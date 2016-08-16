@@ -1,0 +1,36 @@
+#!/bin/sh
+#need to disable screen saver?
+DISABLE=""
+TLINE=$(LANG=C xset -q | grep -m1 'timeout' | tr -s ' ')
+TIMEOUT=$(echo $TLINE | cut -s -f2 -d' '| tr -dc '0-9')
+CYCLE=$(echo $TLINE | cut -s -f4 -d' '| tr -dc '0-9')
+DLINE=$(LANG=C xset -q | grep -m1 'DPMS is' | tr -s ' ')
+DPMS=$(echo $DLINE | cut -s -f3 -d' ')
+if [ "$TIMEOUT" != "0" ]; then
+  [ "$HOME" ] || HOME=/root
+  VLCRC="$HOME/.config/vlc/vlcrc"
+  grep -q '^[^#]*disable-screensaver=0' "$VLCRC" || DISABLE="y"
+fi
+[ "$DISABLE" ] && xset s off && xset -dpms
+PARAM="$@"
+F=""
+if [ "$@" ]; then
+  while [ $# > 0 ]; do
+    case $1 in
+    -*) true;;
+    *) F=$1; break;;
+    esac
+    shift
+   done
+fi
+if [ "$F" ]; then 
+  vlc "$@" vlc://quit
+else
+  vlc "$@"
+fi
+STATUS=$?
+[ "$DISABLE" ] || exit $STATUS
+xset s on
+[ -n "$TIMEOUT" -a -n "$CYCLE" ] && xset s "$TIMEOUT" "$CYCLE"
+[ "$DPMS" = "Enabled" ] && xset +dpms
+exit $STATUS

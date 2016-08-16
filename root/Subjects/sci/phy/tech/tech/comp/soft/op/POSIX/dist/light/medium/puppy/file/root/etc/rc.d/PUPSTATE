@@ -1,0 +1,25 @@
+PUPMODE=12
+PDEV1='sdb3'
+DEV1FS='ext3'
+PUPSFS='sdb3,ext3,/tahrsavejohn/puppy_tahr_6.0.2.sfs'
+PUPSAVE='sdb3,ext3,/tahrsavejohn/tahrsave-john'
+PMEDIA='atahd'
+#ATADRIVES is all internal ide/pata/sata drives, excluding optical, excluding usb...
+ATADRIVES='sda sdb '
+#ATAOPTICALDRIVES is list of non-usb optical drives...
+ATAOPTICALDRIVES='sr0 sr1 '
+#these directories are unionfs/aufs layers in /initrd...
+SAVE_LAYER='/pup_rw'
+PUP_LAYER='/pup_ro2'
+#The partition that has the tahrsave file is mounted here...
+PUP_HOME='/mnt/dev_save'
+#(in /initrd) ...note, /mnt/home is a link to it.
+#this file has extra kernel drivers and firmware...
+ZDRV='sdb3,ext3,/tahrsavejohn/zdrv_tahr_6.0.2.sfs'
+ADRV=''
+YDRV=''
+#complete set of modules in the initrd (moved to main f.s.)...
+ZDRVINIT='no'
+#Partition no. override on boot drive to which session is (or will be) saved...
+PSAVEMARK=''
+PSUBDIR='/tahrsavejohn'

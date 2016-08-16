@@ -1,0 +1,1759 @@
+#!/bin/bash
+
+# Program: pAVrecord
+# Revision date (YMD): 2014/08/15 (original 2012/10/06)                                     
+# (C) Copyright 2009-2014+ William McEwan; GPLv3                 
+#
+# Depends on: +ffmpeg (preferred) or avconv,+ffplay or avplay,+gtkdialog,+lame,+alsa-utils,+bc
+#
+# Changes:
+# (YMD)2014/06/24: can use avconv and avplay if available. Using pidof in recVideoTrack. Will record without av/ffplay.
+#    Selects appropriate AAC encoder and MPEG4 mode. Fixed rec function preview kill race condition.
+#    Noted that avconv in precise buggy for jpeg output (so ffmpeg preferred)
+# (YMD)2014/06/27: hijack expansion idea [Copyright as above] expanded to allow modular plugin addition of
+#                  new main code, new functions, new gui panels and new gui general config buttons
+# (YMD)2014/08/15: Fixed x11grab framerate entry and added video bitrate entry box. Modified help text.
+#    Added video vbr encoding mode in addition to default cbr mode (using -qscale vbr option for bitrate < 32 in kbps)
+
+trap default INT TERM ERR EXIT
+
+[ $(command -v rxvt 2>/dev/null) ] && export VTERMINAL="rxvt" || export VTERMINAL="xterm"
+
+export TEXTDOMAIN=pavrecord
+export TEXTDOMAINDIR=/usr/share/locale
+export OUTPUT_CHARSET=UTF-8
+
+Pversion_="9.0.5"
+programtitle="pAVrecord $Pversion_"
+export PROGRAMNAME="pavrecord"
+export PROGINSTANCENAME=${PROGRAMNAME}
+export PROGRAMHOME=${HOME}/.${PROGRAMNAME}
+CFG_NAME=".pavrecordrc"
+CONFIGFILE=$PROGRAMHOME/"${CFG_NAME}"
+
+avc1="ffmpeg"
+avc2="avconv"
+if [ -e /etc/${PROGRAMNAME}/avpref ];then
+ avc1="avconv"
+ avc2="ffmpeg"
+fi
+AVCONV=$(basename $(command -v $avc1 2>/dev/null) 2>/dev/null) || AVCONV=$(basename $(command -v $avc2 2>/dev/null) 2>/dev/null) || { Xdialog --title "pavrecord" --msgbox "This program depends on avconv or ffmpeg to work.
+Please, install one of these first with Synaptic or apt-get.
+Or use ffmpeg2sfs to create ffmpeg.sfs and load it." 0 0; exit 0; }
+AVPLAY=$(basename $(command -v ffplay 2>/dev/null) 2>/dev/null) || AVPLAY=$(basename $(command -v avplay 2>/dev/null) 2>/dev/null) || AVPLAY="echo"
+
+export AVCONV
+export AVPLAY
+
+if [ ! -s /etc/${PROGRAMNAME}/"${CFG_NAME}" ];then
+ printf "$(gettext "Default config files missing, please reinstall $programtitle\n")"
+ exit 1
+else
+ if [ ! -d $PROGRAMHOME ];then
+  cp -a /etc/${PROGRAMNAME} ~/.${PROGRAMNAME}
+ else
+  [ ! -s "$CONFIGFILE" ] && cp -a /etc/${PROGRAMNAME}/"${CFG_NAME}" $PROGRAMHOME
+ fi
+fi
+
+[ ! -e /tmp/${PROGINSTANCENAME} ] && mkdir /tmp/${PROGINSTANCENAME}
+echo $$ > /tmp/${PROGINSTANCENAME}/PIDstartbinsh
+
+AVCODECS="$($AVCONV -codecs 2>/dev/null)"
+if [ "$(printf '%s' $AVCODECS | grep 'libfaac')" ];then
+ export AACENC="libfaac"
+elif [ "$(printf '%s' $AVCODECS | grep 'libvo_aacenc')" ];then
+ export AACENC="libvo_aacenc"
+else
+ export AACENC="aac -strict experimental"
+fi
+if [ -e /etc/${PROGRAMNAME}/noxvid ];then
+ export MPEG4="-vcodec mpeg4 -vtag xvid"
+elif [ "$(printf '%s' $AVCODECS | grep 'libxvid')" ];then
+ export MPEG4="-vcodec libxvid"
+else
+ export MPEG4="-vcodec mpeg4 -vtag xvid"
+fi
+
+. "$CONFIGFILE" 
+
+if [ -s ${PROGRAMHOME}/functions.hijack ];then
+ . ${PROGRAMHOME}/functions.hijack
+fi
+
+helpsetup (){
+  printf "$(gettext "Section A. Commandline usage:
+
+In a console enter command:
+pavrecord --help
+for brief commandline usage.
+-----
+")""$(gettext "
+Section B. 
+
+Setting up Alsa for sound recording and playback:
+
+1. In some distributions you may need to run the program alsaconf from a commandline console to force your sound card to be recognised and initialised prior to using pAVrecord for the first time. 
+
+2. When not recording, you can pop-up VU meter, audio mixer, and video preview window at any time by pressing record STOP button (in small or config GUI) or MIXER button in config GUI. Prior to pressing the record button, you should be able to see from the running VU display window if, and when, you have your sound controls correctly set up (active but not overloading). Note that because of alsa VU limitations, any activated alsa VU meter is automatically closed during the actual recording.
+
+3. For louder microphone recordings activate Mic boost. If using alsamixer to do this, use the cursor keys, move far over to the right hand side of the alsamixer window, and keep going right (often off the edge of the window). Around that location you may (or should?) find the Mic Boost control. Keyboard key M toggles its activation.
+
+")""$(gettext "
+
+4. For Microphone recording, you should also activate Mic as the capture device. If using alsamixer, use space bar to activate the desired capture device.
+
+You often need to turn up the amplitude setting of the Capture device to around maximum, but be careful you do not unwittingly turn up the Playback Mic volume (which you should inactivate) rather than the Capture one. Otherwise you may end up recording sound fed back to your mic from your blaring speakers! If using alsamixer, pressing the Tab key, such that you come to the alsamixer Capture window, before setting capture devices, may help you to avoid unnecessarily increasing the playback amplitude controls rather than the record ones.
+")""$(gettext "
+
+5. As an alternative to recording from the microphone, you could select some other device to capture from (e.g. Line in). If you select Mix as the capture device (or perhaps Mono Mix, depending on what your sound card provides) you can record most any sound passing through your sound card (for example: streaming radio as in 01micko pupRadio program).
+
+6. For audio Playback to work, you need to turn up the PCM device volume and at least the Master device volume. Note that key M is also used to Mute devices.
+-----
+")""$(gettext "
+Section C:
+
+Setting up pAVrecord Example:
+
+Select Advanced (big) User Interface.
+
+Select Target Directory: /root
+
+Select Record Duration: 0 (for unlimited).
+Also set Play Duration to 0.
+
+Enter Audio sync offset (seconds): 0.5
+(You will probably need to adjust that since audio delay is system/encoder dependent).
+
+In AUDIO RECORD CONFIGURATION:
+
+Select: mp3 (or ogg_q), cbr, bitrate 32k
+
+In VIDEO RECORD CONFIGURATION:
+
+Select video encoder: MPEG-4/10 (or Theora if ogg_q audio). Note that for screencast recording x264 (or maybe Theora) gives better quality.
+")""$(gettext "
+
+Enter:
+
+Frame Rate(fps) video: 15 (10 is probably high enough for a screencast),
+ 
+vInputFormat: video4linux2 (not used during a screencast),
+
+vDEVICE: /dev/video0 (if that is your video device; not used during a screencast),
+
+vWidth 320, vHEIGHT 240 (not used during a screencast).
+
+Leave $AVCONV Extra O/P options blank.
+Note well: Any entered Extra I/P or O/P options are also used when screencasting.
+       
+Select container for combined A and V track: avi (or ogv if ogg_q and Theora)
+
+For Combine AV auto, select as true.
+ 
+For Combine AV del, select as false. 
+Note that the alternative true for checkbox del causes the separate A and V tracks to be automatically deleted after the final combined AV is produced.
+
+Press Record button to record the A and V tracks (which, with above setting, are auto-combined into final avi container once Record Stop button is pressed). 
+
+With the above selections, three files are saved: the date-stamped video track, the date-stamped audio track and the combined AV video (whose name begins with the characters pAV). Note that it is possible to substitute an alternative audio or video track and to then create the final pAV combined AV video file using these by clicking the Combine AV button in the config gui.
+")""$(gettext "
+-----
+To view/hear result:
+
+Method 1: Press Play controls play button. This method plays the individual video and audio tracks in parallel (allowing you to adjust the Audio sync offset).
+
+Method 2: If audio sync offset set up is already fine, you can simply press the Play combined AV file button to play final combined AV video in your system video player (assuming Combine AV auto was selected).
+-----
+")""$(gettext "
+Section D.
+
+Pscheduler:
+
+If Pscheduler is available, you can Add (or Edit) Task(s) of the form 
+
+  pavrecord rec target_directory outfile [duration]
+
+to schedule when a recording session should start.
+
+You can schedule any of the commands described by:
+pavrecord --help
+
+Note: Be careful with timed recordings. Once Pschedule is called up by pAVrecord, Pschedule will by default automatically make recordings every minute if you do not put in any values or fail to cancel the Pschedule entry properly.
+-----
+")""$(gettext "
+Tips:
+
+1. To keep pAVrecord as the top window, right-click on its window bar, and select 
+Layer -> Above or Top
+
+2. If libxvid MPEG-4/10 mode recording is not operating, create an empty file called noxvid in /etc/pavrecord/ prior to re-running pavrecord. The alternative encoder, -vcodec mpeg4 -vtag xvid, will then be used for MPEG-4/10
+recording mode instead.
+
+3. By default, ffmpeg will be used if available. If avconv is preferred as default then, prior to re-running pavrecord, create an empty file called avpref in /etc/pavrecord.")" > /tmp/${PROGINSTANCENAME}/helpsetup.txt
+}
+
+default (){
+ quit
+ [ -f "$CONFIGFILE" ] &&  rm -f "$CONFIGFILE" 2>/dev/null
+ [ -d /tmp/${PROGINSTANCENAME}/ ] && rm -rf /tmp/${PROGINSTANCENAME}/ 2>/dev/null
+ exit
+}
+
+dirfilefix (){
+ SDuse="$1"; SFuse="$2"
+ SDuse=$(echo "${SDuse}" | sed 's/^[ 	]*//;s/[ 	]*$//')
+ SFuse=$(echo "${SFuse}" | sed 's/^[ 	]*//;s/[ 	]*$//')
+ lfd=$(dirname "$SFuse")
+ if [ "$lfd" != "." ];then
+  SDuse="$lfd";SFuse=$(basename "$SFuse")
+ fi
+}
+
+play_combined (){
+ if [ -s ${PROGRAMHOME}/play_combined.hijack ];then
+  . ${PROGRAMHOME}/play_combined.hijack
+ else
+  dirfilefix "$1" "$2"
+  AddExtensions
+  if [ $(command -v gnome-mplayer 2>/dev/null) ];then
+   $VTERMINAL -geometry "1x1-0-0" -e gnome-mplayer "${SDuse}/pAV${SFuse%.*}.${avformat}" &
+  elif [ $(command -v mplayer 2>/dev/null) ];then
+   $VTERMINAL -geometry "1x1-0-0" -e mplayer -geometry "+0+0" -title "pAVrecord mplayer" "${SDuse}/pAV${SFuse%.*}.${avformat}" &
+  elif [ $(command -v cvlc 2>/dev/null) ];then
+   cvlc --video-title "pAVrecord vlc" --no-video-title-show "${SDuse}/pAV${SFuse%.*}.${avformat}" >/dev/null 2>&1 &
+  elif [ $(command -v $AVPLAY 2>/dev/null) ];then
+   $AVPLAY -window_title "pAVrecord $AVPLAY" -i "${SDuse}/pAV${SFuse%.*}.${avformat}" >/dev/null 2>&1 &
+  fi
+ fi # play_combined.hijack
+}
+
+make_avideo (){
+ if [ -s ${PROGRAMHOME}/make_avideo.hijack ];then
+  . ${PROGRAMHOME}/make_avideo.hijack
+ else
+  dirfilefix "$1" "$2"
+  AddExtensions
+  vformat="avi"
+  $AVCONV -y -i "${SDuse}/${SFuse%.*}.${vformat}" -ss $AOFFSET -i "${SDuse}/${SFuse%.*}.${aformat}" -acodec copy -vcodec copy "${SDuse}/pAV${SFuse%.*}.${avformat}" && if [ $AUTODEL = "true" ];then rm -f "${SDuse}/${SFuse%.*}.${vformat}";rm -f "${SDuse}/${SFuse%.*}.${aformat}";fi &
+ fi
+}
+
+recVideoTrack (){
+if [ -s ${PROGRAMHOME}/recVideoTrack.hijack ];then
+ . ${PROGRAMHOME}/recVideoTrack.hijack
+else
+ if [ $vENCODE00 = "true" ];then vcodec="-vcodec mpeg1video" 
+ elif [ $vENCODE01 = "true" ];then vcodec="-vcodec mpeg2video"
+ elif [ $vENCODE03 = "true" ];then vcodec="-vcodec libtheora"
+ elif [ $vENCODE04 = "true" ];then vcodec="-vcodec libx264"
+ elif [ $vENCODE05 = "true" ];then vcodec=""
+ fi
+ if [ "$vBITRATE" = "" ];then
+  vBITRATE="-b 512k"
+ elif [ "$vBITRATE" -gt 31 ];then 
+  vBITRATE="-b ${vBITRATE}k"
+ else 
+  vBITRATE="-qscale ${vBITRATE}"
+ fi
+ if [ $X11GRAB = "true" ];then
+  if [ -s ${PROGRAMHOME}/X11GRAB.hijack ];then
+   . ${PROGRAMHOME}/X11GRAB.hijack
+  else
+   [ $vENCODE02 = "true" ] && vcodec="$MPEG4 -aspect $(echo "scale=5; ${X11WIDTH}/${X11HEIGHT};" | bc)"
+   [ "$X11SHOW" = "true" ] && show_region="-show_region 1" || show_region=""
+   $VTERMINAL -geometry "1x1-0-0" -e sh -c "$AVCONV -y $ffmpegtime -f x11grab $show_region -framerate $xOUTFRATE -s ${X11WIDTH}x${X11HEIGHT} $INvENC_OPTS -i ${XDSPLY}+${XOFS},${YOFS} $vcodec $vBITRATE -f avi $OUTvENC_OPTS \"${SDuse}/${SFuse%.*}.avi\"" &
+  fi
+ else
+  if [ $vENCODE00 = "true" ];then
+   $VTERMINAL -geometry "1x1-0-0" -e sh -c "$AVCONV -y $ffmpegtime -f \"$vINPUTFORMAT\" -s ${vWIDTH}x${vHEIGHT} $INvENC_OPTS -i \"$vDEVICE\" -r $OUTFRATE $vcodec $vBITRATE -f avi $OUTvENC_OPTS - | tee \"${SDuse}/${SFuse%.*}.avi\" | $AVPLAY -window_title pAVrecord -" &
+  elif [ $vENCODE01 = "true" ];then
+   $VTERMINAL -geometry "1x1-0-0" -e sh -c "$AVCONV -y $ffmpegtime -f \"$vINPUTFORMAT\" -s ${vWIDTH}x${vHEIGHT} $INvENC_OPTS -i \"$vDEVICE\" -r $OUTFRATE $vcodec $vBITRATE -f avi $OUTvENC_OPTS - | tee \"${SDuse}/${SFuse%.*}.avi\" | $AVPLAY -window_title pAVrecord -" &
+  elif [ $vENCODE02 = "true" ];then
+   vcodec="$MPEG4 -aspect $(echo "scale=5; ${vWIDTH}/${vHEIGHT};" | bc)"
+   $VTERMINAL -geometry "1x1-0-0" -e sh -c "$AVCONV -y $ffmpegtime -f \"$vINPUTFORMAT\" -s ${vWIDTH}x${vHEIGHT} $INvENC_OPTS -i \"$vDEVICE\" -r $OUTFRATE $vcodec $vBITRATE -f avi $OUTvENC_OPTS - | tee \"${SDuse}/${SFuse%.*}.avi\" | $AVPLAY -window_title pAVrecord -" &
+  elif [ $vENCODE03 = "true" ];then
+   $VTERMINAL -geometry "1x1-0-0" -e sh -c "$AVCONV -y $ffmpegtime -f \"$vINPUTFORMAT\" -s ${vWIDTH}x${vHEIGHT} $INvENC_OPTS -i \"$vDEVICE\" -r $OUTFRATE $vcodec $vBITRATE -f avi $OUTvENC_OPTS - | tee \"${SDuse}/${SFuse%.*}.avi\" | $AVPLAY -window_title pAVrecord -" &
+  elif [ $vENCODE04 = "true" ];then
+   $VTERMINAL -geometry "1x1-0-0" -e sh -c "$AVCONV -y $ffmpegtime -f \"$vINPUTFORMAT\" -s ${vWIDTH}x${vHEIGHT} $INvENC_OPTS -i \"$vDEVICE\" -r $OUTFRATE $vcodec $vBITRATE -bt 240k -f avi $OUTvENC_OPTS - | tee \"${SDuse}/${SFuse%.*}.avi\" | $AVPLAY -window_title pAVrecord -" &
+  elif [ $vENCODE05 = "true" ];then
+   OUTFRATE=1;vformat="jpeg";filename="_%05d";$VTERMINAL -geometry "1x1-0-0" -e sh -c "$AVCONV -y $ffmpegtime -f \"$vINPUTFORMAT\" -s ${vWIDTH}x${vHEIGHT} $INvENC_OPTS -i \"$vDEVICE\" -r $jOUTFRATE -f image2 $OUTvENC_OPTS \"${SDuse}/${SFuse%.*}_%05d.jpeg\"" &
+  fi
+ fi
+ echo $! > /tmp/${PROGINSTANCENAME}/PIDvidrec2
+ while [ "$(pidof $AVCONV)" = "" 2>/dev/null ];do :;done
+ PIDvidrec=$(pidof $AVCONV)
+ echo $PIDvidrec > /tmp/${PROGINSTANCENAME}/PIDvidrec
+fi # recVideoTrack.hijack
+}
+
+AddExtensions (){
+ if [ $vCONTAINER00 = "true" ];then avformat="avi" 
+ elif [ $vCONTAINER01 = "true" ];then avformat="mpeg"
+ elif [ $vCONTAINER02 = "true" ];then avformat="mp2"
+ elif [ $vCONTAINER03 = "true" ];then avformat="mp4"
+ elif [ $vCONTAINER04 = "true" ];then avformat="ogv"
+ elif [ $vCONTAINER05 = "true" ];then avformat="mkv"
+ fi
+ if [ $ENCODEMP3 = "true" ];then aformat="mp3" 
+ elif [ $ENCODEOGGQ = "true" -o $ENCODEOGGMM = "true" ];then aformat="ogg"
+ elif [ $ENCODEWAV = "true" ];then aformat="wav"
+ elif [ $ENCODEAAC = "true" -o $ENCODEAACQ = "true" ];then aformat="aac"
+ elif [ $ENCODEFLAC = "true" ];then aformat="flac"
+ fi
+}
+
+DateStamp1 (){
+ if [ ! -e /tmp/${PROGINSTANCENAME}/PIDrec ];then
+  AddExtensions
+  vformat="avi"
+  if [ $DATEFILE = "false" ];then
+   echo "${DIRFILE1%.*}.${vformat}"
+  else
+   echo "$(date +%Y_%m_%d_%H%M%S).${vformat}"
+  fi
+ fi
+}
+
+preview (){
+ if [ -s ${PROGRAMHOME}/preview.hijack ];then
+  . ${PROGRAMHOME}/preview.hijack
+ else
+  #	[ -e /tmp/${PROGINSTANCENAME}/PIDpreview ] && kill -TERM $(cat /tmp/${PROGINSTANCENAME}/PIDpreview 2>/dev/null) 2>/dev/null
+  #	sleep 0.2
+  if [ -e /tmp/${PROGINSTANCENAME}/PIDpreview ];then
+   getpid="$(cat /tmp/${PROGINSTANCENAME}/PIDpreview 2>/dev/null)"
+   kill -TERM $getpid 2>/dev/null
+   while [ "$(ps u | awk '{print $2}' | grep $getpid)" != "" 2>/dev/null ];do :;done
+  fi
+  if [ $(command -v mplayer 2>/dev/null) ];then
+   $VTERMINAL -geometry "1x1-0-0" -e mplayer tv:// -tv driver=v4l2:width=$vWIDTH:height=$vHEIGHT:device=$vDEVICE -fps $OUTFRATE -geometry "-0+24" -title "pAVrecord $(gettext 'preview')" &
+  elif [ $(command -v cvlc 2>/dev/null) ];then
+   cvlc --video-title "pAVrecord $(gettext 'preview')" --no-video-title-show --width=$vWIDTH --height=$vHEIGHT --video-x 0 --video-y 24 v4l2:// :v4l-vdev="/dev/video0" >/dev/null 2>&1 &
+  elif [ $(command -v $AVPLAY 2>/dev/null) ];then
+   $AVPLAY -window_title "pAVrecord $(gettext 'preview')" -f  "$vINPUTFORMAT" -s "${vWIDTH}x${vHEIGHT}" $vDEVICE >/dev/null 2>&1 &
+  fi
+  echo $! > /tmp/${PROGINSTANCENAME}/PIDpreview
+ fi # preview.hijack 
+}
+
+vu (){
+if [ -s ${PROGRAMHOME}/vu.hijack ];then
+ . ${PROGRAMHOME}/vu.hijack
+else
+ [ -e /tmp/${PROGINSTANCENAME}/PIDvu ] && kill -TERM $(cat /tmp/${PROGINSTANCENAME}/PIDvu 2>/dev/null) 2>/dev/null
+ [ -e /tmp/${PROGINSTANCENAME}/PIDalsamixer ] && kill -TERM $(cat /tmp/${PROGINSTANCENAME}/PIDalsamixer 2>/dev/null) 2>/dev/null
+ preview 
+ $VTERMINAL -bg "#fd0" -title "$(gettext 'VU peak level meter')" -geometry "64x1+0+0" -e arecord -vv /tmp/${PROGINSTANCENAME}/vu_tmp >/dev/null &
+ echo $! > /tmp/${PROGINSTANCENAME}/PIDvu 
+ { sleep 1; rm -f /tmp/${PROGINSTANCENAME}/vu_tmp; } &
+ if [ $(command -v retrovol 2>/dev/null) ];then
+  killall retrovol 2>/dev/null
+  retrovol &
+ else
+  $VTERMINAL -geometry "80x24-0-25" -e alsamixer -V all &
+  echo $! > /tmp/${PROGINSTANCENAME}/PIDalsamixer
+ fi
+fi # vu.hijack
+}
+
+term_TD (){
+ localTD="$1"
+ localTD=$(echo "${localTD}" | sed 's/^[ 	]*//;s/[ 	]*$//')
+ if [ "${localTD}" != "" ];then
+  cd "${localTD}"
+ else
+  localTD="/"
+  cd "${localTD}"
+ fi
+ [ $(command -v rox 2>/dev/null) ] && rox "${localTD}"
+}
+
+rec (){
+ if [ $(cat /tmp/${PROGINSTANCENAME}/PIDpauserec 2>/dev/null) -eq 1 2>/dev/null ];then
+  unpauserec
+ elif [ ! -e /tmp/${PROGINSTANCENAME}/PIDrec ];then
+  echo 0 > /tmp/${PROGINSTANCENAME}/PIDpauserec
+  if [ -e /tmp/${PROGINSTANCENAME}/PIDpreview ];then
+   getpid="$(cat /tmp/${PROGINSTANCENAME}/PIDpreview 2>/dev/null)"
+   kill -TERM $getpid 2>/dev/null
+   while [ "$(ps u | awk '{print $2}' | grep $getpid)" != "" 2>/dev/null ];do :;done
+   rm -f /tmp/${PROGINSTANCENAME}/PIDpreview
+  fi 
+  if [ -e /tmp/${PROGINSTANCENAME}/PIDvu ];then
+   kill -TERM $(cat /tmp/${PROGINSTANCENAME}/PIDvu 2>/dev/null) 2>/dev/null
+   rm -f /tmp/${PROGINSTANCENAME}/PIDvu
+  fi   
+  if [ $(command -v retrovol 2>/dev/null) ];then
+   killall retrovol 2>/dev/null
+   retrovol -hide &
+  else
+   [ -e /tmp/${PROGINSTANCENAME}/PIDalsamixer ] && kill -TERM $(cat /tmp/${PROGINSTANCENAME}/PIDalsamixer 2>/dev/null) 2>/dev/null	
+  fi
+  vbrquality="";acodec="";cdquality="";aacquality="";compresslevel=""
+  if [ -s ${PROGRAMHOME}/rec_hwcard.hijack ];then
+   . ${PROGRAMHOME}/rec_hwcard.hijack
+  else
+   if [ $HWCARD = "false" ];then
+    if [ $HWDEV = "false" ];then plughw="plughw:0,0"; else plughw="plughw:0,1";fi
+   else
+    if [ $HWDEV = "false" ];then plughw="plughw:1,0"; else plughw="plughw:1,1";fi
+   fi
+  fi # rec_hwcard.hijack
+  ufmg=1;if [ $(command -v oggenc 2>/dev/null) ];then ufmg=0;fi
+
+	if [ $ENCODEOGGQ != "true" ] || [ $ENCODEAACQ != "true" ];then
+	 # oggenc could not handle 45 kbps
+	 if [ $BITRATE032 = "true" ];then bitrate=32;[ $ufmg -eq 0 ] && oggquality="- -M 64" || oggquality="-ab 45k"
+	 elif [ $BITRATE008 = "true" ];then
+		bitrate=8
+		[ $ENCODEWAV = "true" ] && acodec="-acodec pcm_u8"
+		[ $ufmg -eq 0 ] && oggquality="- -M 64" || oggquality="-ab 45k"
+	 elif [ $BITRATE016 = "true" ];then bitrate=16;[ $ufmg -eq 0 ] && oggquality="- -M 64" || oggquality="-ab 45k"
+	 elif [ $BITRATE0CD = "true" ];then bitrate=44;cdquality="-f cd";[ $ufmg -eq 0 ] && oggquality="- -M 64" || oggquality="-ab 45k"
+	 elif [ $BITRATE048 = "true" ];then bitrate=48;[ $ufmg -eq 0 ] && oggquality="- -M 64" || oggquality="-ab 45k"
+	 elif [ $BITRATE064 = "true" ];then bitrate=64;[ $ufmg -eq 0 ] && oggquality="- -M 64" || oggquality="-ab 64k"
+	 elif [ $BITRATE128 = "true" ];then bitrate=128;[ $ufmg -eq 0 ] && oggquality="- -M 128" || oggquality="-ab 128k"
+	 elif [ $BITRATE160 = "true" ];then bitrate=160;[ $ufmg -eq 0 ] && oggquality="- -M 160" || oggquality="-ab 160k"
+	 elif [ $BITRATE192 = "true" ];then bitrate=192;[ $ufmg -eq 0 ] && oggquality="- -M 192" || oggquality="-ab 192k"
+	 # Wary-5.3 could handle 256 or 320 but Slacko-5.3.3 ffmpeg could not
+	 elif [ $BITRATE256 = "true" ];then bitrate=256;[ $ufmg -eq 0 ] && oggquality="- -M 256" || oggquality="-ab 256k"
+	 elif [ $BITRATE320 = "true" ];then bitrate=320;[ $ufmg -eq 0 ] && oggquality="- -M 320" || oggquality="-ab 320k"
+	 fi
+	 [ $ENCODEAAC = "true" ] && aacquality="-ab ${bitrate}k"
+	fi
+	if [ $ENCODEOGGQ = "true" ] || [ $ENCODEAACQ = "true" ] || [ $ENCODEMP3 = "true" -a $VBRMODE = "true" ] || [ $ENCODEFLAC = "true" ];then
+	 if [ $OGGQUALITYN1 = "true" ];then
+		[ $ufmg -eq 0 ] && oggquality="- -q -1" || oggquality="-aq -1"
+		vbrquality="-V 0"
+		aacquality="-aq 10"
+		compresslevel="-compression_level 12"
+	 elif [ $OGGQUALITY00 = "true" ];then
+		[ $ufmg -eq 0 ] && oggquality="- -q 0" || oggquality="-aq 0"
+		vbrquality="-V 0"
+		aacquality="-aq 50"
+		compresslevel="-compression_level 0"
+	 elif [ $OGGQUALITY01 = "true" ];then
+		[ $ufmg -eq 0 ] && oggquality="- -q 1" || oggquality="-aq 1"
+		vbrquality="-V 1"
+		aacquality="-aq 70"
+		compresslevel="-compression_level 1"
+	 elif [ $OGGQUALITY02 = "true" ];then
+		[ $ufmg -eq 0 ] && oggquality="- -q 2" || oggquality="-aq 2"
+		vbrquality="-V 2"
+		aacquality="-aq 100"
+		compresslevel="-compression_level 2"
+	 elif [ $OGGQUALITY03 = "true" ];then
+		[ $ufmg -eq 0 ] && oggquality="- -q 3" || oggquality="-aq 3"
+		vbrquality="-V 3"
+		aacquality="-aq 150"
+		compresslevel="-compression_level 3"
+	 elif [ $OGGQUALITY04 = "true" ];then
+		[ $ufmg -eq 0 ] && oggquality="- -q 4" || oggquality="-aq 4"
+		vbrquality="-V 4"
+		aacquality="-aq 200"
+		compresslevel="-compression_level 4"
+	 elif [ $OGGQUALITY05 = "true" ];then
+		[ $ufmg -eq 0 ] && oggquality="- -q 5" || oggquality="-aq 5"
+		vbrquality="-V 5"
+		aacquality="-aq 250"
+		compresslevel="-compression_level 5"
+	 elif [ $OGGQUALITY06 = "true" ];then
+		[ $ufmg -eq 0 ] && oggquality="- -q 6" || oggquality="-aq 6"
+		vbrquality="-V 6"
+		aacquality="-aq 300"
+		compresslevel="-compression_level 6"
+	 elif [ $OGGQUALITY07 = "true" ];then
+		[ $ufmg -eq 0 ] && oggquality="- -q 7" || oggquality="-aq 7"
+		vbrquality="-V 7"
+		aacquality="-aq 350"
+		compresslevel="-compression_level 7"
+	 elif [ $OGGQUALITY08 = "true" ];then
+		[ $ufmg -eq 0 ] && oggquality="- -q 8" || oggquality="-aq 8"
+		vbrquality="-V 8"
+		aacquality="-aq 400"
+		compresslevel="-compression_level 8"
+	 elif [ $OGGQUALITY09 = "true" ];then
+		[ $ufmg -eq 0 ] && oggquality="- -q 9" || oggquality="-aq 9"
+		vbrquality="-V 9"
+		aacquality="-aq 450"
+		compresslevel="-compression_level 9"
+	 elif [ $OGGQUALITY10 = "true" ];then
+		[ $ufmg -eq 0 ] && oggquality="- -q 10" || oggquality="-aq 10"
+		vbrquality="-V 9"									
+		aacquality="-aq 500"
+		compresslevel="-compression_level 10"
+	 fi
+    fi
+	if [ $CHANNELSTEREO = "true" ];then 
+	  channels_arecord=2;channels_lame="j"
+	else 
+	  channels_arecord=1;channels_lame="m"
+	fi
+	if [ "$3" = "" -o "$3" = "0" ];then
+	  duration1="0"
+	  affmpegtime="";ffmpegtime=""
+	else
+	  duration1="$(echo $3+$AOFFSET+1|bc)"
+	  affmpegtime="-t $duration1";ffmpegtime="-t $3"
+	fi
+	dirfilefix "$1" "$2"
+	if [ $ENCODEMP3 = "true" ];then
+	  aformat="mp3"
+      if [ $CBRMODE = "true" ];then mp3mode="-b"
+      elif [ $ABRMODE = "true" ];then mp3mode="--abr"
+	  elif [ $VBRMODE = "true" ];then mp3mode="--vbr-new -b" 
+      fi
+ if [ -s ${PROGRAMHOME}/mp3.hijack ];then
+  . ${PROGRAMHOME}/mp3.hijack
+ else
+      arecord -D $plughw -f cd -c $channels_arecord -d $duration1 2>/dev/null | lame $mp3mode $bitrate $vbrquality -h -m $channels_lame $OUTrec_mp3ENC_OPTS - "${SDuse}/${SFuse%.*}.${aformat}" &
+      echo $! > /tmp/${PROGINSTANCENAME}/PIDrec
+	  recVideoTrack
+ fi # mp3.hijack
+    elif [ $ENCODEWAV = "true" ];then
+	  aformat="wav"
+ if [ -s ${PROGRAMHOME}/wav.hijack ];then
+  . ${PROGRAMHOME}/wav.hijack
+ else
+	  arecord -D $plughw -t wav -r $bitrate $cdquality -c $channels_arecord -d $duration1 $OUTrec_wavENC_OPTS 2>/dev/null | cat > "${SDuse}/${SFuse%.*}.${aformat}" &
+      echo $! > /tmp/${PROGINSTANCENAME}/PIDrec
+	  recVideoTrack
+ fi # wav.hijack
+    elif [ $ENCODEAAC = "true" -o $ENCODEAACQ = "true" ];then
+	  aformat="aac"    
+ if [ -s ${PROGRAMHOME}/aac.hijack ];then
+  . ${PROGRAMHOME}/aac.hijack
+ else
+	  $AVCONV -y $affmpegtime -f alsa -ac $channels_arecord -ar 48000 -i $plughw -f adts -acodec $AACENC $aacquality $OUTrec_aacENC_OPTS "${SDuse}/${SFuse%.*}.${aformat}" &
+      echo $! > /tmp/${PROGINSTANCENAME}/PIDrec
+	  recVideoTrack
+ fi # aac.hijack
+    elif [ $ENCODEFLAC = "true" ];then
+	  aformat="flac"    
+ if [ -s ${PROGRAMHOME}/flac.hijack ];then
+  . ${PROGRAMHOME}/flac.hijack
+ else
+	  $AVCONV -y $affmpegtime -f alsa -ac $channels_arecord -ar 48000 -i $plughw -f flac -acodec flac $compresslevel $OUTrec_flacENC_OPTS "${SDuse}/${SFuse%.*}.${aformat}" &
+      echo $! > /tmp/${PROGINSTANCENAME}/PIDrec
+	  recVideoTrack
+ fi # flac.hijack
+    else
+	 aformat="ogg"
+ if [ -s ${PROGRAMHOME}/ogg.hijack ];then
+  . ${PROGRAMHOME}/ogg.hijack
+ else
+	 if [ $(command -v oggenc 2>/dev/null) ];then
+      arecord -D $plughw -f cd -c $channels_arecord -d $duration1 2>/dev/null | oggenc $oggquality -o $OUTrec_oggENC_OPTS "${SDuse}/${SFuse%.*}.${aformat}" &
+      echo $! > /tmp/${PROGINSTANCENAME}/PIDrec
+	  recVideoTrack
+	 else
+	  $AVCONV -y $affmpegtime -f alsa -ac $channels_arecord -ar 44100 -i $plughw -f ogg $oggquality -acodec libvorbis $OUTrec_oggENC_OPTS "${SDuse}/${SFuse%.*}.${aformat}" &
+      echo $! > /tmp/${PROGINSTANCENAME}/PIDrec
+	  recVideoTrack
+	 fi
+ fi # ogg.hijack
+    fi
+	if [ -e /tmp/${PROGINSTANCENAME}/PIDalsamixer ];then
+     kill -TERM $(cat /tmp/${PROGINSTANCENAME}/PIDalsamixer 2>/dev/null) 2>/dev/null
+     rm -f /tmp/${PROGINSTANCENAME}/PIDalsamixer
+	fi
+ fi
+}
+
+play (){
+ if [ $(cat /tmp/${PROGINSTANCENAME}/PIDpauseplay 2>/dev/null) -eq 1 2>/dev/null ];then
+  unpauseplay
+ elif [ ! -e /tmp/${PROGINSTANCENAME}/PIDplay ];then
+  echo 0 > /tmp/${PROGINSTANCENAME}/PIDpauseplay
+  if [ -e /tmp/${PROGINSTANCENAME}/PIDpreview ];then
+   getpid="$(cat /tmp/${PROGINSTANCENAME}/PIDpreview 2>/dev/null)"
+   kill -TERM $getpid 2>/dev/null
+   while [ "$(ps u | awk '{print $2}' | grep $getpid)" != "" 2>/dev/null ];do :;done
+   rm -f /tmp/${PROGINSTANCENAME}/PIDpreview
+  fi 
+  if [ -s ${PROGRAMHOME}/play_hwcard.hijack ];then
+   . ${PROGRAMHOME}/play_hwcard.hijack
+  else
+   if [ $HWCARD = "false" ];then
+    if [ $HWDEV = "false" ];then plughw="plughw:0,0"; else plughw="plughw:0,1";fi
+   else
+    if [ $HWDEV = "false" ];then plughw="plughw:1,0"; else plughw="plughw:1,1";fi
+   fi
+  fi # play_hwcard.hijack
+  if [ "$3" != "" ];then
+   duration2="$3"
+  else
+   duration2="0"
+  fi
+  dirfilefix "$1" "$2"
+  AddExtensions
+  if [ -s ${PROGRAMHOME}/play_player.hijack ];then
+   . ${PROGRAMHOME}/play_player.hijack
+  else
+   $AVCONV -ss $AOFFSET -i "${SDuse}/${SFuse%.*}.${aformat}" -f au - | aplay -D $plughw -d $duration2 &
+   echo $! > /tmp/${PROGINSTANCENAME}/PIDplay
+   if [ $(command -v mplayer 2>/dev/null) ];then
+    $VTERMINAL -geometry "1x1-0-0" -e mplayer -geometry "-0+24" -title "pAVrecord mplayer" "${SDuse}/${SFuse}" &
+    echo $! > /tmp/${PROGINSTANCENAME}/PIDvidplay2
+    sleep 0.5
+    PIDvidplay=$(ps u | grep 'mplayer -geometry -0+24' | awk '$11 == "mplayer" {print $2}') 
+    echo $PIDvidplay > /tmp/${PROGINSTANCENAME}/PIDvidplay
+   elif [ $(command -v $AVPLAY 2>/dev/null) ];then
+    $AVPLAY -window_title "pAVrecord $AVPLAY"  "${SDuse}/${SFuse}" >/dev/null 2>&1 &
+    echo $! > /tmp/${PROGINSTANCENAME}/PIDvidplay
+   elif [ $(command -v cvlc 2>/dev/null) ];then
+    cvlc --video-title "pAVrecord vlc" --no-video-title-show "${SDuse}/${SFuse}" >/dev/null 2>&1 &
+    echo $! > /tmp/${PROGINSTANCENAME}/PIDvidplay
+   fi
+  fi # play_player.hijack
+ fi
+}
+
+stoprec (){
+ if [ -s ${PROGRAMHOME}/stoprec.hijack ];then
+  . ${PROGRAMHOME}/stoprec.hijack
+ else
+  echo 0 > /tmp/${PROGINSTANCENAME}/PIDpauserec
+  if [ -e /tmp/${PROGINSTANCENAME}/PIDrec ];then
+   kill -CONT $(cat /tmp/${PROGINSTANCENAME}/PIDvidrec 2>/dev/null) 2>/dev/null
+   kill -TERM $(cat /tmp/${PROGINSTANCENAME}/PIDvidrec 2>/dev/null) 2>/dev/null
+   kill -CONT $(cat /tmp/${PROGINSTANCENAME}/PIDvidrec2 2>/dev/null) 2>/dev/null
+   kill -TERM $(cat /tmp/${PROGINSTANCENAME}/PIDvidrec2 2>/dev/null) 2>/dev/null
+   sleep $AOFFSET
+   kill -CONT $(cat /tmp/${PROGINSTANCENAME}/PIDrec 2>/dev/null) 2>/dev/null
+   kill -TERM $(cat /tmp/${PROGINSTANCENAME}/PIDrec 2>/dev/null) 2>/dev/null
+  # killall arecord 2>/dev/null
+   rm -f /tmp/${PROGINSTANCENAME}/PIDrec 2>/dev/null
+   rm -f /tmp/${PROGINSTANCENAME}/PIDvidrec 2>/dev/null
+   if [ $AUTOMAKE = "true" ];then make_avideo "$1" "$2";fi
+   preview
+  fi
+ fi # stoprec.hijack
+}
+
+stopplay (){
+ echo 0 > /tmp/${PROGINSTANCENAME}/PIDpauseplay
+ if [ -e /tmp/${PROGINSTANCENAME}/PIDplay ];then
+  kill -CONT $(cat /tmp/${PROGINSTANCENAME}/PIDplay 2>/dev/null) 2>/dev/null
+  kill -TERM $(cat /tmp/${PROGINSTANCENAME}/PIDplay 2>/dev/null) 2>/dev/null
+  kill -CONT $(cat /tmp/${PROGINSTANCENAME}/PIDvidplay 2>/dev/null) 2>/dev/null
+  kill -TERM $(cat /tmp/${PROGINSTANCENAME}/PIDvidplay 2>/dev/null) 2>/dev/null
+  kill -CONT $(cat /tmp/${PROGINSTANCENAME}/PIDvidplay2 2>/dev/null) 2>/dev/null
+  kill -TERM $(cat /tmp/${PROGINSTANCENAME}/PIDvidplay2 2>/dev/null) 2>/dev/null
+  rm -f /tmp/${PROGINSTANCENAME}/PIDplay 2>/dev/null
+  rm -f /tmp/${PROGINSTANCENAME}/PIDvidplay 2>/dev/null
+ fi
+}
+
+pauserec (){
+ if [ -e /tmp/${PROGINSTANCENAME}/PIDrec ];then
+  pavrecordPIDrec=$(cat /tmp/${PROGINSTANCENAME}/PIDrec 2>/dev/null)
+  pavrecordPIDvidrec=$(cat /tmp/${PROGINSTANCENAME}/PIDvidrec 2>/dev/null)
+  kill -STOP $pavrecordPIDrec 2>/dev/null
+  kill -STOP $pavrecordPIDvidrec 2>/dev/null
+  kill -STOP $pavrecordPIDvidrec2 2>/dev/null
+  echo 1 > /tmp/${PROGINSTANCENAME}/PIDpauserec
+ fi
+}
+
+unpauserec (){
+ if [ -e /tmp/${PROGINSTANCENAME}/PIDrec ];then
+  pavrecordPIDrec=$(cat /tmp/${PROGINSTANCENAME}/PIDrec 2>/dev/null)
+  pavrecordPIDvidrec=$(cat /tmp/${PROGINSTANCENAME}/PIDvidrec 2>/dev/null)
+  kill -CONT $pavrecordPIDrec 2>/dev/null
+  kill -CONT $pavrecordPIDvidrec2 2>/dev/null
+  kill -CONT $pavrecordPIDvidrec 2>/dev/null
+  echo 0 > /tmp/${PROGINSTANCENAME}/PIDpauserec
+ fi
+}
+
+pauseplay (){
+ if [ -e /tmp/${PROGINSTANCENAME}/PIDplay ];then
+  pavrecordPIDplay=$(cat /tmp/${PROGINSTANCENAME}/PIDplay 2>/dev/null)
+  pavrecordPIDvidplay=$(cat /tmp/${PROGINSTANCENAME}/PIDvidplay 2>/dev/null)
+  kill -STOP $pavrecordPIDplay 2>/dev/null
+  echo 1 > /tmp/${PROGINSTANCENAME}/PIDpauseplay
+  kill -STOP $pavrecordPIDvidplay 2>/dev/null
+ fi
+}
+
+unpauseplay (){
+ if [ -e /tmp/${PROGINSTANCENAME}/PIDplay ];then
+  pavrecordPIDplay=$(cat /tmp/${PROGINSTANCENAME}/PIDplay 2>/dev/null)
+  pavrecordPIDvidplay=$(cat /tmp/${PROGINSTANCENAME}/PIDvidplay 2>/dev/null)
+  kill -CONT $pavrecordPIDplay 2>/dev/null
+  echo 0 > /tmp/${PROGINSTANCENAME}/PIDpauseplay
+  kill -CONT $pavrecordPIDvidplay 2>/dev/null
+ fi
+}
+
+quit (){
+ if [ -s ${PROGRAMHOME}/quit.hijack ];then
+  . ${PROGRAMHOME}/quit.hijack
+ else
+  stoprec "$TDIRFILE_DS1" "$DIRFILE1"
+  stopplay
+  if [ $(command -v retrovol 2>/dev/null) ];then
+   killall retrovol 2>/dev/null
+   retrovol -hide &
+  fi
+  [ -e /tmp/${PROGINSTANCENAME}/PIDpreview ] && kill -TERM $(cat /tmp/${PROGINSTANCENAME}/PIDpreview 2>/dev/null) 2>/dev/null
+  [ -e /tmp/${PROGINSTANCENAME}/PIDvu ] && kill -TERM $(cat /tmp/${PROGINSTANCENAME}/PIDvu 2>/dev/null) 2>/dev/null
+  [ -e /tmp/${PROGINSTANCENAME}/PIDalsamixer ] && kill -TERM $(cat /tmp/${PROGINSTANCENAME}/PIDalsamixer 2>/dev/null) 2>/dev/null
+  rm -rf /tmp/${PROGINSTANCENAME}
+ fi # quit.hijack
+}
+export -f rec
+export -f play
+export -f stoprec
+export -f stopplay
+export -f pauserec unpauserec
+export -f pauseplay unpauseplay
+export -f vu term_TD DateStamp1 dirfilefix AddExtensions recVideoTrack make_avideo play_combined preview
+export -f helpsetup
+export DURATION1 DURATION2 HWCARD HWDEV ENCODEMP3 ENCODEOGGQ ENCODEOGGMM ENCODEWAV ENCODEAAC ENCODEAACQ ENCODEFLAC
+export BITRATE006 BITRATE008 BITRATE016 BITRATE032 BITRATE0CD BITRATE048 BITRATE064 BITRATE128 BITRATE160 BITRATE192 BITRATE256 BITRATE320
+export OGGQUALITYN1 OGGQUALITY01 OGGQUALITY02 OGGQUALITY03 OGGQUALITY04 OGGQUALITY05
+export OGGQUALITY06 OGGQUALITY07 OGGQUALITY08 OGGQUALITY09 OGGQUALITY10
+export CHANNELSTEREO CBRMODE ABRMODE VBRMODE DIRFILE1 DIRFILE2 TDIRFILE_DS1 DATEFILE
+export aformat vformat avformat
+export vENCODE00 vENCODE01 vENCODE02 vENCODE03 vENCODE04 vENCODE05 X11GRAB X11SHOW
+export vCONTAINER00 vCONTAINER01 vCONTAINER02 vCONTAINER03 vCONTAINER04 vCONTAINER05
+export vINPUTFORMAT vDEVICE vWIDTH vHEIGHT X11WIDTH X11HEIGHT AOFFSET OUTFRATE jOUTFRATE xOUTFRATE OUTvENC_OPTS INvENC_OPTS AUTOMAKE AUTODEL XOFS YOFS XDSPLY vBITRATE
+export OUTrec_mp3ENC_OPTS=""
+export OUTrec_wavENC_OPTS=""
+export OUTrec_aacENC_OPTS=""
+export OUTrec_flacENC_OPTS=""
+export OUTrec_oggENC_OPTS=""
+
+small_dialog_ (){
+ if [ -s ${PROGRAMHOME}/small_dialog_.hijack ];then
+  . ${PROGRAMHOME}/small_dialog_.hijack
+ else
+
+export MAIN_DIALOG="
+ <window title=\"$programtitle: $(gettext 'Tick checkbox beside filename for datestamp record')\" icon-name=\"gtk-media-record\" width-request=\"740\">
+ <vbox>
+  <hbox>
+   <button tooltip-text=\"$(gettext 'RECORD A and V tracks')\" width-request=\"24\">
+    <input file stock=\"gtk-media-record\"></input> 
+    <variable>_REC</variable>
+    <action>refresh:DIRFILE1</action>
+    <action>disable:_PLAY</action>
+"'  <action>rec "$TDIRFILE_DS1" "$DIRFILE1" "$DURATION1"</action>'"
+    <action>enable:_STOPREC</action>
+    <action>enable:_PAUSEREC</action>
+    <action>disable:_REC</action>
+   </button>
+   <button tooltip-text=\"$(gettext 'PAUSE record')\" width-request=\"24\">
+    <input file stock=\"gtk-media-pause\"></input>
+    <variable>_PAUSEREC</variable>
+    <action>pauserec</action>
+    <action>enable:_REC</action>
+   </button>
+   <button tooltip-text=\"$(gettext 'STOP record. If no record in process, pop up MIXER, VU display and video preview')\" width-request=\"24\">
+    <input file stock=\"gtk-media-stop\"></input>
+    <variable>_STOPREC</variable>
+"'  <action>if [ ! -e /tmp/${PROGINSTANCENAME}/PIDrec ];then vu; else sleep 1; stoprec "$TDIRFILE_DS1" "$DIRFILE1"; stopplay; fi</action>'"
+    <action>enable:_REC</action>
+    <action>enable:_PLAY</action>
+   </button>
+   <button relief=\"2\" tooltip-text=\"$(gettext 'PLAY A and V tracks')\" width-request=\"24\">
+    <input file stock=\"gtk-media-play\"></input>
+    <variable>_PLAY</variable>
+"'  <action>play "$TDIRFILE_DS1" "$DIRFILE1"</action>'"
+    <action>enable:_STOPPLAY</action>
+    <action>enable:_PAUSEPLAY</action>
+    <action>disable:_PLAY</action>
+   </button>
+   <button relief=\"2\" tooltip-text=\"$(gettext 'PAUSE A and V track play')\" width-request=\"24\">
+    <input file stock=\"gtk-media-pause\"></input>
+    <variable>_PAUSEPLAY</variable>
+    <action>pauseplay</action>
+    <action>enable:_PLAY</action>
+   </button>
+   <button relief=\"2\" tooltip-text=\"$(gettext 'STOP A and V track play')\" width-request=\"24\">
+    <input file stock=\"gtk-media-stop\"></input>
+    <variable>_STOPPLAY</variable>
+    <action>stopplay</action>
+    <action>enable:_PLAY</action>
+   </button>
+   <button tooltip-text=\"$(gettext 'PLAY combined AV file')\" width-request=\"24\">
+    <input file stock=\"gtk-media-play\"></input>
+    <variable>_PLAYAV</variable>
+"'  <action>play_combined "$TDIRFILE_DS1" "$DIRFILE1"</action>'"
+   </button>   
+   <button tooltip-text=\"$(gettext 'Opens Rox filemanager at target directory of recording')\" width-request=\"24\">
+    <input file stock=\"gtk-home\"></input>
+"'	<action>term_TD "$TDIRFILE_DS1"</action>'"
+   </button>
+   <button tooltip-text=\"$(gettext 'Advanced User Interface and pAVrecord configuration')\">
+    <input file stock=\"gtk-preferences\"></input>
+"'  <action>echo "$TDIRFILE_DS1" >/tmp/${PROGINSTANCENAME}/TDIRFILE_DS1</action>
+	<action>echo "$DIRFILE1" >/tmp/${PROGINSTANCENAME}/DIRFILE1</action>
+'"
+    <action>stopplay</action>
+"'  <action>stoprec "$TDIRFILE_DS1" "$DIRFILE1"</action>'"
+    <action type=\"exit\">REALLY-CONFIG</action>
+   </button>
+   <button tooltip-text=\"$(gettext 'Browse and select the target directory for the file to record or play')\">
+    <input file stock=\"gtk-open\"></input>
+    <variable>PATHTOFILE</variable>
+    <action type=\"fileselect\">TDIRFILE_DS1</action>
+   </button>
+   <entry  accept=\"directory\" tooltip-text=\"$(gettext 'Browse, drag and drop, copy and paste, or type the target directory for the file to record or play')\">
+    <variable>TDIRFILE_DS1</variable>
+"'	<input>echo "${TDIRFILE_DS1}"</input>'"
+   </entry>
+   <checkbox tooltip-text=\"$(gettext 'Click this checkbox for date-stamped record to chosen directory')\">
+    <variable>DATEFILE</variable>
+    <label>:</label>
+    <default>$DATEFILE</default>
+   </checkbox>
+   <hbox width-request=\"172\">
+   <entry accept=\"directory\" tooltip-text=\"$(gettext 'Drag and drop, copy and paste, or type the name of the file to record. Note that a separate sound track will also be recorded in the background')\">
+    <variable>DIRFILE1</variable>
+	<input>DateStamp1</input>
+   </entry>
+   </hbox>
+   <checkbox tooltip-text=\"$(gettext 'Click this checkbox for automatically encapsulate audio and video tracks in single AV container when record stop is pressed')\">
+    <variable>AUTOMAKE</variable>
+    <label>$(gettext 'auto')</label>
+    <default>$AUTOMAKE</default>
+    <action>if true disable:COMBINE</action>
+    <action>if false enable:COMBINE</action>
+   </checkbox>
+   <button tooltip-text=\"$(gettext 'Encapsulate audio and video tracks in single AV container')\">
+    <input file stock=\"gtk-convert\"></input>
+    <variable>COMBINE</variable>
+"'  <action>[ $AUTOMAKE = "false" ] && make_avideo "$TDIRFILE_DS1" "$DIRFILE1"</action>'"
+   </button>
+   <checkbox tooltip-text=\"$(gettext 'Click this checkbox for automatically delete the separate audio and video tracks once the combined AV file is created')\">
+    <variable>AUTODEL</variable>
+    <label>$(gettext 'del')</label>
+    <default>$AUTODEL</default>
+   </checkbox>
+   <button tooltip-text=\"$(gettext 'QUIT')\" width-request=\"24\">
+    <input file stock=\"gtk-quit\"></input>
+"'  <action>echo "$TDIRFILE_DS1" >/tmp/${PROGINSTANCENAME}/TDIRFILE_DS1</action>
+	<action>echo "$DIRFILE1" >/tmp/${PROGINSTANCENAME}/DIRFILE1</action>
+'"
+    <action type=\"exit\">EXIT-QUIT</action>
+   </button>
+  </hbox>
+
+" 
+if [ -s ${PROGRAMHOME}/smallgui_addpanel.hijack ];then
+ . ${PROGRAMHOME}/smallgui_addpanel.hijack
+fi
+MAIN_DIALOG=${MAIN_DIALOG}"
+</vbox>
+</window>"
+preview
+gtkdialog --program=MAIN_DIALOG -G +394+0 > /tmp/${PROGINSTANCENAME}/maindialog
+MAIN_DIALOG=$(</tmp/${PROGINSTANCENAME}/maindialog)
+TDIRFILE_DS1="$(cat /tmp/${PROGINSTANCENAME}/TDIRFILE_DS1 2>/dev/null)"
+DIRFILE1="$(cat /tmp/${PROGINSTANCENAME}/DIRFILE1 2>/dev/null)"
+sed -i -e '/^TDIRFILE_DS1=[^ ]*/ d' "$CONFIGFILE"
+echo "TDIRFILE_DS1=""\"$TDIRFILE_DS1\"" >> "$CONFIGFILE"
+sed -i -e '/^DIRFILE1=[^ ]*/ d' "$CONFIGFILE"
+echo "DIRFILE1=""\"$DIRFILE1\"" >> "$CONFIGFILE"
+
+ fi # small_dialog_.hijack
+}
+
+config_dialog_ (){
+ if [ -s ${PROGRAMHOME}/config_dialog_.hijack ];then
+  . ${PROGRAMHOME}/config_dialog_.hijack
+ else
+ 
+  export HELP_SETUP="
+  <window title=\"$programtitle $(gettext 'Setup Help')\" icon-name=\"gtk-media-record\">
+   <vbox>
+    <edit wrap-mode=\"2\"><width>312</width><height>500</height>
+     <variable>HELPTEXTSETUP</variable>
+     <input file>/tmp/${PROGINSTANCENAME}/helpsetup.txt</input>
+    </edit>
+    <hbox>
+     <button ok>
+      <variable>HELP_SETUP</variable> 
+      <action type=\"closewindow\">HELP_SETUP</action>
+     </button>
+    </hbox>
+   </vbox>
+  </window>"
+  
+export MAIN_DIALOG="
+<window width-request=\"740\" title=\"$programtitle: $(gettext 'Tick checkbox beside filename for datestamp record')\" icon-name=\"gtk-media-record\">
+ <vbox>
+  <hbox width-request=\"740\">
+
+  <hbox width-request=\"392\">
+   <frame $(gettext 'Record A and V tracks')>
+
+    <hbox>
+
+     <frame $(gettext 'Target Directory')>
+      <hbox>
+       <button tooltip-text=\"$(gettext 'Browse and select the target directory for the file to record')\">
+        <input file stock=\"gtk-directory\"></input>
+        <variable>TARGET_DIRECTORY1</variable>
+        <action type=\"fileselect\">TDIRFILE_DS1</action>
+       </button>
+       <entry editable=\"true\" accept=\"directory\" tooltip-text=\"$(gettext 'Browse, drag and drop, copy and paste, or type the target directory for the file to record')\">
+        <variable>TDIRFILE_DS1</variable>
+"'      <input>echo "$TDIRFILE_DS1"</input>'"
+       </entry>
+       <button tooltip-text=\"$(gettext 'Opens Rox filemanager at target directory of recording')\">
+        <input file stock=\"gtk-home\"></input>
+"'		<action>term_TD "$TDIRFILE_DS1"</action>'"
+       </button>
+      </hbox>
+     </frame>
+
+     <frame $(gettext 'Duration')>
+     <hbox width-request=\"50\">
+      <entry tooltip-text=\"$(gettext 'In seconds. 0 or blank means no time limit')\" xalign=\"1\">
+       <variable>DURATION1</variable>
+"'     <input>echo "$DURATION1"</input>'"
+      </entry>
+     </hbox>
+     </frame>
+
+    </hbox>	
+
+    <hbox>
+	 <text><label>$(gettext 'File')</label></text>
+     <checkbox tooltip-text=\"$(gettext 'Click this checkbox for date-stamped record to chosen directory')\">
+      <variable>DATEFILE</variable>
+      <label>:</label>
+      <default>$DATEFILE</default>
+     </checkbox>
+     <entry tooltip-text=\"$(gettext 'Drag and drop, copy and paste, or type name of the file to record. Note that a separate sound track will also be recorded in the background')\">
+      <variable>DIRFILE1</variable>
+      <input>DateStamp1</input>
+     </entry>
+     <button tooltip-text=\"$(gettext 'RECORD A and V tracks')\">
+      <input file stock=\"gtk-media-record\"></input> 
+      <variable>_REC</variable>
+      <action>refresh:DIRFILE1</action>
+      <action>disable:_PLAY</action>
+"'    <action>rec "$TDIRFILE_DS1" "$DIRFILE1" "$DURATION1"</action>'"
+      <action type=\"refresh\">DIRFILE2</action>
+      <action>enable:_STOPREC</action>
+      <action>enable:_PAUSEREC</action>
+      <action>disable:_REC</action>
+     </button>
+     <button tooltip-text=\"$(gettext 'PAUSE record')\">
+      <input file stock=\"gtk-media-pause\"></input>
+      <variable>_PAUSEREC</variable>
+      <action>pauserec</action>
+      <action>enable:_REC</action>
+     </button>
+     <button tooltip-text=\"$(gettext 'STOP record. If no record in process, pop up MIXER, VU display and video preview')\">
+      <input file stock=\"gtk-media-stop\"></input>
+      <variable>_STOPREC</variable>
+"'    <action>if [ ! -e /tmp/${PROGINSTANCENAME}/PIDrec ];then vu; else sleep 1; stoprec "$TDIRFILE_DS1" "$DIRFILE1"; stopplay; fi</action>'"
+      <action>enable:_REC</action>
+      <action>enable:_PLAY</action>
+     </button>
+
+    </hbox>
+
+   </frame>
+  </hbox>
+
+  <frame $(gettext 'Play A and V tracks')>
+
+   <hbox>
+
+    <frame $(gettext 'Audio sync')>
+     <hbox>
+	  <text><label>$(gettext 'offset:')</label></text>
+      <hbox width-request=\"32\">
+       <entry tooltip-text=\"$(gettext 'Offset audio track by this amount. For example: 0.5 (in seconds)')\">
+        <variable>AOFFSET</variable>
+"'      <input>echo "$AOFFSET"</input>'"
+       </entry>
+      </hbox>
+     </hbox>
+    </frame>
+
+	<frame $(gettext 'Duration')>
+     <hbox width-request=\"72\">
+      <entry tooltip-text=\"$(gettext 'In seconds. 0 or blank means no time limit')\" xalign=\"1\">
+       <variable>DURATION2</variable>
+"'     <input>echo "$DURATION2"</input>'"
+      </entry>
+     </hbox>
+    </frame>
+
+    <frame $(gettext 'Play controls')>
+     <hbox width-request=\"112\">
+      <button relief=\"2\" tooltip-text=\"$(gettext 'PLAY the separate A and V tracks at same time')\">
+       <input file stock=\"gtk-media-play\"></input>
+       <variable>_PLAY</variable>
+"'     <action>play "$TDIRFILE_DS1" "$DIRFILE2" "$DURATION2"</action>'"
+       <action>enable:_STOPPLAY</action>
+       <action>enable:_PAUSEPLAY</action>
+       <action>disable:_PLAY</action>
+      </button>
+      <button relief=\"2\" tooltip-text=\"$(gettext 'PAUSE play')\">
+       <input file stock=\"gtk-media-pause\"></input>
+       <variable>_PAUSEPLAY</variable>
+       <action>pauseplay</action>
+       <action>enable:_PLAY</action>
+      </button>
+      <button relief=\"2\" tooltip-text=\"$(gettext 'STOP play')\">
+       <input file stock=\"gtk-media-stop\"></input>
+       <variable>_STOPPLAY</variable>
+       <action>stopplay</action>
+       <action>enable:_PLAY</action>
+      </button>
+     </hbox>
+    </frame>
+
+   </hbox>
+
+   <hbox>
+    <button tooltip-text=\"$(gettext 'Browse for SOURCE File to play')\">
+     <input file stock=\"gtk-open\"></input>
+     <variable>PATHTOFILE</variable>
+     <action type=\"fileselect\">DIRFILE2</action>
+    </button>
+    <entry tooltip-text=\"$(gettext 'Browse, drag and drop, copy and paste, or type name of the video file to play. Note that, if available, the associated sound track will also be played')\">
+     <variable>DIRFILE2</variable>
+"'   <input>echo "${DIRFILE1}"</input>'"
+    </entry>
+    <button tooltip-text=\"$(gettext 'PLAY combined AV file')\">
+     <input file stock=\"gtk-media-play\"></input>
+     <variable>_PLAYAV</variable>
+"'   <action>play_combined "$TDIRFILE_DS1" "$DIRFILE1"</action>'"
+    </button> 
+   </hbox>
+
+  </frame>
+
+ </hbox>
+
+ <hbox>
+  
+   <frame $(gettext 'SCREENCAST:                 WxH')>
+   <hbox>
+    <checkbox tooltip-text=\"$(gettext 'Click this checkbox for screencast recording')\">
+     <variable>X11GRAB</variable>
+     <label> $(gettext 'select')</label>
+     <default>$X11GRAB</default>
+	</checkbox>
+    <checkbox tooltip-text=\"$(gettext 'Click this checkbox to show capture region during capture')\">
+     <variable>X11SHOW</variable>
+     <label> $(gettext 'show')</label>
+     <default>$X11SHOW</default>
+	</checkbox>
+    <hbox width-request=\"48\">
+     <entry tooltip-text=\"$(gettext 'Window capture width. For example 1024')\">
+      <variable>X11WIDTH</variable>
+"'    <input>echo "$X11WIDTH"</input>'"
+     </entry>
+    </hbox>
+	<text><label>x</label></text>
+    <hbox width-request=\"48\">
+     <entry tooltip-text=\"$(gettext 'Window capture height. For example 768')\">
+      <variable>X11HEIGHT</variable>
+"'    <input>echo "$X11HEIGHT"</input>'"
+     </entry>
+    </hbox>
+" 
+if [ $(command -v xwininfo 2>/dev/null) ];then
+     MAIN_DIALOG=${MAIN_DIALOG}"
+    <hbox>
+     <button height-request=\"30\" tooltip-text=\"$(gettext 'Find X window screen coordinates and offsets')\">
+      <input file stock=\"gtk-page-setup\"></input>
+	  "' <action>$VTERMINAL -bg "#fd0" -geometry "80x24-0-25" -e sh -c "xwininfo && read" &</action>'"
+     </button>
+    </hbox>
+"
+fi
+MAIN_DIALOG=${MAIN_DIALOG}"
+
+   </hbox>
+   </frame>
+
+   <frame $(gettext 'DISPLAY+Xoffset,Yoffset')>
+   <hbox>
+    <hbox width-request=\"40\">
+     <entry tooltip-text=\"$(gettext 'X11 Display. For example :0.0')\">
+      <variable>XDSPLY</variable>
+"'    <input>echo "$XDSPLY"</input>'"
+     </entry>
+    </hbox>
+	<text><label>+</label></text>
+    <hbox width-request=\"48\">
+     <entry tooltip-text=\"$(gettext 'Window capture position Xoffset. For example 0')\">
+      <variable>XOFS</variable>
+"'    <input>echo "$XOFS"</input>'"
+     </entry>
+    </hbox>
+	<text><label>,</label></text>
+    <hbox width-request=\"48\">
+     <entry tooltip-text=\"$(gettext 'Window capture position Yoffset. For example 0')\">
+      <variable>YOFS</variable>
+"'    <input>echo "$YOFS"</input>'"
+     </entry>
+    </hbox>
+   </hbox>
+   </frame>
+
+   <frame $(gettext 'Frame rate (fps)')>
+   <hbox>
+	<text><label>$(gettext 'scast:')</label></text>
+     <hbox width-request=\"28\">
+     <entry tooltip-text=\"$(gettext 'Screencast frame rate. For example 10 frames per second')\">
+      <variable>xOUTFRATE</variable>
+"'    <input>echo "$xOUTFRATE"</input>'"
+     </entry>
+    </hbox>
+    <text><label>$(gettext 'video:')</label></text>
+    <hbox width-request=\"28\">
+     <entry tooltip-text=\"$(gettext 'Video frame rate. For example 30 frames per second')\">
+      <variable>OUTFRATE</variable>
+"'    <input>echo "$OUTFRATE"</input>'"
+     </entry>
+    </hbox>
+   </hbox>
+   </frame>
+
+ </hbox>
+
+ <frame $(gettext 'VIDEO RECORD CONFIGURATION (Note: video track is first recorded alone into an avi container)')>
+
+  <hbox>
+
+   <frame $(gettext 'select video encoder')>
+    <hbox>    
+      <radiobutton>
+       <variable>vENCODE00</variable>
+       <label>MPEG-1</label>
+       <default>$vENCODE00</default>
+      </radiobutton>
+      <radiobutton>
+       <variable>vENCODE01</variable>
+       <label>MPEG-2</label>
+       <default>$vENCODE01</default>
+      </radiobutton>
+      <radiobutton>
+       <variable>vENCODE02</variable>
+       <label>MPEG-4/10</label>
+       <default>$vENCODE02</default>
+      </radiobutton>
+      <radiobutton>
+       <variable>vENCODE03</variable>
+       <label>Theora</label>
+       <default>$vENCODE03</default>
+      </radiobutton>
+      <radiobutton>
+       <variable>vENCODE04</variable>
+       <label>x264</label>
+       <default>$vENCODE04</default>
+      </radiobutton>
+      <radiobutton tooltip-text=\"$(gettext 'jpeg sequence for output')\">
+       <variable>vENCODE05</variable>
+       <label>JPEGS</label>
+       <default>$vENCODE05</default>
+      </radiobutton>
+    </hbox> 
+   </frame>
+
+   <frame $(gettext 'JPEGS/sec')>
+   <hbox>
+
+	<text><label>$(gettext 'rate')</label></text>
+     <hbox width-request=\"34\">
+     <entry tooltip-text=\"$(gettext 'JPEG image rate. For example 0.5 images per second')\">
+      <variable>jOUTFRATE</variable>
+"'    <input>echo "$jOUTFRATE"</input>'"
+     </entry>
+    </hbox>
+   </hbox>
+   </frame>
+
+   <frame $(gettext 'VideoBitrate')>
+   <hbox>
+    <text><label>$(gettext 'kbps:')</label></text>
+    <hbox width-request=\"40\">
+     <entry tooltip-text=\"$(gettext 'If left blank, default used is 512 (in kilo bits per second) constant video bit rate encoding mode. Entered values above 31 also result in constant video bit rate mode being used. If variable bit rate video mode is preferred, enter a value less than 32. VBR mode is then automatically used; the entered value being used as the vbr -qscale value (e.g. 10 results in -qscale 10 being used, which with Theora encoder would result in best Theora vbr quality)')\">
+      <variable>vBITRATE</variable>
+"'    <input>echo "$vBITRATE"</input>'"
+     </entry>
+    </hbox>
+   </hbox>
+   </frame>
+
+  </hbox>
+
+  <hbox>
+
+   <frame $(gettext 'InputFormat        Extra I/P options')>
+   <hbox>
+    <hbox width-request=\"96\">
+     <entry tooltip-text=\"$(gettext 'For example: video4linux2 for webcam. This entry box is NOT used during screencasts.')\">
+      <variable>vINPUTFORMAT</variable>
+"'    <input>echo "$vINPUTFORMAT"</input>'"
+     </entry>
+    </hbox>
+    <hbox width-request=\"180\">
+     <entry tooltip-text=\"$(gettext 'Leave blank or appends additional avconv/ffmpeg input options. This entry box is ALSO used during screencasts.')\">
+      <variable>INvENC_OPTS</variable>
+"'    <input>echo "$INvENC_OPTS"</input>'"
+     </entry>
+    </hbox>
+   </hbox>
+   </frame>
+
+   <frame $(gettext 'vDEVICE             W x H')>
+   <hbox>
+    <hbox width-request=\"96\">
+     <entry tooltip-text=\"$(gettext 'For example: /dev/video0 if input format video4linux2. This entry box is NOT used during screencasts.')\">
+      <variable>vDEVICE</variable>
+"'    <input>echo "$vDEVICE"</input>'"
+     </entry>
+    </hbox>
+    <hbox width-request=\"48\">
+     <entry tooltip-text=\"$(gettext 'For example 320. This entry box is NOT used during screencasts.')\">
+      <variable>vWIDTH</variable>
+"'    <input>echo "$vWIDTH"</input>'"
+     </entry>
+    </hbox>
+    <hbox width-request=\"48\">
+     <entry tooltip-text=\"$(gettext 'For example 240. This entry box is NOT used during screencasts.')\">
+      <variable>vHEIGHT</variable>
+"'    <input>echo "$vHEIGHT"</input>'"
+     </entry>
+    </hbox>
+   </hbox>
+   </frame>
+
+   <frame $(gettext 'Extra O/P options')>
+   <hbox>
+    <hbox width-request=\"180\">
+     <entry tooltip-text=\"$(gettext 'Leave blank or appends additional avconv/ffmpeg output options. This entry box is ALSO used during screencasts.')\">
+      <variable>OUTvENC_OPTS</variable>
+"'    <input>echo "$OUTvENC_OPTS"</input>'"
+     </entry>
+    </hbox>
+   </hbox>
+   </frame>
+
+ </hbox>
+ </frame>
+  
+ <frame $(gettext 'AUDIO RECORD CONFIGURATION:')>
+
+  <hbox>
+       
+   <frame $(gettext 'select container for combined audio and video track')>
+    <hbox homogeneous=\"true\">
+     <radiobutton>
+      <variable>vCONTAINER00</variable>
+      <label>avi</label>
+      <default>$vCONTAINER00</default>
+     </radiobutton>
+     <radiobutton>
+      <variable>vCONTAINER01</variable>
+      <label>mpeg</label>
+      <default>$vCONTAINER01</default>
+     </radiobutton>
+     <radiobutton>
+      <variable>vCONTAINER02</variable>
+      <label>mp2</label>
+      <default>$vCONTAINER02</default>
+     </radiobutton>
+     <radiobutton>
+      <variable>vCONTAINER03</variable>
+      <label>mp4</label>
+      <default>$vCONTAINER03</default>
+     </radiobutton>
+     <radiobutton>
+      <variable>vCONTAINER04</variable>
+      <label>ogv</label>
+      <default>$vCONTAINER04</default>
+     </radiobutton>
+     <radiobutton>
+      <variable>vCONTAINER05</variable>
+      <label>mkv</label>
+      <default>$vCONTAINER05</default>
+     </radiobutton>       
+    </hbox>
+   </frame>
+
+   <frame $(gettext 'Combine AV')>
+    <hbox homogeneous=\"true\">
+     <checkbox tooltip-text=\"$(gettext 'Click this checkbox for automatically encapsulate audio and video tracks in selected container when record stop is pressed')\">
+      <variable>AUTOMAKE</variable>
+      <label>$(gettext 'auto')</label>
+      <default>$AUTOMAKE</default>
+      <action>if true disable:COMBINE</action>
+      <action>if false enable:COMBINE</action>
+     </checkbox>
+	 <button tooltip-text=\"$(gettext 'Encapsulate audio and video tracks in selected single AV container')\">
+	  <input file stock=\"gtk-convert\"></input>
+	  <variable>COMBINE</variable>
+"'    <action>[ $AUTOMAKE = "false" ] && make_avideo "$TDIRFILE_DS1" "$DIRFILE1"</action>'"
+	 </button>
+     <checkbox tooltip-text=\"$(gettext 'Click this checkbox for automatically delete the separate audio and video tracks once the combined AV file is created')\">
+      <variable>AUTODEL</variable>
+      <label>$(gettext 'del')</label>
+      <default>$AUTODEL</default>
+     </checkbox>
+    </hbox>
+   </frame>
+
+  </hbox>
+
+  <hbox>
+    
+   <frame $(gettext 'select audio format')>
+    <hbox homogeneous=\"true\">    
+     <radiobutton tooltip-text=\"$(gettext 'use mp3 encoder type')\">
+      <variable>ENCODEMP3</variable>
+      <label>mp3</label>
+      <default>$ENCODEMP3</default>
+     </radiobutton>
+     <radiobutton tooltip-text=\"$(gettext 'use wav encoder type')\">
+      <variable>ENCODEWAV</variable>
+      <label>wav</label>
+      <default>$ENCODEWAV</default>
+     </radiobutton>
+     <radiobutton tooltip-text=\"$(gettext 'use ogg managed maximum encoder type')\">
+      <variable>ENCODEOGGMM</variable>
+      <label>ogg_mm</label>
+      <default>$ENCODEOGGMM</default>
+     </radiobutton>
+     <radiobutton tooltip-text=\"$(gettext 'use ogg unmanaged quality encoder type')\">
+      <variable>ENCODEOGGQ</variable>
+      <label>ogg_q</label>
+      <default>$ENCODEOGGQ</default>
+     </radiobutton>
+     <radiobutton tooltip-text=\"$(gettext 'use aac bitrate mode encoder type')\">
+      <variable>ENCODEAAC</variable>
+      <label>aac</label>
+      <default>$ENCODEAAC</default>
+     </radiobutton>
+     <radiobutton tooltip-text=\"$(gettext 'use aac quality mode encoder type')\">
+      <variable>ENCODEAACQ</variable>
+      <label>aac_q</label>
+      <default>$ENCODEAACQ</default>
+     </radiobutton>
+     <radiobutton tooltip-text=\"$(gettext 'use flac lossless encoder type')\">
+      <variable>ENCODEFLAC</variable>
+      <label>flac</label>
+      <default>$ENCODEFLAC</default>
+     </radiobutton>
+    </hbox> 
+   </frame>
+
+   <frame $(gettext 'select mp3 mode')>
+    <hbox homogeneous=\"true\" width-request=\"304\">    
+     <radiobutton tooltip-text=\"$(gettext 'use Constant Bit Rate mode when mp3 encoding')\">
+      <variable>CBRMODE</variable>
+      <label>cbr</label>
+      <default>$CBRMODE</default>
+     </radiobutton>
+     <radiobutton tooltip-text=\"$(gettext 'use Average Bit Rate mode when mp3 encoding')\">
+      <variable>ABRMODE</variable>
+      <label>abr</label>
+      <default>$ABRMODE</default>
+     </radiobutton>
+     <radiobutton tooltip-text=\"$(gettext 'use Variable Bit Rate mode when mp3 encoding')\">
+      <variable>VBRMODE</variable>
+      <label>vbr</label>
+      <default>$VBRMODE</default>
+     </radiobutton>
+    </hbox> 
+   </frame>
+
+  </hbox>
+
+  <hbox> 
+
+   <frame $(gettext 'sample rate for wav; bitrate for mp3, aac or ogg_mm')>
+    <hbox homogeneous=\"true\">
+     <radiobutton>
+      <variable>BITRATE320</variable>
+      <label>320k</label>
+      <default>$BITRATE320</default>
+     </radiobutton>
+     <radiobutton>
+      <variable>BITRATE256</variable>
+      <label>256k</label>
+      <default>$BITRATE256</default>
+     </radiobutton>
+     <radiobutton>
+      <variable>BITRATE192</variable>
+      <label>192k</label>
+      <default>$BITRATE192</default>
+     </radiobutton>
+     <radiobutton>
+      <variable>BITRATE160</variable>
+      <label>160k</label>
+      <default>$BITRATE160</default>
+     </radiobutton>
+     <radiobutton>
+      <variable>BITRATE128</variable>
+      <label>128k</label>
+      <default>$BITRATE128</default>
+     </radiobutton>
+     <radiobutton>
+      <variable>BITRATE064</variable>
+      <label>64k</label>
+      <default>$BITRATE064</default>
+     </radiobutton>
+     <radiobutton>
+      <variable>BITRATE048</variable>
+      <label>48k</label>
+      <default>$BITRATE048</default>
+     </radiobutton>
+     <radiobutton>
+      <variable>BITRATE0CD</variable>
+      <label>44.1k</label>
+      <default>$BITRATE0CD</default>
+     </radiobutton>
+     <radiobutton>
+      <variable>BITRATE032</variable>
+      <label>32k</label>
+      <default>$BITRATE032</default>
+     </radiobutton>
+     <radiobutton>
+      <variable>BITRATE016</variable>
+      <label>16k</label>
+      <default>$BITRATE016</default>
+     </radiobutton>
+     <radiobutton>
+      <variable>BITRATE008</variable>
+      <label>8k</label>
+      <default>$BITRATE008</default>
+     </radiobutton>
+    </hbox>
+   </frame>
+
+  </hbox>
+
+  <hbox>       
+
+   <frame $(gettext 'audio quality for: mp3 vbr, aac_q or ogg_q; compression_level for flac (N1=12)')>
+    <hbox homogeneous=\"true\">
+     <radiobutton>
+      <variable>OGGQUALITY10</variable>
+      <label>10</label>
+      <default>$OGGQUALITY10</default>
+     </radiobutton>
+     <radiobutton>
+      <variable>OGGQUALITY09</variable>
+      <label>09</label>
+      <default>$OGGQUALITY09</default>
+     </radiobutton>
+     <radiobutton>
+      <variable>OGGQUALITY08</variable>
+      <label>08</label>
+      <default>$OGGQUALITY08</default>
+     </radiobutton>
+     <radiobutton>
+      <variable>OGGQUALITY07</variable>
+      <label>07</label>
+      <default>$OGGQUALITY07</default>
+     </radiobutton>
+     <radiobutton>
+      <variable>OGGQUALITY06</variable>
+      <label>06</label>
+      <default>$OGGQUALITY06</default>
+     </radiobutton>
+     <radiobutton>
+      <variable>OGGQUALITY05</variable>
+      <label>05</label>
+      <default>$OGGQUALITY05</default>
+     </radiobutton>
+     <radiobutton>
+      <variable>OGGQUALITY04</variable>
+      <label>04</label>
+      <default>$OGGQUALITY04</default>
+     </radiobutton>
+     <radiobutton>
+      <variable>OGGQUALITY03</variable>
+      <label>03</label>
+      <default>$OGGQUALITY03</default>
+     </radiobutton>
+     <radiobutton>
+      <variable>OGGQUALITY02</variable>
+      <label>02</label>
+      <default>$OGGQUALITY02</default>
+     </radiobutton>
+     <radiobutton>
+      <variable>OGGQUALITY01</variable>
+      <label>01</label>
+      <default>$OGGQUALITY01</default>
+     </radiobutton>
+     <radiobutton>
+      <variable>OGGQUALITY00</variable>
+      <label>00</label>
+      <default>$OGGQUALITY00</default>
+     </radiobutton>
+     <radiobutton>
+      <variable>OGGQUALITYN1</variable>
+      <label>N1</label>
+      <default>$OGGQUALITYN1</default>
+     </radiobutton>       
+    </hbox>
+   </frame>
+
+  </hbox>
+ </frame>
+
+ <frame $(gettext 'General Configuration')>
+
+  <hbox>
+
+   <hbox width-request=\"88\">
+   <frame $(gettext 'channel')>
+    <checkbox tooltip-text=\"$(gettext 'Click this checkbox for stereo recording')\">
+     <variable>CHANNELSTEREO</variable>
+     <label> $(gettext 'stereo')</label>
+     <default>$CHANNELSTEREO</default>
+    </checkbox>
+   </frame>
+   </hbox>
+   <hbox width-request=\"160\">
+   <frame $(gettext 'select soundcard')>
+   <hbox>
+    <checkbox tooltip-text=\"$(gettext 'If you soundcard is not card 0 click this checkbox')\">
+     <variable>HWCARD</variable>
+     <label> $(gettext 'card')</label>
+     <default>$HWCARD</default>
+    </checkbox>
+    <checkbox tooltip-text=\"$(gettext 'If you soundcard is not subdevice 0 click this checkbox')\">
+     <variable>HWDEV</variable>
+     <label> $(gettext 'device')</label>
+     <default>$HWDEV</default>
+    </checkbox>
+   </hbox>
+   </frame>
+   </hbox>
+
+   <frame>
+   <hbox>
+
+" 
+if [ -s ${PROGRAMHOME}/addbuttons.hijack ];then
+ . ${PROGRAMHOME}/addbuttons.hijack
+fi
+MAIN_DIALOG=${MAIN_DIALOG}"
+
+    <button tooltip-text=\"$(gettext 'Return to Small GUI')\">
+     <input file stock=\"gtk-leave-fullscreen\"></input>
+     <action>stopplay</action>
+"'     <action>stoprec "$TDIRFILE_DS1" "$DIRFILE1"</action>'"
+     <action type=\"exit\">REALLY-CONFIG</action>
+    </button>
+    <button tooltip-text=\"$(gettext 'Help')\">
+     <input file stock=\"gtk-help\"></input>
+     <variable>HELPSETBUT</variable>
+	 <action>launch:HELP_SETUP</action>
+    </button>
+" 
+if [ $(command -v pschedule 2>/dev/null) ];then
+     MAIN_DIALOG=${MAIN_DIALOG}"
+    <hbox>
+     <button height-request=\"30\" tooltip-text=\"$(gettext 'Run Pschedule task on time')\">
+      <input file>/usr/local/share/icons/mini-clock.xpm</input>
+	  "' <action>pschedule "pavrecord rec '\''${TDIRFILE_DS1}'\'' '\''${DIRFILE1}'\'' $DURATION1" &</action>'"
+     </button>
+    </hbox>
+"
+fi
+MAIN_DIALOG=${MAIN_DIALOG}"
+
+     <button height-request=\"30\" tooltip-text=\"$(gettext 'Pop up MIXER, VU display and video preview')\">
+      <input file stock=\"gtk-select-color\"></input>
+   	  <action>vu</action>
+     </button>
+     <button height-request=\"30\" tooltip-text=\"$(gettext 'QUIT')\">
+      <input file stock=\"gtk-quit\"></input>
+      <action type=\"exit\">EXIT-QUIT</action>
+     </button>
+    </hbox>
+    </frame>
+
+  </hbox>
+
+ </frame>
+
+" 
+if [ -s ${PROGRAMHOME}/config_addpanel.hijack ];then
+ . ${PROGRAMHOME}/config_addpanel.hijack
+fi
+MAIN_DIALOG=${MAIN_DIALOG}"
+
+</vbox>
+</window>"
+preview
+gtkdialog --program=MAIN_DIALOG -G +216+0 > /tmp/${PROGINSTANCENAME}/maindialog
+MAIN_DIALOG=$(</tmp/${PROGINSTANCENAME}/maindialog)
+echo $MAIN_DIALOG > "$CONFIGFILE"
+
+ fi # config_dialog_.hijack
+}
+
+if [ -s ${PROGRAMHOME}/maincode1.hijack ];then
+ . ${PROGRAMHOME}/maincode1.hijack
+fi
+
+if [ -s ${PROGRAMHOME}/commandline_args.hijack ];then
+ . ${PROGRAMHOME}/commandline_args.hijack
+else
+
+ if [ -z "$1" ];then
+  _argv1=""
+ else
+  _argv1="$1"
+ fi
+ if [ -z "$2" ];then
+  _argv2="TDIRFILE_DS1"
+ else
+  _argv2="$2"
+ fi
+ if [ -z "$3" ];then
+  _argv3="$DIRFILE1"
+ else
+  _argv3="$3"
+ fi
+ if [ -z "$4" ];then
+  _argv4="$DURATION1"
+ else
+  _argv4="$4"
+ fi
+
+ set -u
+ # process commandline arguments
+ # read from stdin
+ if [ "$_argv1" = "-" ];then
+  read _argv1 _argv2 _argv3 _argv4
+  [ -z "$_argv1" ] && _argv1=""
+  [ -z "$_argv2" ] && _argv2="$TDIRFILE_DS1"
+  [ -z "$_argv3" ] && _argv3="$DIRFILE1"
+  [ -z "$_argv4" ] && _argv4="$DURATION1"
+  TDIRFILE_DS1="$_argv2";DIRFILE1="$_argv3";DURATION1="$_argv4"
+ fi
+ case "$_argv1" in
+ "")
+  helpsetup
+  ;;
+ "rec")
+  stoprec "$_argv2" "$_argv3"
+  rec "$_argv2" "$_argv3" "$_argv4"
+  trap - INT TERM EXIT
+  exit;;
+ "pauserec")
+  pauserec
+  trap - INT TERM EXIT
+  exit;;
+ "stoprec")
+  stoprec "$_argv2" "$_argv3"
+  trap - INT TERM EXIT
+  exit;;
+ "play")
+  stopplay
+  play "$_argv2" "$_argv3" "$_argv4"
+  trap - INT TERM EXIT
+  exit;;
+ "pauseplay")
+  pauseplay
+  trap - INT TERM EXIT
+  exit;;
+ "stopplay")
+  stopplay
+  trap - INT TERM EXIT
+  exit;;
+ "quit")
+  quit
+  trap - INT TERM EXIT
+  exit;;
+ '--help'|'-?')
+  printf "$(gettext "After you have configure pavrecord 
+via the GUI, you can also control it
+from the commandline using:
+
+pavrecord [option] [path to file] [file] [duration]
+
+where [duration] is a time limit for the record
+capture or play process:
+ 
+0 or blank means no time limit;
+entering no duration results in use of
+duration pre-configured for record.
+")""$(gettext "
+
+Commandline Arguments:
+
+rec target_directory outfile [duration] : record to outfile.
+pauserec : pause/continue recording (toggle).  
+stoprec target_directory outfile : stop recording.
+play target_directory infile [duration] : play infile.
+pauseplay : pause/continue playback (toggle).
+stopplay : stop playback.
+quit : clean up all and quit program.
+--help : this brief usage help.
+-? : this brief usage help.
+- : read arguments from stdin (e.g. pipe)
+ 
+If no options are entered the pAVrecord GUI
+will start.
+
+Notes:
+
+1. If libxvid MPEG-4/10 mode recording is not operating,
+create an empty file called noxvid in /etc/pavrecord/ prior
+to re-running pavrecord. The alternative encoder, 
+-vcodec mpeg4 -vtag xvid, will then be used for MPEG-4/10
+recording mode instead.
+
+2. By default, ffmpeg will be used if available. If avconv
+is preferred as default then, prior to re-running pavrecord,
+create an empty file called avpref in /etc/pavrecord.\n")"
+  trap - INT TERM EXIT
+  exit;;
+ *)
+  helpsetup
+  ;;
+ esac
+
+fi # commandline_args.hijack
+
+if [ -s ${PROGRAMHOME}/maincode2.hijack ];then
+ . ${PROGRAMHOME}/maincode2.hijack
+fi
+
+if [ -s ${PROGRAMHOME}/maincode3.hijack ];then
+ . ${PROGRAMHOME}/maincode3.hijack
+else
+ small_dialog_
+ stoprec "$TDIRFILE_DS1" "$DIRFILE1"
+ stopplay
+ while [ "$(echo "$MAIN_DIALOG" | grep REALLY-CONFIG)" != "" ]; do
+  config_dialog_
+  stoprec "$TDIRFILE_DS1" "$DIRFILE1"
+  stopplay
+  if [ "$(echo "$MAIN_DIALOG" | grep REALLY-CONFIG)" != "" ];then
+   . "$CONFIGFILE"
+   small_dialog_
+   stoprec "$TDIRFILE_DS1" "$DIRFILE1"
+   stopplay
+  fi
+ done
+ if [ "$(echo "$MAIN_DIALOG" | grep 'EXIT="abort"')" != "" ];then
+  rm -f "$CONFIGFILE"
+ fi
+ quit
+ trap - INT TERM ERR EXIT
+ exit 0
+fi # maincode3.hijack
+exit 0

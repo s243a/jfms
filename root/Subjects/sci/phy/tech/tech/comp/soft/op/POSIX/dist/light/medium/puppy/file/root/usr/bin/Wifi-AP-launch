@@ -1,0 +1,3 @@
+#!/bin/sh
+
+rxvt -e Wifi-AP-launch.sh

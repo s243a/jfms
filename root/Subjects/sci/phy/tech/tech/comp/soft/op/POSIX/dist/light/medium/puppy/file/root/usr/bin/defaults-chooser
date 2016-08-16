@@ -1,0 +1,608 @@
+#!/bin/sh
+
+# defaults-chooser, require defaults-changer
+# by sc0ttman
+# free to all (obviously), edit as you like :D
+# 18may2012 shinobar: rewrte, I18n
+# 22may2012 shinobar: fix was failed to update audioplayer
+# v0.8.5 20Oct2012 shinobar: fix imageeditor/imageviewer detection (thanks to bigpup)
+# v0.8.6 20Oct2012 shinobar: improve searching desktops (thanks to bigpup)
+# v0.8.7 16Nov2012 sc0ttman: added pdf support
+# v0.8.8 04Nov2013 shinobar: avoid the default is set to itself, auto layout
+# v0.8.9 27Nov2013 shinobar: add defaultterminal, check excutable before, opning splash
+# v0.9 30Jul2014 shinobar: add pdfviewer, screenshot
+export VERSION='0.9'
+
+echo "$1"
+
+# messages
+export TEXTDOMAIN=defaults-chooser
+export OUTPUT_CHARSET=UTF-8
+_Choose_header=$(gettext 'Choose your preferred default programs and applications, which you can then launch from your start menu or desktop.')
+_Choose_tip=$(gettext 'Choose your preferred default program, or type command.')
+export _Updated=$(gettext 'Your default apps have been updated.')
+_Help0=$(gettext 'Helpful Tips')
+_Help1=$(gettext 'You can add custom commands, parameters and options by typing the desired command in the chosen field and clicking the apply button.')
+_Help2=$(gettext 'To load apps through the terminal, simply add "rxvt -e " before the command you wish to execute in the terminal.')
+_Help3=$(gettext 'Example: "rxvt -e mp" will load the terminal based editor, called "MP".')
+_Help9=$(gettext 'by sc0ttman')
+_Apply=$(gettext 'Apply')
+_Help=$(gettext 'Help')
+_Cancel=$(gettext 'Cancel')
+_AUDIOMIXER=$(gettext  "Audio Mixer")
+_AUDIOPLAYER=$(gettext  "Audio Player")
+_BAREHTMLVIEWER=$(gettext "Bare HTML Viewer")
+_BROWSER=$(gettext "Browser")
+_CALENDAR=$(gettext "Calendar")
+_CDPLAYER=$(gettext "CD Player")
+_CHAT=$(gettext "Chat")
+_CHMVIEWER=$(gettext "CHM Viewer")
+_CONNECT=$(gettext "Connect")
+_CONTACT=$(gettext "Contact")
+_DRAW=$(gettext "Drawing")
+_EMAIL=$(gettext "Email")
+_HTMLEDITOR=$(gettext "HTML Editor")
+_HTMLVIEWER=$(gettext "HTML Viewer")
+_IMAGEEDITOR=$(gettext "Image Editor")
+_IMAGEVIEWER=$(gettext "Image Viewer")
+_MEDIAPLAYER=$(gettext "Media Player")
+_MUSICPLAYER=$(gettext "Music Player")
+_PAINT=$(gettext "Paint")
+_PDF=$(gettext "PDF")
+_PDFVIEWER=$(gettext "PDF viewer")
+_SCREENSHOT=$(gettext "Screenshot")
+_SEARCH=$(gettext "Search")
+_SPREADSHEET=$(gettext "Spreadsheet")
+_TERMINAL=$(gettext "Terminal")
+_TEXTEDITOR=$(gettext "Text Editor")
+_TEXTVIEWER=$(gettext "Text Viewer")
+_WORDPROCESSOR=$(gettext "Word Processor")
+
+# single item
+DEFAULTAPPS=""
+case "$1" in
+default*) DEFAULTAPPS="$@"
+  while [ $# -gt 0 ]; do shift;done
+ ;;
+esac
+if [ -z "$DEFAULTAPPS" -a -z "$1" ];then
+  PSRESULT=$(ps)
+  P=$(echo "$PSRESULT" | grep -w "^[ ]*$PPID" | grep -o '/usr/local/bin/default[^ ]*')
+  [ "$P" ] && DEFAULTAPPS=$(basename $P)
+fi
+
+# chroot into a new root, then run stuff, if the new root exists
+if [ -e "$1" ];then
+	export newroot="$1"
+	export prefix="chroot $newroot "
+	echo "using a new root: $newroot..."
+fi
+
+# which gtkdialog
+for P in gtkdialog gtkdialog3 gtkdialog4; do
+  P=$(which $P) && GTKDIALOG="$P" && break
+done
+if [ -z "$GTKDIALOG" ]; then
+  echo "No gtkdialog found." >&2
+  exit 1
+fi
+
+###OPNING splash
+if [ -z "$1" ] && which yaf-splash &>/dev/null ;then
+  APPNAME=$(basename $0)
+  yaf-splash -fontsize x-large -bg white -text "Default Applications Chooser $VERSION" &
+  XPID=$!
+fi
+
+set -a # export all functions
+
+# create functions
+NCOUNT=0  # v0.8.8: count default app available
+export COUNT_FILE=/tmp/$(basename $0)_count
+echo -n $NCOUNT > $COUNT_FILE
+get_default () {
+	if [ "$DEFAULTAPPS" ]; then
+	  if ! ( echo "$DEFAULTAPPS" | grep -qw "default$1"); then
+	    echo '###'
+	    return 1
+	  fi
+	fi
+	F="$newroot/usr/local/bin/default$1"
+	if [ ! -f "$F" ]; then
+	  echo '###'
+	  return 1
+	fi
+	# strip out 'exec ', ' "$@"', and all whitespace from the end of the last line of the file
+	P=$(grep '^[^#]*exec ' "$F"| grep -vw 'defaults-chooser' | head -1 | sed -e 's/^.*exec[ ]//' -e 's/.\$@.*$//')
+	# v0.8.9: check excutable
+	X=$(echo $P| sed -e 's/rxvt [ ]*-e //'| cut -d' ' -f1)
+	[ "$(echo $X| cut -c1)" = "/" ] || X=$(which $X)
+	[ -x "$X" ] && echo $P
+	# v0.8.8: count up
+	NCOUNT=$(cat $COUNT_FILE)
+	NCOUNT=$(($NCOUNT + 1)) 
+	echo -n $NCOUNT > $COUNT_FILE
+	return 0
+}
+
+search_desktop() {
+  [ "$1" ] || return
+  grep -v  '\[.*\]' /usr/share/applications/*.desktop | grep -iE "$1" | cut -f1 -d':' | uniq
+}
+extract_desktops() {
+  [ "$1" ] || return
+  grep -i 'exec=' $@ | cut -s -f2 -d'=' | sort -u
+}
+# ensure the app is installed and ready to execute
+excutable_filter() {
+	LANG=C
+	while read P
+	do
+	  E=$(echo $P| sed -e 's/^.*\(rxvt\|term\) -e //')
+	  ${prefix}which "$(echo $E| cut -f1 -d' ')" &>/dev/null && echo $P
+    done
+}
+
+make_item() {
+  TOP=$@
+  [ "$TOP" ] || TOP='@'
+   # v0.8.8 : avoid the default is set to itself
+  (echo "$TOP"; grep -vw "$TOP") | grep -vw "default$APP"| sed -e 's|\(..*\)|<item>\1</item>|' | sed -e 's/>@</></'
+}
+
+make_box() {
+ L=$1
+ V=$2
+ shift; shift
+ eval D=\${$V}
+ [ "$D" != '###' ] || return 
+  # new frame
+  if [ "$ITEMS_PER_COLUMN" ]; then
+    N=$(cat $COUNT_FILE)
+    [ "$N" ] || N=0
+    N=$(($N + 1))
+    if [ $N -gt $ITEMS_PER_COLUMN ]; then
+      N=1
+      echo '		</frame>
+			<frame>'
+    fi
+    echo -n $N > $COUNT_FILE
+  fi
+ echo '				<hbox>
+					<text><label>"'$L'"</label></text>
+					<combobox tooltip-text="'$_Choose_tip'" '$COMBOWIDTH'>
+						<variable>'$V'</variable>
+						'$@'
+					</combobox>
+				</hbox>'
+}
+# update the default*** files
+update_defaults () {
+
+	# change all the default*** files, using the 'defaults-changer' util
+	defaults-changer 'audiomixer' "$AUDIOMIXER" "$newroot"
+	defaults-changer 'audioplayer' "$AUDIOPLAYER" "$newroot"
+	defaults-changer 'barehtmlviewer' "$BAREHTMLVIEWER" "$newroot"
+	defaults-changer 'browser' "$BROWSER" "$newroot"
+	defaults-changer 'calendar' "$CALENDAR" "$newroot"
+	defaults-changer 'cdplayer' "$CDPLAYER" "$newroot"
+	defaults-changer 'chat' "$CHAT" "$newroot"
+	defaults-changer 'chmviewer' "$CHMVIEWER" "$newroot"
+	defaults-changer 'connect' "$CONNECT" "$newroot"
+	defaults-changer 'contact' "$CONTACT" "$newroot"
+	defaults-changer 'draw' "$DRAW" "$newroot"
+	defaults-changer 'email' "$EMAIL" "$newroot"
+	defaults-changer 'htmleditor' "$HTMLEDITOR" "$newroot"
+	defaults-changer 'htmlviewer' "$HTMLVIEWER" "$newroot"
+	defaults-changer 'imageeditor' "$IMAGEEDITOR" "$newroot"
+	defaults-changer 'imageviewer' "$IMAGEVIEWER" "$newroot"
+	defaults-changer 'mediaplayer' "$MEDIAPLAYER" "$newroot"
+	defaults-changer 'musicplayer' "$MUSICPLAYER" "$newroot"
+	defaults-changer 'paint' "$PAINT" "$newroot"
+	defaults-changer 'pdf' "$PDF" "$newroot"
+	defaults-changer 'pdfviewer' "$PDFVIEWER" "$newroot"
+	defaults-changer 'screenshot' "$SCREENSHOT" "$newroot"
+	defaults-changer 'search' "$SEARCH" "$newroot"
+	defaults-changer 'spreadsheet' "$SPREADSHEET" "$newroot"
+	defaults-changer 'terminal' "$TERMINAL" "$newroot"
+	defaults-changer 'texteditor' "$TEXTEDITOR" "$newroot"
+	defaults-changer 'textviewer' "$TEXTVIEWER" "$newroot"
+	defaults-changer 'wordprocessor' "$WORDPROCESSOR" "$newroot"
+	
+	# update user
+	Xdialog --title 'Defaults updated' --msgbox "$_Updated" 0 0
+}
+
+# set app vars 
+# gui option vars
+export AUDIOMIXER=`get_default audiomixer`
+export AUDIOPLAYER=`get_default audioplayer`
+export BAREHTMLVIEWER=`get_default barehtmlviewer`
+export BROWSER=`get_default browser`
+export CALENDAR=`get_default calendar`
+export CDPLAYER=`get_default cdplayer`
+export CHAT=`get_default chat`
+export CHMVIEWER=`get_default chmviewer`
+export CONNECT=`get_default connect`
+export CONTACT=`get_default contact`
+export DRAW=`get_default draw`
+export EMAIL=`get_default email`
+export HTMLEDITOR=`get_default htmleditor`
+export HTMLVIEWER=`get_default htmlviewer`
+export IMAGEEDITOR=`get_default imageeditor`
+export IMAGEVIEWER=`get_default imageviewer`
+export MEDIAPLAYER=`get_default mediaplayer`
+export MUSICPLAYER=`get_default musicplayer`
+export PAINT=`get_default paint`
+export PDF=`get_default pdf`
+export PDFVIEWER=`get_default pdfviewer`
+export SCREENSHOT=`get_default screenshot`
+export SEARCH=`get_default search`
+export SPREADSHEET=`get_default spreadsheet`
+export TERMINAL=`get_default terminal`
+export TEXTEDITOR=`get_default texteditor`
+export TEXTVIEWER=`get_default textviewer`
+export WORDPROCESSOR=`get_default wordprocessor`
+
+# build GUI elements
+if [ "$AUDIOMIXER" != '###' -o "$MUSICPLAYER" != '###' ]; then
+  APP='audiomixer' # v0.8.8
+  DESKTOPS=$(search_desktop 'mixer')
+  AUDIOMIXER_ARRAY=$(extract_desktops $DESKTOPS)
+  AUDIOMIXER_ITEMS=$(echo "$AUDIOMIXER_ARRAY" | make_item "$AUDIOMIXER")
+fi
+
+if [ "$AUDIOPLAYER" != '###' ]; then
+  APP='audioplayer'
+  DESKTOPS=$(search_desktop '(audio|media).*player')
+  AUDIOPLAYER_ARRAY=$(extract_desktops $DESKTOPS)
+  AUDIOPLAYER_ITEMS=$(echo "$AUDIOPLAYER_ARRAY" | make_item "$AUDIOPLAYER")
+fi
+
+if [ "$BAREHTMLVIEWER" != '###' -o "$HTMLVIEWER" != '###'  ]; then
+  APP='barehtmlviewer'
+  BAREHTMLVIEWER_ARRAY="defaultbrowser
+findbrowser
+mozstart
+gtkmoz
+PuppyBrowser
+dillo
+hv3
+mini-web
+skipstone
+midori
+operamini
+elinks
+icecat
+hv3
+xlynx
+w3m
+w3m-term"
+  BAREHTMLVIEWER_ARRAY=$(echo "$BAREHTMLVIEWER_ARRAY" | excutable_filter)
+  BAREHTMLVIEWER_ITEMS=$(echo "$BAREHTMLVIEWER_ARRAY" | make_item "$BAREHTMLVIEWER")
+fi
+
+if [ "$BROWSER" != '###' -o "$HTMLVIEWER" != '###'  ]; then
+  APP='browser'
+  DESKTOPS=$(search_desktop 'web.*browser')
+  BROWSER_ARRAY=$(extract_desktops $DESKTOPS)
+  BROWSER2_ARRAY="findbrowser"
+  BROWSER2_ARRAY=$(echo "$BROWSER2_ARRAY" | excutable_filter)
+  [ "$BROWSER2_ARRAY" ] && BROWSER_ARRAY="$BROWSER_ARRAY 
+$BROWSER2_ARRAY"
+  BROWSER_ITEMS=$(echo "$BROWSER_ARRAY" | make_item  "$BROWSER")
+fi
+
+if [ "$CALENDAR" != '###' ]; then
+  APP='calendar'
+  CALENDAR_ARRAY="osmo
+ical
+calcurse
+notecase"
+  CALENDAR_ITEMS=$(echo "$CALENDAR_ARRAY" | excutable_filter | make_item "$CALENDAR")
+fi
+
+if [ "$CDPLAYER" != '###' ]; then
+  APP='cdplayer'
+  DESKTOPS=$(search_desktop 'cd.*player')
+  CDPLAYER_ARRAY=$(extract_desktops $DESKTOPS)
+  CDPLAYER_ITEMS=$(echo "$CDPLAYER_ARRAY" | make_item "$CDPLAYER")
+fi
+
+if [ "$CHAT" != '###' ]; then
+  APP='chat'
+  DESKTOPS=$(search_desktop 'chat')
+  CHAT_ARRAY=$(extract_desktops $DESKTOPS)
+  CHAT_ITEMS=$(echo "$CHAT_ARRAY" | make_item  "$CHAT")
+fi
+
+if [ "$CHMVIEWER" != '###' ]; then
+  APP='chmviewer'
+  CHMVIEWER_ARRAY="pzchmview
+chmsee
+kchmviewer
+gnochm
+xchm
+kchm"
+  CHMVIEWER_ITEMS=$(echo "$CHMVIEWER_ARRAY" | excutable_filter | make_item "$CHMVIEWER")
+fi
+
+if [ "$CONNECT" != '###' ]; then
+  APP='connect'
+  CONNECT_ARRAY="net-setup.sh
+connectwizard
+connectwizard_2nd
+clinet
+frisbee
+Pwireless2
+sns
+gnome-ppp
+pupdial
+pppoe_gui
+pgprs-shell
+pppoeconf
+net_wiz_classic"
+  CONNECT_ARRAY=$(echo "$CONNECT_ARRAY" | excutable_filter)
+  CONNECT_ITEMS=$(echo "$CONNECT_ARRAY" | make_item "$CONNECT")
+fi
+
+if [ "$CONTACT" != '###' ]; then
+  APP='contact'
+  CONTACT_ARRAY="gaby
+ical
+osmo
+mozaddressbook
+sylpheed
+thunderbird
+mtcelledit"
+  CONTACT_ITEMS=$(echo "$CONTACT_ARRAY" | excutable_filter | make_item "$CONTACT")
+fi
+
+if [ "$DRAW" != '###' ]; then
+  APP='draw'
+  DESKTOPS=$(search_desktop '(draw|(vector|grapgics|image).*editor)')
+  DRAW_ARRAY=$(extract_desktops $DESKTOPS)
+  DRAW_ITEMS=$(echo "$DRAW_ARRAY" | make_item "$DRAW")
+fi
+
+if [ "$EMAIL" != '###' ]; then
+  APP='email'
+  DESKTOPS=$(search_desktop 'mail')
+  EMAIL_ARRAY=$(extract_desktops $DESKTOPS)
+  EMAIL_ITEMS=$(echo "$EMAIL_ARRAY" | make_item "$EMAIL")
+fi
+
+if [ "$HTMLEDITOR" != '###' -o "$HTMLVIEWER" != '###' ]; then
+  APP='htmleditor'
+  DESKTOPS=$(search_desktop '(html|web|text).*editor')
+  HTMLEDITOR_ARRAY=$(extract_desktops $DESKTOPS)
+  HTMLEDITOR_ITEMS=$(echo "$HTMLEDITOR_ARRAY" | make_item "$HTMLEDITOR")
+fi
+
+if [ "$HTMLVIEWER" != '###' ]; then
+  APP='htmlviewer'
+  HTMLVIEWER_ARRAY=$BAREHTMLVIEWER_ARRAY
+  HTMLVIEWER_ARRAY="$HTMLVIEWER_ARRAY
+$BROWSER_ARRAY
+$HTMLEDITOR_ARRAY"
+  HTMLVIEWER_ITEMS=$(echo "$HTMLVIEWER_ARRAY" | sort -u | make_item "$HTMLVIEWER")
+fi
+
+if [ "$IMAGEEDITOR" != '###' -o "$PAINT" != '###' ]; then
+  APP='imageeditor'
+  DESKTOPS=$(search_desktop '(graphics|image).*editor')
+  IMAGEEDITOR_ARRAY=$(extract_desktops $DESKTOPS)
+  IMAGEEDITOR_ITEMS=$(echo "$IMAGEEDITOR_ARRAY"| make_item "$IMAGEEDITOR")
+fi
+
+if [ "$IMAGEVIEWER" != '###' ]; then
+  APP='imageviewer'
+  DESKTOPS=$(search_desktop '(grapgics|image|picture).*(editor|viewer)')
+  IMAGEVIEWER_ARRAY=$(extract_desktops $DESKTOPS)
+  IMAGEVIEWER_ITEMS=$(echo "$IMAGEVIEWER_ARRAY" | make_item "$IMAGEVIEWER")
+fi
+
+if [ "$MEDIAPLAYER" != '###' ]; then
+  APP='mediaplayer'
+  DESKTOPS=$(search_desktop 'media.*player')
+  MEDIAPLAYER_ARRAY=$(extract_desktops $DESKTOPS)
+  MEDIAPLAYER_ITEMS=$(echo "$MEDIAPLAYER_ARRAY" | make_item "$MEDIAPLAYER")
+fi
+
+if [ "$MUSICPLAYER" != '###' ]; then
+  APP='musicplayer'
+  MUSICPLAYER_ARRAY=$AUDIOPLAYER_ARRAY
+  MUSICPLAYER_ITEMS=$(echo "$MUSICPLAYER_ARRAY" | make_item "$MUSICPLAYER")
+fi
+
+if [ "$PAINT" != '###' ]; then
+  APP='paint'
+  PAINT_ARRAY=$IMAGEEDITOR_ARRAY
+  PAINT_ITEMS=$(echo "$PAINT_ARRAY" | make_item "$PAINT")
+fi
+
+if [ "$PDF" != '###' -o "$PDFVIEWER" != '###' ]; then
+  APP='pdf'
+  DESKTOPS=$(search_desktop 'pdf')
+  PDF_ARRAY=$(extract_desktops $DESKTOPS)
+  PDF_ITEMS=$(echo "$PDF_ARRAY" | make_item "$PDF")
+  if [ "$PDFVIEWER" != '###' ]; then
+    APP='pdfviewer'
+    PDF_ITEMS=$(echo "$PDF_ARRAY" | make_item "$PDFVIEWER")
+  fi
+fi
+
+if [ "$SCREENSHOT" != '###' ]; then
+  APP='screenshot'
+  DESKTOPS=$(search_desktop 'screen[ ]*(shot|capture)')
+  SCREENSHOT_ARRAY="mtpaint -s
+mtpaintsnapshot.sh
+hotshots 
+screeny
+tas
+xpaint -snapshot"
+  SCREENSHOT_ARRAY=$(echo "$SCREENSHOT_ARRAY" | excutable_filter)
+  if [ "$DESKTOPS" ]; then
+    SCREENSHOT_ARRAY="$(extract_desktops $DESKTOPS)
+$SCREENSHOT_ARRAY"
+  fi
+  echo "SCREENSHOT_ARRAY=$SCREENSHOT_ARRAY"
+  SCREENSHOT_ITEMS=$(echo "$SCREENSHOT_ARRAY"  | sort -u| make_item "$SCREENSHOT")
+fi
+
+if [ "$SEARCH" != '###' ]; then
+  APP='search'
+  SEARCH_ARRAY=$(search_desktop 'seach')
+  SEARCH_ITEMS=$(echo "$SEARCH_ARRAY" | make_item "$SEARCH")
+fi
+
+if [ "$SPREADSHEET" != '###' ]; then
+  APP='spreadsheet'
+  DESKTOPS=$(search_desktop 'spreadsheet')
+  SPREADSHEET_ARRAY=$(extract_desktops $DESKTOPS)
+  SPREADSHEET_ITEMS=$(echo "$SPREADSHEET_ARRAY" | make_item "$SPREADSHEET")
+fi
+
+if [ "$TERMINAL" != '###' ]; then
+  APP='terminal'
+  DESKTOPS=$(search_desktop 'terminalemulator')
+  TERMINAL_ARRAY=$(extract_desktops $DESKTOPS)
+  TERMINAL_ITEMS=$(echo "$TERMINAL_ARRAY" | make_item "$TERMINAL")
+fi
+
+if [ "$TEXTEDITOR" != '###' -o "$TEXTVIEWER" != '###' ]; then
+  APP='texteditor'
+  TEXTEDITOR_ARRAY="beaver
+geany
+leafpad
+mtleafpad
+rxvt -e elvis
+rxvt -e vi
+rxvt -e ex
+gvim
+mp-5
+nicoedit
+rxvt -e mcedit
+rxvt -e me
+rxvt -e mg
+rxvt -e mp
+rxvt -fn 9x15 -e nano
+supernotepad
+xcoral
+tea"
+  TEXTEDITOR_ITEMS=$(echo "$TEXTEDITOR_ARRAY" | excutable_filter | make_item "$TEXTEDITOR")
+fi
+
+if [ "$TEXTVIEWER" != '###' ]; then
+  APP='textviewer'
+  TEXTVIEWER_ARRAY=$TEXTEDITOR_ARRAY
+  TEXTVIEWER_ITEMS=$(echo "$TEXTVIEWER_ARRAY" | excutable_filter | make_item "$TEXTVIEWER")
+fi
+
+if [ "$WORDPROCESSOR" != '###' ]; then
+  APP='wordprocessor'
+  DESKTOPS=$(search_desktop 'wordp')
+  WORDPROCESSOR_ARRAY=$(extract_desktops $DESKTOPS)
+  WORDPROCESSOR_ITEMS=$(echo "$WORDPROCESSOR_ARRAY" | make_item "$WORDPROCESSOR")
+fi
+
+# build help GUI
+export HELPGUI='<window title="Default Applications Chooser '$VERSION'" allow-grow="false">
+	<vbox>
+		<vbox homogeneous="true">
+			<frame>
+				<text><label>'$_Help0':</label></text>
+				<text height-request="5"><label>""</label></text>
+				<text><label>'$_Help1'</label></text>
+				<text height-request="5"><label>""</label></text>
+				<text><label>'$_Help2'</label></text>
+				<text height-request="5"><label>""</label></text>
+				<text><label>'$_Help3'</label></text>
+				<text height-request="5"><label>""</label></text>
+				<text><label>- '$_Help9' -</label></text>
+			</frame>
+		</vbox>
+		<hbox><button><input file stock="gtk-close"></input><label>"Close"</label></button></hbox>
+	</vbox>
+</window>'
+
+# build GUI
+# v0.8.8: layout
+COMBOWIDTH=""	#15
+#[ "$DEFAULTAPPS" ] && COMBOWITH=""
+[ "$COMBOWIDTH" ] && COMBOWITH="width-request=\"$COMBOWIDTH\""
+NCOUNT=$(cat $COUNT_FILE)
+[ "$NCOUNT" ] || NCOUNT=0
+ITEMS_PER_COLUMN=$((($NCOUNT + 1)/2))
+[ $NCOUNT -lt 10 ] && ITEMS_PER_COLUMN=
+echo $NCOUNT, $ITEMS_PER_COLUMN
+echo -n "0" > $COUNT_FILE
+export GUI='<window title="Default Applications Chooser '$VERSION'" allow-grow="false">
+	<vbox>
+
+				<text width-request="400">
+					<label>'$_Choose_header'</label>
+				</text>
+
+		<hbox>
+			<frame>
+				'$(make_box "$_AUDIOMIXER" AUDIOMIXER "$AUDIOMIXER_ITEMS")'
+				'$(make_box "$_AUDIOPLAYER" AUDIOPLAYER "$AUDIOPLAYER_ITEMS")'
+				'$(make_box "$_BAREHTMLVIEWER" BAREHTMLVIEWER "$BAREHTMLVIEWER_ITEMS")'
+				'$(make_box "$_BROWSER" BROWSER "$BROWSER_ITEMS")'
+				'$(make_box "$_CALENDAR" CALENDAR "$CALENDAR_ITEMS")'
+				'$(make_box "$_CDPLAYER" CDPLAYER "$CDPLAYER_ITEMS")'
+				'$(make_box "$_CHAT" CHAT "$CHAT_ITEMS")'
+				'$(make_box "$_CHMVIEWER" CHMVIEWER "$CHMVIEWER_ITEMS")'
+				'$(make_box "$_CONNECT" CONNECT "$CONNECT_ITEMS")'
+				'$(make_box "$_CONTACT" CONTACT "$CONTACT_ITEMS")'
+				'$(make_box "$_DRAW" DRAW "$DRAW_ITEMS")'
+				'$(make_box "$_EMAIL" EMAIL "$EMAIL_ITEMS")'
+				'$(make_box "$_HTMLEDITOR" HTMLEDITOR "$HTMLEDITOR_ITEMS")'
+				'$(make_box "$_HTMLVIEWER" HTMLVIEWER "$HTMLVIEWER_ITEMS")'
+				'$(make_box "$_IMAGEEDITOR" IMAGEEDITOR "$IMAGEEDITOR_ITEMS")'
+				'$(make_box "$_IMAGEVIEWER" IMAGEVIEWER "$IMAGEVIEWER_ITEMS")'
+				'$(make_box "$_MEDIAPLAYER" MEDIAPLAYER "$MEDIAPLAYER_ITEMS")'
+				'$(make_box "$_MUSICPLAYER" MUSICPLAYER "$MUSICPLAYER_ITEMS")'
+				'$(make_box "$_PAINT" PAINT "$PAINT_ITEMS")'
+				'$(make_box "$_PDF" PDF "$PDF_ITEMS")'
+				'$(make_box "$_PDFVIEWER" PDFVIEWER "$PDF_ITEMS")'
+				'$(make_box "$_SCREENSHOT" SCREENSHOT "$SCREENSHOT_ITEMS")'
+				'$(make_box "$_SEARCH" SEARCH "$SEARCH_ITEMS")'
+				'$(make_box "$_SPREADSHEET" SPREADSHEET "$SPREADSHEET_ITEMS")'
+				'$(make_box "$_TERMINAL" TERMINAL "$TERMINAL_ITEMS")'
+				'$(make_box "$_TEXTEDITOR" TEXTEDITOR "$TEXTEDITOR_ITEMS")'
+				'$(make_box "$_TEXTVIEWER" TEXTVIEWER "$TEXTVIEWER_ITEMS")'
+				'$(make_box "$_WORDPROCESSOR" WORDPROCESSOR "$WORDPROCESSOR_ITEMS")'
+
+			</frame>
+		</hbox>
+		<vbox>
+
+				<hbox>
+				   <button>
+					  <input file stock="gtk-apply"></input>
+					  <label> '$_Apply' </label>
+					  <action>update_defaults $newroot &</action>
+					  <action type="exit">OK</action>
+				   </button>
+				   <button>
+					  <input file stock="gtk-help"></input>
+					  <label> '$_Help' </label>
+					  <action>gtkdialog3 --program HELPGUI --center &</action>
+				   </button>
+				   <button>
+					  <input file stock="gtk-cancel"></input>
+					  <label> '$_Cancel' </label>
+					  <action type="exit">EXIT_NOW</action>
+				   </button>
+				</hbox>
+
+		</vbox>
+	</vbox>
+</window>'
+
+# load the app
+[ "$XPID" ] && kill "$XPID" && XPID=""	#splash stop
+$GTKDIALOG -p GUI --center || echo "$GUI" >&2
+unset GUI

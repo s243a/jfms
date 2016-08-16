@@ -1,0 +1,62 @@
+#!/bin/sh
+# /usr/local/bin/Extract-pet
+## 2009-7-15 TazOC
+# 2010-04 TazOC partial CL fix
+
+APPTITLE="Extract-pet"
+
+# Set up buttons for gxmessage Nathan Fisher 2007-01
+# For more, gtk-demo, click stock items and icon browser
+B_OK="GTK_STOCK_OK"
+
+PETFILE="$@"
+BASEPETFILE=`basename "$PETFILE"`
+DIRPETFILE=`dirname "$PETFILE"`
+
+# Check for a valid pet file
+FILE="`echo "$PETFILE" | grep '\.pet$'`" # if no .pet file present, result will be blank
+if [ "$FILE" = "" ]; then
+ FILE="`echo "$PETFILE" | grep '\.tar\.gz$'`" # if no .pet file present, result will be blank
+fi
+
+if ! [ "$FILE" = "" ]; then
+   PKGLONGNAME="`basename "$PETFILE" .pet`"
+   WORKINGDIR="$DIRPETFILE"
+   cd "$WORKINGDIR"
+   cp  "$PETFILE" "$PKGLONGNAME$$.pet"
+   pet2tgz "$PKGLONGNAME$$.pet"
+   tar -xf "$PKGLONGNAME$$.tar.gz"
+   Err=$?
+   if [ $Err -gt 0 ] ;then
+    MSG=`which gxmessage` || MSG=xmessage
+    $MSG -title " $APPTITLE" -center -buttons "$B_OK:101" "
+'tar -xf "$PKGLONGNAME$$.tar.gz"' failed in
+ "$WORKINGDIR" with error code $Err."
+    exit $Err # END SCRIPT
+   fi
+   rm -f "$PKGLONGNAME$$.tar.gz"
+   
+   if [ -d $PKGLONGNAME/install ]; then
+     PKGSHORTNAME="`echo "$PKGLONGNAME" | cut -f 1 -d '-'`"
+     DESC="`cat install/slack-desc | grep "$PKGSHORTNAME" | grep ":"`"
+     mkdir -p $PKGLONGNAME/var/log/packages
+     echo -e "PACKAGE NAME:     $PKGLONGNAME" > $PKGLONGNAME/var/log/packages/$PKGLONGNAME
+     echo -e "COMPRESSED PACKAGE SIZE: \nUNCOMPRESSED PACKAGE SIZE: \nPACKAGE LOCATION: \nPACKAGE DESCRIPTION: " >> $PKGLONGNAME/var/log/packages/$PKGLONGNAME
+     echo "$DESC" >> $PKGLONGNAME/var/log/packages/$PKGLONGNAME
+     rm -fR $PKGLONGNAME/install
+   else
+    mkdir -p $PKGLONGNAME/var/log/packages
+    echo -e "PACKAGE NAME:     $PKGLONGNAME" > $PKGLONGNAME/var/log/packages/$PKGLONGNAME
+   fi
+   yaf-splash -deco 'Extraction Info' -center -close box -bg orange -fontsize x-large -text "
+$BASEPETFILE was extracted into the folder 
+$PKGLONGNAME/
+   " &
+   
+  else
+   echo "(II) $APPTITLE looked for a .pet file in '$PETFILE' but did not find one."
+   MSG=`which gxmessage` || MSG=xmessage
+   $MSG -center -title " $APPTITLE"  -buttons "$B_OK" "
+   Filename must end with .pet. '$PETFILE' not extracted." &
+fi
+exit #END SCRIPT

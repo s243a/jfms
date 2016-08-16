@@ -1,0 +1,168 @@
+#!/bin/sh
+
+GTKDIALOG=gtkdialog
+
+#export TMPDIR=/tmp/gtkdialog/examples/"`basename $0`"
+#mkdir -p "$TMPDIR"
+
+export TEXTDOMAIN=quickpet
+export OUTPUT_CHARSET=UTF-8
+. gettext.sh 
+
+MAIN_DIALOG='
+<window title="graphic driver install" window-position="1">
+	<vbox>
+		<notebook labels="'"$(gettext "info|6.0 iso|6.0.2 iso")"'">
+			<vbox>
+         <text><label>"'"$(gettext "Tahrpup comes with 'open source' accelerated")"'"</label></text>
+         <text><label>"'"$(gettext "graphic drivers, which should be enabled by default.")"'"</label></text>
+         <text><label>"'"$(gettext "Proprietory drivers are available on the tabs above")"'"</label></text>
+         <text><label>"'"$(gettext " ")"'"</label></text>
+	     <text><label>"'"$(gettext "First off check what driver you need at the appropriate website.")"'"</label></text>
+			<button tooltip-text="'"$(gettext "visit the nvidia website to check 
+which driver you need")"'">
+		        <label>"'"$(gettext "nvidia website")"'"</label>
+		        <height>16</height>
+		        <width>16</width>
+		        <input file icon="qnvidia-settings"></input>
+				<action>defaultbrowser http://www.nvidia.com/Download/index.aspx?lang=en-us &</action>
+			</button>
+			<button tooltip-text="'"$(gettext "visit the amd website
+to see which driver you need")"'">
+		        <label>"'"$(gettext "amd website")"'"</label>
+		        <height>16</height>
+		        <width>16</width>
+		        <input file icon="qati"></input>
+				<action>defaultbrowser http://support.amd.com/en-us/download &</action>
+			</button>
+			<text><label>"'"$(gettext " ")"'"</label></text> 
+			<text><label>"'"$(gettext "Note that even if you've upgraded through service packs, you ")"'"</label></text>
+			<text><label>"'"$(gettext "should still select the version of the of the tahrpup.iso you've")"'"</label></text>
+           	<text><label>"'"$(gettext "actually installed, either 6.0 or 6.0.2")"'"</label></text>
+           </vbox>
+			<vbox>
+			<text><label>"'"$(gettext "The following drivers are for the 3.14.20 kernel only")"'"</label></text>
+			<button tooltip-text="'"$(gettext "nvidia driver installer")"'">
+		        <label>nvidia 340.58 PAE</label>
+		        <height>16</height>
+		        <width>16</width>
+		        <input file icon="qnvidia-settings"></input>
+				<action>/usr/local/quickpet_precise/nvidia340pae &</action>
+			</button>
+			<button tooltip-text="'"$(gettext "nvidia driver installer")"'">
+		        <label>nvidia 340.58 noPAE</label>
+		        <height>16</height>
+		        <width>16</width>
+		        <input file icon="qnvidia-settings"></input>
+				<action>/usr/local/quickpet_precise/nvidia340nopae &</action>
+			</button>
+			<button tooltip-text="'"$(gettext "nvidia driver installer")"'">
+		        <label>nvidia 304.123 PAE</label>
+		        <height>16</height>
+		        <width>16</width>
+		        <input file icon="qnvidia-settings"></input>
+				<action>/usr/local/quickpet_precise/nvidia304pae &</action>
+			</button>
+			<button tooltip-text="'"$(gettext "nvidia driver installer")"'">
+		        <label>nvidia 304.123 noPAE</label>
+		        <height>16</height>
+		        <width>16</width>
+		        <input file icon="qnvidia-settings"></input>
+				<action>/usr/local/quickpet_precise/nvidia304nopae &</action>
+			</button>
+			<button tooltip-text="'"$(gettext "nvidia driver installer")"'">
+		        <label>nvidia 173.14 PAE</label>
+		        <height>16</height>
+		        <width>16</width>
+		        <input file icon="qnvidia-settings"></input>
+				<action>/usr/local/quickpet_precise/nvidia173pae &</action>
+			</button>
+			<button tooltip-text="'"$(gettext "nvidia driver installer")"'">
+		        <label>nvidia 173.14 noPAE</label>
+		        <height>16</height>
+		        <width>16</width>
+		        <input file icon="qnvidia-settings"></input>
+			<action>/usr/local/quickpet_precise/nvidia173nopae &</action>
+			</button>
+			<button tooltip-text="'"$(gettext "amd driver installer")"'">
+		        <label>amd fglrx 14.9 PAE</label>
+		        <input file icon="qati"></input>
+		        <height>16</height>
+		        <width>16</width>
+				<action>/usr/local/quickpet_precise/amdmodernpae &</action>
+			</button>
+			<button tooltip-text="'"$(gettext "amd driver installer")"'">
+		        <label>amd fglrx 14.9 noPAE</label>
+		        <height>16</height>
+		        <width>16</width>
+		        <input file icon="qati"></input>
+				<action>/usr/local/quickpet_precise/amdmodernnopae &</action>
+			</button>
+			</vbox>
+			<vbox>
+			<text><label>"'"$(gettext "The following drivers are for the 3.14.20 kernel only")"'"</label></text>
+			<button tooltip-text="'"$(gettext "nvidia driver installer")"'">
+		        <label>nvidia 346.35 PAE</label>
+		        <height>16</height>
+		        <width>16</width>
+		        <input file icon="qnvidia-settings"></input>
+				<action>/usr/local/quickpet_precise/nvidia346pae &</action>
+			</button>
+			<button tooltip-text="'"$(gettext "nvidia driver installer")"'">
+		        <label>nvidia 346.35 noPAE</label>
+		        <height>16</height>
+		        <width>16</width>
+		        <input file icon="qnvidia-settings"></input>
+				<action>/usr/local/quickpet_precise/nvidia346nopae &</action>
+			</button>
+			<button tooltip-text="'"$(gettext "nvidia driver installer")"'">
+		        <label>nvidia 173.14 PAE</label>
+		        <height>16</height>
+		        <width>16</width>
+		        <input file icon="qnvidia-settings"></input>
+				<action>/usr/local/quickpet_precise/nvidia173pae602 &</action>
+			</button>
+			<button tooltip-text="'"$(gettext "nvidia driver installer")"'">
+		        <label>nvidia 173.14 noPAE</label>
+		        <height>16</height>
+		        <width>16</width>
+		        <input file icon="qnvidia-settings"></input>
+			<action>/usr/local/quickpet_precise/nvidia173nopae602 &</action>
+			</button>
+			<button tooltip-text="'"$(gettext "amd driver installer")"'">
+		        <label>amd fglrx 14.12 PAE</label>
+		        <input file icon="qati"></input>
+		        <height>16</height>
+		        <width>16</width>
+				<action>/usr/local/quickpet_precise/amdmodernpae602 &</action>
+			</button>
+			<button tooltip-text="'"$(gettext "amd driver installer")"'">
+		        <label>amd fglrx 14.12 noPAE</label>
+		        <height>16</height>
+		        <width>16</width>
+		        <input file icon="qati"></input>
+				<action>/usr/local/quickpet_precise/amdmodernnopae602 &</action>
+			</button>
+			</vbox>
+		</notebook>
+		<hbox>
+			<button cancel></button>
+			</hbox>
+	</vbox>
+</window>'
+GUI="
+<window>
+ <vbox>
+  <menubar>
+   ...
+  </menubar>
+ </vbox>
+ <action signal=\"hide\">exit:Exit</action>
+</window>"
+export MAIN_DIALOG
+
+case $1 in
+	-d | --dump) echo "$MAIN_DIALOG" ;;
+	*) $GTKDIALOG --program=MAIN_DIALOG ;;
+esac
+

@@ -1,0 +1,77 @@
+#!/bin/bash
+# jwm sticky window by recobayu
+# feel free to improve this code
+# 150317 add top/bottom tray parameter (B_TOP)
+
+# get width of screen and height of screen
+SCREEN_WIDTH=$(xwininfo -root | awk '$1=="Width:" {print $2}')
+SCREEN_HEIGHT=$(xwininfo -root | awk '$1=="Height:" {print $2}')
+#panjang dan lebar window
+W_WINDOW=`xwininfo -id $(xprop -root | awk '/_NET_ACTIVE_WINDOW\(WINDOW\)/{print $NF}') | grep Width | awk '{print $2}'`
+H_WINDOW=`xwininfo -id $(xprop -root | awk '/_NET_ACTIVE_WINDOW\(WINDOW\)/{print $NF}') | grep Height | awk '{print $2}'`
+X_WINDOW=`xwininfo -id $(xprop -root | awk '/_NET_ACTIVE_WINDOW\(WINDOW\)/{print $NF}') | grep 'Absolute upper-left X' | awk '{print $4}'`
+Y_WINDOW=`xwininfo -id $(xprop -root | awk '/_NET_ACTIVE_WINDOW\(WINDOW\)/{print $NF}') | grep 'Absolute upper-left Y' | awk '{print $4}'`
+BORDER=`xwininfo -id $(xprop -root | awk '/_NET_ACTIVE_WINDOW\(WINDOW\)/{print $NF}') | grep 'Relative upper-left X' | awk '{print $4}'`
+TITLE=`xwininfo -id $(xprop -root | awk '/_NET_ACTIVE_WINDOW\(WINDOW\)/{print $NF}') | grep 'Relative upper-left Y' | awk '{print $4}'`
+
+#cek apakah autohide
+AUTO=`cat /root/.jwmrc-tray|grep autohide|cut -d '"' -f2`
+#di mana posisi tray nya
+POS=`cat /root/.jwmrc-tray|grep y=|cut -d '"' -f8`
+B_TOP=0
+
+if [ $AUTO = 'false' ];
+then
+	H_TRAY=`cat /root/.jwmrc-tray|grep autohide|cut -d '"' -f12`
+	if [ $POS = 0 ];
+	then
+		B_TOP=$H_TRAY
+	fi
+else
+	H_TRAY=0
+fi
+
+# new width and height
+if  [ $(( $H_WINDOW + $TITLE + $BORDER )) = $(( $(( $SCREEN_HEIGHT - $H_TRAY )) / 2 )) ];
+then
+	if [ $(( $W_WINDOW + 2 * $BORDER )) = $SCREEN_WIDTH ];
+	then
+		#rightquad
+		W=$(( $SCREEN_WIDTH / 2 - 2 * $BORDER ))
+		H=$(( $(( $SCREEN_HEIGHT - $H_TRAY )) / 2 - $TITLE - $BORDER ))
+		X=$(( $SCREEN_WIDTH / 2 ))
+		Y=$(( $Y_WINDOW - $TITLE ))
+	else
+		if [ $X_WINDOW = $BORDER ];
+		then
+			#centerhalfheight
+			W=$(( $SCREEN_WIDTH - 2 * $BORDER ))
+			W=$(( $SCREEN_WIDTH - 2 * $BORDER ))
+			H=$(( $(( $SCREEN_HEIGHT - $H_TRAY )) / 2 - $TITLE - $BORDER ))
+			X=0
+			Y=$(( $Y_WINDOW - $TITLE ))
+		fi
+	fi
+else
+	if [ $X_WINDOW = $BORDER ];
+	then
+		#unsticky, center of screen
+		W=$(( $SCREEN_WIDTH - 2 * $BORDER - 150 ))
+		H=$(( $SCREEN_HEIGHT - $H_TRAY - $TITLE - $BORDER - 100 ))
+		X=75
+		Y=$(( 50 + B_TOP ))
+	else
+		#wide
+		W=$(( $SCREEN_WIDTH / 2 - 2*$BORDER ))
+		H=$(( $SCREEN_HEIGHT - $TITLE - $BORDER - $H_TRAY ))
+		X=$(( $SCREEN_WIDTH / 2 ))
+		Y=$B_TOP
+	fi
+fi
+
+# X, change to move left or right:
+# moving to the right half of the screen:
+
+#wmctrl -r :ACTIVE: -b remove,maximized_vert,maximized_horz && 
+wmctrl -r :ACTIVE: -e 0,$X,$Y,$W,$H &&
+aplay /usr/share/audio/tile.wav

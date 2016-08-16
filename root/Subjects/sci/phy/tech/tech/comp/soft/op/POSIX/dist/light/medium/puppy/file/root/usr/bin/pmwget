@@ -1,0 +1,77 @@
+#!/bin/bash
+# Pmwget created by gposil with thanks to Lobster for Pwget
+# April 2009 GPL v3 License
+# http://gposil.netne.net
+#2009 gposil: version 0.2
+#121018 bk: bug fixes, version 0.2.1.
+#130517 robwoj44: gettexted.
+
+. gettext.sh
+export TEXTDOMAIN=pmwget
+export TEXTDOMAINDIR=/usr/share/locale
+export OUTPUT_CHARSET=UTF-8
+
+export HELP_DIALOG='
+<window title="'$(gettext 'PMirrorget - Help')'" resizable="false">
+  <vbox>
+    <text>
+      <label>'$(gettext 'PMirrorget allows you to download an entire web page and its text linked pages to a folder on your PC. Copy and paste the URL you wish to download. Use the folder selector to choose the destination. It is designed primarily for grabbing manuals and wiki pages without sifting through them, so you can view them later.')'</label>
+      <variable>HELP_DLG_MSG</variable>
+    </text>
+    <button>
+      <label>'$(gettext 'Close')'</label>
+      <action type="closewindow">HELP_DLG_MSG</action>
+    </button>
+  </vbox>
+  </window>
+'
+
+export Pmwget='
+<window title="'$(gettext 'PMirrorget - 0.2.1 - Site Grabber Utility')'" resizable="false">
+<vbox>
+ <hbox>
+  <text><label>'$(gettext 'Copy and Paste or type the URL of the required site into URL. Choose your destination folder and then Grab It Now!')'</label></text>
+ </hbox>
+ <frame>
+ <hbox>
+  <text><label> '$(gettext ' URL:    ')'</label></text>
+  <entry accept="directory"><variable>SOURCE</variable><input>/tmp/pm_source_dir</input></entry>
+ </hbox>
+ <hbox>
+  <text><label>'$(gettext 'Folder:')'</label></text>
+  <entry accept="directory"><variable>DEST</variable><input>/tmp/pm_mirror_dir</input></entry>
+  <button>
+   <input file stock="gtk-open"></input>
+   <action type="fileselect">DEST</action>
+   <action>refresh:DEST</action>
+  </button>
+ </hbox>
+ </frame>
+ <hbox>
+ <frame>
+  <button help>
+<action type="launch">HELP_DIALOG</action>
+  </button>
+  <button cancel></button>
+  </frame>
+  <button>
+  <input file>/usr/local/lib/X11/mini-icons/mini.checkmark.xpm</input>
+       <label>'$(gettext 'Grab It Now!')' </label>
+       <action type="exit">OK</action>
+  </button>
+
+ </hbox>
+</vbox>
+</window>'
+
+I=$IFS; IFS=""
+for STATEMENTS in  $(gtkdialog4 --program=Pmwget --center); do
+   eval $STATEMENTS
+done
+IFS=$I
+if [ $EXIT = OK ]; then
+  rxvt -name PMirrorget -bg "#F3F2DF" -e wget -m -c -k -r -np -P "$DEST" $SOURCE
+  rox -d "$DEST"
+fi
+
+###END###

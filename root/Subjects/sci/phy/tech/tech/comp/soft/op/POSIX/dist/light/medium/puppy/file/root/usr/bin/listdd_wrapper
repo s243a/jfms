@@ -1,0 +1,9 @@
+#!/bin/sh
+# Right-click wrapper for /usr/bin/listdd.sh
+
+export FILEPATH=$(echo "$1" | sed "s/\/$//")
+listddPID=$(ps ax | grep gtkdialog | grep LISTDD_DIALOG | awk '{print $1}')
+killall listdd.sh 2>/dev/null
+kill $listddPID 2>/dev/null
+sleep .2
+. listdd.sh

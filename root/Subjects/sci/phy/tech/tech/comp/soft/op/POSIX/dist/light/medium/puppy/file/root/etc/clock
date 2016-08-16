@@ -1,0 +1,2 @@
+#this is read/written by /usr/sbin/quicksetup, timezone-set
+HWCLOCKTIME=localtime

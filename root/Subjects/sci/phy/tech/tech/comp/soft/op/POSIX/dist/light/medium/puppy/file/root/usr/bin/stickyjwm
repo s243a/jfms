@@ -1,0 +1,48 @@
+#!/bin/sh
+
+GTKDIALOG=gtkdialog
+
+#export TMPDIR=/tmp/gtkdialog/examples/"`basename $0`"
+#mkdir -p "$TMPDIR"
+
+export TEXTDOMAIN=sticky-jwm
+export OUTPUT_CHARSET=UTF-8
+. gettext.sh 
+
+MAIN_DIALOG='
+<window title="Sticky JWM by recobayu" window-position="1">
+	<vbox>
+	 <vbox>
+	        <text><label>"'"$(gettext "Sticky JWM allows you to ")"'"</label></text>
+         	<text><label>"'"$(gettext "use CTRL + ALT and the cursor keys")"'"</label></text>
+			<text><label>"'"$(gettext "to control window positions")"'"</label></text>
+			<text><label>-------------------</label></text>
+			<button tooltip-text="'"$(gettext "enable sticky JWM")"'">
+		        <label>"'"$(gettext "enable sticky JWM")"'"</label>
+		        <height>32</height>
+		        <width>32</width>
+		        <input file icon="stickysmiley"></input>
+                <action>/usr/local/stickyjwm/stickyjwmenable &</action>
+				<action>exit:Exit &</action>
+				</button>
+			</vbox>
+		<hbox>
+			<button cancel></button>
+			</hbox>
+	</vbox>
+</window>'
+GUI="
+<window>
+ <vbox>
+  <menubar>
+   ...
+  </menubar>
+ </vbox>
+ <action signal=\"hide\">exit:Exit</action>
+</window>"
+export MAIN_DIALOG
+
+case $1 in
+	-d | --dump) echo "$MAIN_DIALOG" ;;
+	*) $GTKDIALOG --program=MAIN_DIALOG ;;
+esac

@@ -1,0 +1,18 @@
+#!/bin/sh
+   APP='/usr/bin/palemoon.bin'
+#script to run $APP as spot...
+ARGS=""
+[ "$1" ] && while [ "$1" ]; do ARGS="$ARGS \"$1\""; shift; done
+if [ $(id -u) -eq 0 ]; then
+ [ $XAUTHORITY ] && cp $XAUTHORITY /root/spot/.Xauthority 2>/dev/null
+ touch /root/spot/.Xauthority
+ #following line is mostly there to catch any root:root files that may have got copied in...
+ find /root/spot \( -not -user spot -or -not -group spot \) -exec chown -h spot:spot {} \; &
+ export XAUTHORITY=/root/spot/.Xauthority  
+ export XDG_CONFIG_HOME=/root/spot/.config
+ export XDG_CACHE_HOME=/root/spot/.cache
+ export XDG_DATA_HOME=/root/spot/.local/share
+ exec su spot -s /bin/sh -c "\"$APP\" $ARGS"
+else #precaution
+ exec "$APP" "$ARGS"
+fi

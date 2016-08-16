@@ -1,0 +1,25 @@
+#!/bin/sh
+
+## Stu90 ##
+## drag the directory you wish to make ##
+## into  .pet onto then makepet script ##  
+
+MP="$@"
+DIR=`dirname "$MP" `
+PET=`basename "$MP" `
+
+DIALOG=Xdialog
+
+$DIALOG --wrap --title "Question"   --yesno "Do you want to create a pet package?" 0 0
+if [ "$?" -eq "1" ] ;then 
+exit 0
+fi
+
+
+cd "$DIR"
+
+    if [ -n "$PET" ]; then
+      dir2pet "$PET"
+    else
+      echo "Usage: drag [dir] onto makepet script "
+   fi

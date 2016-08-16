@@ -1,0 +1,1050 @@
+#!/bin/sh
+# rcrsn51 2013-04-28
+# tabbed format 2013-07-19
+
+export TEXTDOMAIN=peasydisc
+export OUTPUT_CHARSET=UTF-8
+
+#. gettext.sh   #old Puppies don't have this
+
+eval_gettext () {
+  local myMESSAGE=$(gettext "$1")
+  eval echo -n \"$myMESSAGE\"
+}
+export -f eval_gettext
+
+JOLIET () {
+  case "$COMPATLEVEL" in
+    XP) echo -n "-D -iso-level 4";;
+    95) echo -n "-J";;
+    *) echo -n "";;
+  esac
+}
+export -f JOLIET
+
+MAKELIST () {
+  DEFAULT=$1
+  LIST="<item>$DEFAULT</item>"
+  shift
+  for I in $@; do
+    [ $I != $DEFAULT ] && LIST=$LIST"<item>$I</item>"
+  done
+  echo -n $LIST
+}
+
+CHECKOUTFOLDER () {
+MNT=$(echo $OUTFOLDER | cut -d "/" -f 2)
+if [ "$MNT" = "mnt" ]; then
+  PART=$(echo $OUTFOLDER | cut -d "/" -f 3)
+  if [ ! "$PART" = "home" ]; then
+    cat /proc/mounts | cut -d " " -f 2 | grep -q "$PART"
+    if [ $? -gt 0 ]; then
+       Xdialog --title " " --msgbox "$(eval_gettext '$PART is not a mounted partition!')" 0 0
+       return 1
+    fi
+  fi
+fi
+mkdir -p $OUTFOLDER
+if [ ! -d "$OUTFOLDER" ]; then
+  Xdialog --title " " --msgbox "$(gettext 'Output folder not found!')" 0 0
+  return 1
+fi
+return 0
+}
+export -f CHECKOUTFOLDER
+
+CHECKSOURCEFOLDER () {
+if [ ! -d "$1" ]; then
+  Xdialog --title " " --msgbox "$(gettext 'Source folder not found!')" 0 0
+  return 1
+else
+  return 0
+fi
+}
+export -f CHECKSOURCEFOLDER
+
+CHECKDRIVEMOUNTED () {
+  cat /proc/mounts | grep -q $DRIVE
+  if [ $? -eq 0 ]; then
+    Xdialog --title " " --msgbox "$(eval_gettext 'Drive $DRIVE is mounted!')" 0 0
+    return 1
+  else
+    return 0
+ fi
+}
+export -f CHECKDRIVEMOUNTED
+
+SAVE_SETTINGS () {
+  echo $DRIVE,$SPEED,$OUTFOLDER,$COMPATLEVEL> $SETFILE
+  Xdialog --title " " --msgbox "$(eval_gettext 'Settings saved in $SETFILE')" 0 0
+}
+export -f SAVE_SETTINGS
+
+BLANK () {
+  if [ $CDFAST = "true" ]; then
+    echo "cdrecord blank=fast gracetime=0 $(SPEEDARG) dev=$DRIVE; $PRESS_ENTER" >/tmp/go.sh  
+  elif [ $CDFULL = "true" ]; then
+    echo "cdrecord blank=all gracetime=0 $(SPEEDARG) dev=$DRIVE; $PRESS_ENTER" >/tmp/go.sh  
+  elif [ $DVDFAST = "true" ]; then
+    touch /tmp/.null
+    echo "growisofs -Z $DRIVE -use-the-force-luke=notray -use-the-force-luke=notty $(SPEEDARG) -r $(JOLIET) -f /tmp/.null; $PRESS_ENTER" >/tmp/go.sh
+  fi
+  rxvt -e sh /tmp/go.sh
+}
+export -f BLANK
+
+FORMAT () {
+  echo "dvd+rw-format -force $DRIVE; $PRESS_ENTER" >/tmp/go.sh
+  rxvt -e sh /tmp/go.sh
+}
+export -f FORMAT
+
+SPEEDARG() {
+  if [ -z "$SPEED" -o "$SPEED" = "auto" ]; then
+    echo -n ""
+  else
+    echo -n "-speed=$SPEED"
+  fi
+}
+export -f SPEEDARG
+
+BURN () {
+
+  if [ ! -f "$ISOFILE" ]; then
+    Xdialog --title " " --msgbox "$(gettext 'ISO file not found!')" 0 0
+    exit
+  fi
+
+  CHECKDRIVEMOUNTED
+  [ $? -gt 0 ] && exit
+
+  if [ $DVD = "true" -a $BATCH = "true" ]; then
+    BATCHBURN
+    exit
+  fi
+
+  if [ $MULTI = "true" ]; then
+    MODE="-multi -tao padsize=300k -data"
+  else
+    MODE="-dao -data"	
+  fi
+ 
+  if [ $CD = "true" ]; then
+    echo "cdrecord -v $MODE gracetime=0 $(SPEEDARG) dev=$DRIVE \"$ISOFILE\"; $PRESS_ENTER" > /tmp/go.sh
+  elif [ $DVD = "true" ]; then
+    echo "growisofs -use-the-force-luke=notray -use-the-force-luke=notty $(SPEEDARG) -Z $DRIVE=\"$ISOFILE\"; $PRESS_ENTER" > /tmp/go.sh 
+  fi
+  rxvt -e sh /tmp/go.sh
+  eject $DRIVE
+}
+export -f BURN
+
+BATCHBURN () {
+  COPIES=$(Xdialog --title "DVD Batch Burn" --stdout --spinbox "$(gettext 'Number of copies to burn')" 10 30 1 10 1 "")
+  [ -z "$COPIES" ] && exit
+
+  for ((I=1; I<=$COPIES; ++I)); do
+    while [ 1 ]; do
+      dvd+rw-mediainfo $DRIVE >/dev/null 2>&1
+      [ $? -eq 0 ] && break
+      sleep 1
+    done
+    Xdialog --title " " --msgbox "$(eval_gettext 'Burning copy $I of $COPIES ...')" 0 0 &
+    MSGPID=$!
+    growisofs -use-the-force-luke=notray -use-the-force-luke=notty $(SPEEDARG) -Z $DRIVE="$ISOFILE"
+    kill $MSGPID
+    eject $DRIVE
+  done
+}
+export -f BATCHBURN
+
+VERIFY () {
+    if [ ! -f "$VERISOFILE" ]; then
+    Xdialog --title " " --msgbox "$(gettext 'ISO file not found!')" 0 0
+    exit
+  fi
+  umount /mnt/cdrom /mnt/data 2>/dev/null
+  mount -t iso9660 $DRIVE /mnt/cdrom
+  mount -o loop "$VERISOFILE" /mnt/data;
+  echo "echo Verifying...; diff -r /mnt/cdrom /mnt/data; $PRESS_ENTER" > /tmp/go.sh
+  rxvt -e sh /tmp/go.sh
+  umount /mnt/cdrom /mnt/data;
+}
+export -f VERIFY
+
+WRITE () {
+
+  CHECKOUTFOLDER
+  [ $? -gt 0 ] && exit
+
+  CHECKDRIVEMOUNTED
+  [ $? -gt 0 ] && exit
+
+  if [ ! -f "$DVDSOURCE" ]; then	# allow a single file to be written
+    CHECKSOURCEFOLDER "$DVDSOURCE"
+    [ $? -gt 0 ] && exit
+  fi
+
+  dvd+rw-mediainfo $DRIVE		# check disc
+  RETVAL=$?
+
+  if [ $RETVAL -eq 0 ]; then		# DVD/BR
+
+    [ $NEW2DVD = "true" ] && MODE="-Z"
+    [ $ADD2DVD = "true" ] && MODE="-M"
+    echo "growisofs $MODE $DRIVE -use-the-force-luke=notray -use-the-force-luke=notty $(SPEEDARG) -r $(JOLIET) -f \"$DVDSOURCE\"; $PRESS_ENTER" > /tmp/go.sh
+  
+  elif [ $RETVAL -eq 252 ]; then	# CD
+    
+    INFO=$(cdrecord dev=$DRIVE -msinfo)
+    [ $NEW2DVD = "true" ] && MODE="" 
+    [ $ADD2DVD = "true" ] && MODE="-C $INFO -M $DRIVE"
+    echo "mkisofs -r $(JOLIET) -f $MODE -o $OUTFOLDER/tmp.iso \"$DVDSOURCE\"; cdrecord gracetime=0 $(SPEEDARG) dev=$DRIVE -v -multi -data $OUTFOLDER/tmp.iso; $PRESS_ENTER" > /tmp/go.sh
+
+  else
+    Xdialog --title " " --msgbox "$(eval_gettext 'No disc detected in $DRIVE')" 0 0
+    exit;
+  fi
+
+  rxvt -e sh /tmp/go.sh
+  eject $DRIVE
+  rm -f $OUTFOLDER/tmp.iso
+}
+export -f WRITE
+
+MAKEISO () {
+
+  CHECKOUTFOLDER
+  [ $? -gt 0 ] && exit
+
+  CHECKSOURCEFOLDER "$SOURCEFOLDER1"
+  [ $? -gt 0 ] && exit
+
+  if [ $ISOLINUX = "true" ]; then
+    if [ ! -f $SOURCEFOLDER1/isolinux.bin ]; then
+       Xdialog --title " " --msgbox "$(gettext 'The source folder must contain these files:\nisolinux.bin from /usr/lib/syslinux\nisolinux.cfg\n eg. `default vmlinuz initrd=initrd.gz pmedia=cd`')" 0 0
+       exit
+    fi 
+  fi
+
+  if [ $GRLDR = "true" ]; then
+    if [ ! -f $SOURCEFOLDER1/grldr ]; then
+      Xdialog --title " " --msgbox "$(gettext 'The source folder must contain these files:\n grldr from /usr/lib/grub4dos\nmenu.lst')" 0 0
+      exit
+    fi 
+  fi
+
+  if [ $NOBOOT = "true" ]; then
+    echo "mkisofs -r $(JOLIET) -f -o $OUTFOLDER/$NEWISO \"$SOURCEFOLDER1\"; $PRESS_ENTER" > /tmp/go.sh
+  elif [ $ISOLINUX = "true" ]; then
+    echo "mkisofs -r $(JOLIET) -f -b isolinux.bin -c boot.cat -no-emul-boot -boot-load-size 4 -boot-info-table -o $OUTFOLDER/$NEWISO $SOURCEFOLDER1; $PRESS_ENTER" > /tmp/go.sh
+  elif [ $GRLDR = "true" ]; then
+    echo "mkisofs -r $(JOLIET) -f -b grldr -c boot.cat -no-emul-boot -boot-load-size 4 -boot-info-table -o $OUTFOLDER/$NEWISO $SOURCEFOLDER1; $PRESS_ENTER" > /tmp/go.sh
+  fi
+  rxvt -e sh /tmp/go.sh
+  if [ -f "$OUTFOLDER/$NEWISO" ]; then
+    Xdialog --title " " --msgbox "$(eval_gettext 'ISO saved as $OUTFOLDER/$NEWISO')" 0 0
+  else
+    Xdialog --title " " --msgbox "$(gettext 'ISO not created!')" 0 0 
+  fi
+}
+export -f MAKEISO
+
+RIPISO () {
+
+  CHECKOUTFOLDER
+  [ $? -gt 0 ] && exit
+
+  BS=$(isoinfo -d dev=$DRIVE | grep "block size" | awk '{print $5}')
+  COUNT=$(isoinfo -d dev=$DRIVE | grep "Volume size" | awk '{print $4}')
+
+  DDARG=""
+  [ -n "$COUNT" ] && DDARG="bs=$BS count=$COUNT"
+
+  echo "echo Ripping...; dd if=$DRIVE of=$OUTFOLDER/$NEWISO $DDARG; $PRESS_ENTER" > /tmp/go.sh
+  rxvt -e sh /tmp/go.sh
+  if [ -f "$OUTFOLDER/$NEWISO" ]; then
+    Xdialog --title " " --msgbox "$(eval_gettext 'ISO saved as $OUTFOLDER/$NEWISO')" 0 0
+  else
+    Xdialog --title " " --msgbox "$(gettext 'ISO not created!')" 0 0 
+  fi
+}
+export -f RIPISO
+
+RIP () {
+  
+  CHECKOUTFOLDER
+  [ $? -gt 0 ] && exit
+
+  if [ "$TRACKS" = "${TRACKS//[^0-9]/}" ]; then	# all digits
+    TRACKS=$TRACKS"+"$TRACKS			# N becomes N+N
+  else
+    TRACKS=${TRACKS/-/+}			# N- become N+ and N-M become N+M
+  fi
+
+  MODE=""
+  [ "$TITLES" = "true" ] && MODE="-L 1"
+  [ "$PARANOIA" = "true" ] && MODE=$MODE" -paranoia"
+ 
+  echo "cd $OUTFOLDER; cdda2wav $MODE -t $TRACKS -B -D $DRIVE ; sync; $PRESS_ENTER" > /tmp/go.sh
+  rxvt -e sh /tmp/go.sh
+
+  cd $OUTFOLDER
+  for T in audio*.wav; do
+    INF=${T%.wav}.inf  
+    TITLE=$(grep "Tracktitle" $INF | cut -f 2 | tr -d "'")
+    TITLE=$(echo -n $TITLE | tr -c [:alnum:] " ")
+    if [ -n "$TITLE" ]; then
+      mv $T "${TITLE}.wav"
+    else
+      if [ "$T" = "audio.wav" ]; then		# just one track ripped
+        NUM=$(grep "Tracknumber" $INF | cut -f 2)
+        NUM=$(printf "%02d" $NUM)
+        mv $T "track_"$NUM".wav"
+      else
+	mv $T ${T/audio/track}
+      fi
+    fi
+  done
+  rm *.inf *.cddb *.cdindex
+  Xdialog --title " " --msgbox "$(eval_gettext 'WAV files saved in $OUTFOLDER')" 0 0
+}
+export -f RIP
+
+CONVERT () {
+
+  CHECKOUTFOLDER
+  [ $? -gt 0 ] && exit
+
+  CHECKSOURCEFOLDER "$SOURCEFOLDER2"
+  [ $? -gt 0 ] && exit
+
+  if [ $WAV2MP3 = "true" ]; then
+    echo 'cd "$SOURCEFOLDER2"; for F in *.wav ; do F=${F%.wav}; lame -h "$F.wav" "$OUTFOLDER/$F.mp3"; done; eval $PRESS_ENTER' > /tmp/go.sh
+  elif [ $MP32WAV = "true" ]; then
+    echo 'cd "$SOURCEFOLDER2"; for F in *.mp3 ; do echo $F; F=${F%.mp3}; lame --decode "$F.mp3" "$OUTFOLDER/$F.wav"; done; eval  $PRESS_ENTER' > /tmp/go.sh
+  fi
+  rxvt -e sh /tmp/go.sh
+  Xdialog --title " " --msgbox "$(eval_gettext 'Converted files are in $OUTFOLDER')" 0 0
+}
+export -f CONVERT
+
+BURNCD () {
+  CHECKSOURCEFOLDER "$TRACKFOLDER"
+  [ $? -gt 0 ] && exit
+
+  echo "cd \"$TRACKFOLDER\"; cdrecord -v gracetime=0 $(SPEEDARG) dev=$DRIVE -audio -pad *.wav; $PRESS_ENTER" > /tmp/go.sh
+  rxvt -e sh /tmp/go.sh
+  eject $DRIVE
+}
+export -f BURNCD
+
+EJECT () {
+  eject $DRIVE
+}
+export -f EJECT
+
+HELP () {
+  Xdialog --left --wrap --title "$(gettext 'Help')" --msgbox "$(gettext 'Pick a location for your Output Folder in a partition with lots of space, probably NOT in /root. A good choice is a mounted flash drive, like /mnt/sdb1.\n\nClick the View button for quick access to your Output Folder.\n\nUnlike CD-RWs, rewritable DVDs do NOT need to be blanked before burning. However, new DVD-RWs need an initial formatting. DVD+RWs are OK.\n\nTo write data to a CD/DVD/BD, you must first collect the files and folders into a temporary Source Folder. Use Link instead of Copy to save space. If the data is already organized in a folder, use it as the source. You can also write a single file.\n\nTo copy an audio CD, rip tracks "1-" and uncheck "Titles". Then burn using your output folder as the source.')" 0 70 
+}
+export -f HELP
+
+NEWSHOW () { 
+  if [ ! $(which pnmpad) ]; then
+    Xdialog --title " " --msgbox "$(gettext 'You must install the Extras package!')" 0 0 
+    exit
+  fi
+
+  CHECKOUTFOLDER
+  [ $? -gt 0 ] && exit
+
+  rm -rf $OUTFOLDER/SS
+  mkdir $OUTFOLDER/SS
+  mkdir $OUTFOLDER/SS/pics
+  echo "0" > $OUTFOLDER/SS/.filecounter
+  echo > $HOME/.peasyslideshow
+  Xdialog --title " " --msgbox "$(eval_gettext 'New project started in $OUTFOLDER/SS\nSee it with the View button')" 0 0
+}
+export -f NEWSHOW
+
+ONEADD () {
+  file "$1" | grep -q "JPEG"
+  [ $? -gt 0 ] && return	
+	
+  case $SCREENSIZE in
+    4:3) FRAMEWIDTH=720;;
+    16:9) FRAMEWIDTH=840;;
+  esac
+  FRAMEHEIGHT=480
+
+  FC=$(cat $OUTFOLDER/SS/.filecounter)
+  ((++FC))
+  echo $FC > $OUTFOLDER/SS/.filecounter
+
+  Xdialog --title " " --msgbox "$(gettext 'Adding ...')" 0 0 &
+  MSGPID=$!  
+
+  jpegtopnm "$1" | pamscale -xyfit $((FRAMEWIDTH-SHRINKPIXELS)) $((FRAMEHEIGHT-SHRINKPIXELS)) - | pnmpad -black -width $FRAMEWIDTH -height $FRAMEHEIGHT | pnmtojpeg > $OUTFOLDER/SS/pics/"img"$(printf "%3.3d" $FC)".jpg"
+
+  kill $MSGPID
+  echo $(basename "$1") > $HOME/.peasyslideshow
+} 
+export -f ONEADD
+
+ADDSLIDE () {
+  if [ ! -f $OUTFOLDER/SS/.filecounter ]; then
+    Xdialog --title " "  --msgbox "$(gettext 'Please start a new project!')" 0 0
+    exit
+  fi
+
+  if [ -d "$SLIDEFILE" ]; then
+    for F in "$SLIDEFILE"/*; do
+      ONEADD "$F"
+    done
+  elif [ -f "$SLIDEFILE" ]; then
+    ONEADD "$SLIDEFILE"
+  else
+    Xdialog --title " "  --msgbox "$(gettext 'File not found!')" 0 0
+  fi
+}
+export -f ADDSLIDE
+
+TARGET () {
+  case "$VIDEOSTANDARD" in
+    NTSC) echo -n "ntsc-dvd";;
+    PAL)  echo -n "pal-dvd";;
+  esac
+}
+export -f TARGET
+
+BUILDSHOW() {
+  ls $OUTFOLDER/SS/pics/*.jpg > /dev/null
+  if [ $? -gt 0 ]; then
+    Xdialog --title " " --msgbox "$(gettext 'Nothing to build!')" 0 0 
+    exit
+  fi
+
+  Xdialog --title " " --msgbox "$(gettext 'Building ... this will take a while ...')" 0 0 &
+  MSGPID=$!
+  
+  cp $OUTFOLDER/SS/pics/img001.jpg $OUTFOLDER/SS/pics/img000.jpg
+    
+  ASPECTARG=""
+  [ $VOB = "true" ] && ASPECTARG="-aspect $SCREENSIZE"
+  
+  rm -f $OUTFOLDER/SS/SLIDESHOW.VOB $OUTFOLDER/SS/SLIDESHOW.ISO
+  
+  if [ -f "$AUDIOTRACK" ]; then
+    ffmpeg -i "$AUDIOTRACK" -r 1/$FRAMESPEED -i $OUTFOLDER/SS/pics/img%03d.jpg -target $(TARGET) $ASPECTARG -shortest $OUTFOLDER/SS/SLIDESHOW.VOB
+  else
+    ffmpeg -r 1/$FRAMESPEED -i $OUTFOLDER/SS/pics/img%03d.jpg -target $(TARGET) $ASPECTARG $OUTFOLDER/SS/SLIDESHOW.VOB
+  fi
+  
+  cat > $OUTFOLDER/SS/dvd.xml << EOF
+  <dvdauthor>
+    <vmgm />
+    <titleset>
+        <titles>
+            <pgc>
+                <vob file="$OUTFOLDER/SS/SLIDESHOW.VOB"/>
+                <post>
+                    jump chapter 1;
+                </post>
+            </pgc>
+        </titles>
+    </titleset>
+</dvdauthor>
+EOF
+      
+  rm -rf $OUTFOLDER/SS/dvd
+  dvdauthor -o $OUTFOLDER/SS/dvd -x $OUTFOLDER/SS/dvd.xml
+  mkisofs -dvd-video -o $OUTFOLDER/SS/SLIDESHOW.ISO $OUTFOLDER/SS/dvd; 
+
+  kill $MSGPID
+  Xdialog --title " " --msgbox "$(eval_gettext 'Project saved as $OUTFOLDER/SS/SLIDESHOW.ISO\nPreview this file (or the VOB) in your media player.\nThen burn the ISO to DVD as usual.')" 0 0
+}
+export -f BUILDSHOW
+
+SSHELP () {
+  defaultbrowser http://murga-linux.com/puppy/viewtopic.php?p=724461#724461 &
+}
+export -f SSHELP
+
+VIEWOUTFOLDER () {
+  CHECKOUTFOLDER
+  [ $? -gt 0 ] && exit
+  rox $OUTFOLDER
+}
+export -f VIEWOUTFOLDER
+
+MAKEBLANKJPEG () {
+  CHECKOUTFOLDER
+  [ $? -gt 0 ] && exit
+
+  if [ ! $(which pbmmake) ]; then
+    Xdialog --title " " --msgbox "$(gettext 'You must install the Extras package!')" 0 0 
+    exit
+  fi
+  
+  pbmmake -$JPEGCOLOUR 720 480 | pnmtojpeg > $OUTFOLDER/BLANKJPEG.JPG
+  Xdialog --title " " --msgbox "$(eval_gettext 'Blank JPEG saved as $OUTFOLDER/BLANKJPEG.JPG')" 0 0 
+}
+export -f MAKEBLANKJPEG
+
+MAKEBLANKMP3 () {
+  CHECKOUTFOLDER
+  [ $? -gt 0 ] && exit
+
+  Xdialog --title " " --msgbox "$(gettext 'Working ...')" 0 0 &
+  MSGPID=$!
+  
+  rm $OUTFOLDER/temp.wav
+  ffmpeg -ar 48000 -t $MP3LENGTH -f s16le -acodec pcm_s16le -ac 2 -i /dev/zero -acodec copy $OUTFOLDER/temp.wav
+  lame $OUTFOLDER/temp.wav $OUTFOLDER/BLANKMP3-$MP3LENGTH.MP3
+  rm $OUTFOLDER/temp.wav
+
+  kill $MSGPID
+  Xdialog --title " " --msgbox "$(eval_gettext 'Blank MP3 saved as $OUTFOLDER/BLANKMP3-$MP3LENGTH.MP3')" 0 0 
+}
+export -f MAKEBLANKMP3
+
+AUDIOCHECK () {
+
+  if [ ! -f "$AUDIOCHECKFILE" ]; then
+    Xdialog --title " " --msgbox "$(gettext 'Source file not found!')" 0 0
+    exit
+  fi
+
+  NOT=""
+  ffmpeg -i "$AUDIOCHECKFILE" 2>&1 | grep -q "Audio"
+  if [ $? -gt 0 ]; then 
+    Xdialog --title " " --msgbox "$(gettext 'Audio track NOT found!')" 0 0
+  else
+    DURATION=$(ffmpeg -i "$AUDIOCHECKFILE" 2>&1 | grep "Duration" | cut -d ":" -f 3-4 | cut -d "." -f 1)
+    Xdialog --title " " --msgbox "$(eval_gettext 'Length (min:sec) $DURATION')" 0 0
+  fi
+}
+export -f AUDIOCHECK
+
+CONCATNEW () {
+  echo -n "concat:" > $CONCATLIST
+  Xdialog --title " " --msgbox "$(gettext 'New list started.')" 0 0
+}
+export -f CONCATNEW
+
+CONCATADD () {
+  if [ -f "$CONCATFILE" ]; then 
+    echo -n $CONCATFILE"|" >> $CONCATLIST
+    SHORTNAME=$(basename "$CONCATFILE")
+    Xdialog --title " " --info "$(eval_gettext '$SHORTNAME added to list.')" 0 0 2000
+  fi
+}
+export -f CONCATADD
+
+CONCATMP3 () {
+   
+  CHECKOUTFOLDER
+  [ $? -gt 0 ] && exit
+
+  LIST=$(cat $CONCATLIST)
+  if [ -z "$LIST" -o "$LIST" = "concat:" ]; then
+    Xdialog --title " " --msgbox "$(gettext 'No files added!')" 0 0
+    exit
+  fi
+
+  Xdialog --title " " --msgbox "$(gettext 'Working ...')" 0 0 &
+  MSGPID=$!
+  
+  eval ffmpeg -y -i \"$LIST\" -acodec copy $OUTFOLDER/JOINEDMP3.MP3
+
+  kill $MSGPID
+  Xdialog --title " " --msgbox "$(eval_gettext 'Joined MP3 saved as $OUTFOLDER/JOINEDMP3.MP3')" 0 0 
+  
+}
+export -f CONCATMP3
+
+KILL () {
+  kill $(ps | grep BURN | awk '{print $1}') 2>/dev/null
+  killall growisofs mkisofs cdrecord ffmpeg 2> /dev/null
+}
+export -f KILL
+
+############ End of Functions ############################################3
+
+export SETFILE=$HOME/.peasydisc
+[ ! -f $SETFILE ] && echo "/dev/sr0,auto,/mnt/home/peasydisc,XP" > $SETFILE
+
+I=$IFS; IFS=","
+read DEF_DRIVE DEF_SPEED DEF_OUTFOLDER DEF_COMPATLEVEL< $SETFILE
+IFS=$I
+
+[ -z "$DEF_DRIVE" ] && DEF_DRIVE=\"\"
+[ -z "$DEF_SPEED" ] && DEF_SPEED=\"\"
+[ -z "$DEF_OUTFOLDER" ] && DEF_OUTFOLDER=\"\"
+[ -z "$DEF_COMPATLEVEL" ] && DEF_COMPATLEVEL=\"\"
+
+export NEWISO=newiso.iso
+export CONCATLIST=/tmp/concatlist
+
+export PRESS_ENTER="echo; read -p \"$(gettext 'Press Enter') \""
+
+export PROG="
+<window title=\"PeasyDisc v3.0\">
+<vbox>
+<notebook labels=\"$(gettext 'Basic|Advanced|Audio|Video|Tools')\">
+<vbox>
+  <frame $(gettext 'Settings')>
+    <hbox>
+      <text><label>$(gettext 'Optical Drive')  </label></text>
+      <combobox>
+        <variable>DRIVE</variable>
+        $(MAKELIST $DEF_DRIVE /dev/sr0 /dev/sr1 /dev/sr2)
+      </combobox>
+    </hbox>
+    <hbox>
+      <text><label>$(gettext 'Burn Speed')  </label></text>
+      <combobox>  
+        <variable>SPEED</variable>
+        $(MAKELIST $DEF_SPEED auto 32 16 8 4 2)
+      </combobox>
+    </hbox>
+    <hbox>
+      <text><label>$(gettext 'Compatibility')  </label></text>
+      <combobox>  
+        <variable>COMPATLEVEL</variable>
+        $(MAKELIST $DEF_COMPATLEVEL XP 95 DOS)
+      </combobox>
+    </hbox>
+    <hbox>
+      <text><label>$(gettext 'Output Folder')</label></text>
+      <entry>
+        <variable>OUTFOLDER</variable>
+        <default>$DEF_OUTFOLDER</default>
+      </entry>
+      <button>
+        <label>$(gettext 'Save')</label>
+        <action>SAVE_SETTINGS &</action>
+      </button>
+    </hbox>
+  </frame>  
+  <frame $(gettext 'Blank a rewritable disc (read the Help)')>
+    <hbox>
+      <radiobutton> 
+        <variable>CDFAST</variable>
+        <label>$(gettext 'CD-Fast')</label>
+      </radiobutton>
+      <radiobutton> 
+        <variable>CDFULL</variable>
+        <label>$(gettext 'CD-Full')</label>
+      </radiobutton>
+      <radiobutton> 
+        <variable>DVDFAST</variable>
+        <label>$(gettext 'DVD-Fast')</label>
+      </radiobutton>
+      <button>
+        <label>$(gettext 'Blank')</label>
+        <action>BLANK &</action>
+      </button>
+    </hbox>
+    <hbox>
+      <text><label>$(gettext 'Format a new DVD-RW')</label></text>
+      <button>
+        <label>$(gettext 'Format')</label>
+        <action>FORMAT &</action>
+      </button>
+    </hbox>
+  </frame>
+  <frame $(gettext 'Burn an ISO (drag an ISO file into this box)')>
+    <hbox>
+      <entry accept=\"filename\">
+        <variable>ISOFILE</variable>
+       </entry>
+      <button>
+        <input file stock=\"gtk-open\"></input>
+        <action type=\"fileselect\">ISOFILE</action>
+      </button>
+    </hbox>
+    <hbox>
+      <radiobutton> 
+        <variable>CD</variable>
+        <label>$(gettext 'CD')</label>
+      </radiobutton>
+      <text><label>+</label></text>
+      <checkbox>
+        <label>$(gettext 'Multisession')</label>
+        <variable>MULTI</variable>
+      </checkbox>
+      <radiobutton> 
+        <variable>DVD</variable>
+        <label>$(gettext 'DVD')</label>
+      </radiobutton>
+      <text><label>+</label></text>
+      <checkbox>
+        <label>$(gettext 'Batch')</label>
+        <variable>BATCH</variable>
+      </checkbox>
+      <button>
+        <label>$(gettext 'Burn')</label>
+        <action>BURN &</action>
+      </button>
+    </hbox>
+  </frame>
+</vbox>
+<vbox>
+<frame $(gettext 'Write data to CD/DVD/BD (drag the source folder/file here)')>
+    <hbox>
+      <entry accept=\"directory\">
+         <variable>DVDSOURCE</variable>
+       </entry>
+      <button>
+        <input file stock=\"gtk-open\"></input>
+        <action type=\"fileselect\">DVDSOURCE</action>
+      </button>
+    </hbox>
+    <hbox>
+      <radiobutton> 
+        <variable>NEW2DVD</variable>
+        <label>$(gettext 'New Disc')</label>
+      </radiobutton>
+      <radiobutton> 
+        <variable>ADD2DVD</variable>
+        <default>true</default>
+        <label>$(gettext 'Add to Disc')</label>
+      </radiobutton>
+      <button>
+        <label>$(gettext 'Write')</label>
+        <action>WRITE &</action>
+      </button>
+    </hbox>
+  </frame>
+  <frame $(gettext 'Make an ISO (drag the source folder here)')>
+    <hbox>
+      <entry accept=\"directory\">
+         <variable>SOURCEFOLDER1</variable>
+       </entry>
+      <button>
+        <input file stock=\"gtk-open\"></input>
+        <action type=\"fileselect\">SOURCEFOLDER1</action>
+      </button>
+    </hbox>
+    <hbox>
+      <text><label>$(gettext 'Boot method:')</label></text>
+      <radiobutton> 
+        <variable>NOBOOT</variable>
+        <label>$(gettext 'None')</label>
+      </radiobutton>
+      <radiobutton> 
+        <variable>ISOLINUX</variable>
+        <label>$(gettext 'Isolinux')</label>
+      </radiobutton>
+      <radiobutton> 
+        <variable>GRLDR</variable>
+        <label>$(gettext 'Grldr')</label>
+      </radiobutton>
+      <button>
+        <label>$(gettext 'Make')</label>
+        <action>MAKEISO &</action>
+      </button>
+    </hbox>
+  </frame>
+  <frame $(gettext 'Rip a CD/DVD back into an ISO (use for disc copying)')>
+    <hbox>
+      <text><label>$(gettext 'Load the disc and click when ready')</label></text>
+      <button>
+        <label>$(gettext 'Rip')</label>
+        <action>RIPISO &</action>
+      </button>
+    </hbox>
+  </frame>
+  <frame $(gettext 'Verify a disc (Select an ISO file and load the disc)')>
+    <hbox>
+      <entry accept=\"filename\">
+        <variable>VERISOFILE</variable>
+       </entry>
+      <button>
+        <input file stock=\"gtk-open\"></input>
+        <action type=\"fileselect\">VERISOFILE</action>
+      </button>
+      <button>
+        <label>$(gettext 'Verify')</label>
+        <action>VERIFY &</action>
+      </button>
+    </hbox>
+  </frame>
+  <hbox><text><label>\" \"</label></text></hbox>
+</vbox>
+<vbox>
+  <frame $(gettext 'Rip tracks from an audio CD (select tracks)')>
+    <hbox>
+      <text><label>$(gettext 'Track'): N or N- or N-M </label></text>
+      <entry>
+        <variable>TRACKS</variable>
+        <default>1</default>
+      </entry>
+    </hbox>
+    <hbox>
+      <checkbox>
+        <label>$(gettext 'Repair')</label>
+        <variable>PARANOIA</variable>
+      </checkbox>
+      <text><label>\" \"</label></text>
+      <checkbox>
+        <label>$(gettext 'Titles')</label>
+        <variable>TITLES</variable>
+        <default>true</default>
+      </checkbox>
+      <text><label>\" \"</label></text>
+      <button>
+        <label>$(gettext 'Rip')</label>
+        <action>RIP &</action>
+      </button>
+    </hbox>
+  </frame>
+  <frame $(gettext 'Convert audio file format (drag the source folder here)')>
+    <hbox>
+      <entry accept=\"directory\">
+         <variable>SOURCEFOLDER2</variable>
+       </entry>
+      <button>
+        <input file stock=\"gtk-open\"></input>
+        <action type=\"fileselect\">SOURCEFOLDER2</action>
+      </button>
+    </hbox>
+    <hbox>
+      <radiobutton> 
+        <variable>WAV2MP3</variable>
+        <label>$(gettext 'WAV to MP3')</label>
+      </radiobutton>
+      <radiobutton> 
+        <variable>MP32WAV</variable>
+        <label>$(gettext 'MP3 to WAV')</label>
+      </radiobutton>
+      <button>
+        <label>$(gettext 'Convert')</label>
+        <action>CONVERT &</action>
+      </button>
+    </hbox>
+  </frame>
+  <frame $(gettext 'Burn WAV files to an audio CD (drag the source folder here)')>
+    <hbox>
+      <entry accept=\"directory\">
+         <variable>TRACKFOLDER</variable>
+       </entry>
+      <button>
+        <input file stock=\"gtk-open\"></input>
+        <action type=\"fileselect\">TRACKFOLDER</action>
+      </button>
+      <button>
+        <label>$(gettext 'Burn')</label>
+        <action>BURNCD &</action>
+      </button>
+    </hbox>
+  </frame>
+  <hbox><text><label>\" \"</label></text></hbox>
+  <hbox><text><label>\" \"</label></text></hbox>
+  <hbox><text><label>\" \"</label></text></hbox>
+  <hbox><text><label>\" \"</label></text></hbox>
+ </vbox>
+ <vbox>
+  <frame $(gettext 'Build a DVD slideshow')>
+    <hbox>
+      <text><label>$(gettext 'Screen size')  </label></text>
+      <combobox>
+        <variable>SCREENSIZE</variable>
+        <item>4:3</item><item>16:9</item>
+      </combobox>
+    </hbox>
+    <hbox>
+      <text><label>$(gettext 'Shrink to fit (pixels)')  </label></text>
+      <combobox>
+        <variable>SHRINKPIXELS</variable>
+        <item>0</item><item>10</item><item>20</item><item>30</item><item>40</item>
+      </combobox>
+    </hbox>
+    <hbox>
+      <text><label>$(gettext 'Seconds per frame')  </label></text>
+      <combobox>
+        <variable>FRAMESPEED</variable>
+        <item>5</item><item>10</item><item>15</item><item>20</item>
+      </combobox>
+    </hbox>
+    <hbox>
+      <text><label>$(gettext 'Video standard')  </label></text>
+      <combobox>
+        <variable>VIDEOSTANDARD</variable>
+        <item>NTSC</item><item>PAL</item>
+      </combobox>
+    </hbox>
+    <hbox>
+      <text><label>$(gettext 'Audio track (optional)')</label></text>
+      <entry accept=\"filename\">
+        <variable>AUDIOTRACK</variable>
+      </entry>
+      <button>
+        <input file stock=\"gtk-open\"></input>
+        <action type=\"fileselect\">AUDIOTRACK</action>
+      </button>
+    </hbox>
+  </frame>
+  <frame $(gettext 'Add a JPEG image (or drag in a folder of JPEGs)')>
+    <hbox>
+      <entry accept=\"filename\">
+        <variable>SLIDEFILE</variable>
+       </entry>
+      <button>
+        <input file stock=\"gtk-open\"></input>
+        <action type=\"fileselect\">SLIDEFILE</action>
+      </button>
+    </hbox>
+  </frame>
+  <hbox>
+     <button>
+      <label>$(gettext 'Help')</label>
+      <action>SSHELP &</action>
+     </button>
+     <hbox><text><label>\"   \"</label></text></hbox>
+     <checkbox>
+       <label>$(gettext 'VOB')</label>
+       <variable>VOB</variable>
+       <default>false</default>
+     </checkbox>
+     <hbox><text><label>\"   \"</label></text></hbox>
+     <button>
+      <label>$(gettext 'New')</label>
+      <action>NEWSHOW</action>
+      <action>Refresh:LASTIMAGEADDED</action>
+    </button>
+    <button>
+      <label>$(gettext 'Add')</label>
+      <action>ADDSLIDE</action>
+      <action>Clear:SLIDEFILE</action>
+      <action>Refresh:LASTIMAGEADDED</action>
+    </button>
+    <button>
+      <label>$(gettext 'Build')</label>
+      <action>BUILDSHOW &</action>
+    </button>
+  </hbox>
+  <hbox>
+      <text><label>$(gettext 'Last image added')</label></text>
+      <entry>
+        <variable>LASTIMAGEADDED</variable>
+        <input>cat $HOME/.peasyslideshow</input>
+      </entry>
+  </hbox>
+  <hbox><text><label>\" \"</label></text></hbox>
+ </vbox>
+ <vbox>
+  <frame $(gettext 'Make a blank MP3 file')>
+    <hbox>
+      <text><label>$(gettext 'Length (seconds)') </label></text>
+      <combobox>
+        <variable>MP3LENGTH</variable>
+        <item>5</item><item>10</item><item>30</item><item>60</item>
+      </combobox>
+      <button>
+        <label>$(gettext 'Make')</label>
+        <action>MAKEBLANKMP3 &</action>
+      </button>
+    </hbox>
+  </frame>
+  <frame $(gettext 'Make a blank JPEG file')>
+    <hbox>
+      <text><label>$(gettext 'Colour') </label></text>
+      <combobox>
+        <variable>JPEGCOLOUR</variable>
+        <item>black</item><item>white</item>
+      </combobox>
+      <button>
+        <label>$(gettext 'Make')</label>
+        <action>MAKEBLANKJPEG &</action>
+      </button>
+    </hbox>
+  </frame>
+  <frame $(gettext 'Check the length of an audio track')>
+    <hbox>
+      <entry accept=\"filename\">
+         <variable>AUDIOCHECKFILE</variable>
+      </entry>
+      <button>
+        <input file stock=\"gtk-open\"></input>
+        <action type=\"fileselect\">AUDIOCHECKFILE</action>
+      </button>
+      <button>
+        <label>$(gettext 'Check')</label>
+        <action>AUDIOCHECK &</action>
+      </button>
+    </hbox>
+  </frame>
+  <frame $(gettext 'Join several MP3 files')>
+    <hbox>
+      <entry accept=\"filename\">
+         <variable>CONCATFILE</variable>
+      </entry>
+      <button>
+        <input file stock=\"gtk-open\"></input>
+        <action type=\"fileselect\">CONCATFILE</action>
+      </button>
+    </hbox>
+    <hbox>
+      <button>
+        <label>$(gettext 'New')</label>
+        <action>CONCATNEW</action>
+      </button>
+      <button>
+        <label>$(gettext 'Add')</label>
+        <action>CONCATADD</action>
+        <action>Clear:CONCATFILE</action>
+      </button>
+      <button>
+        <label>$(gettext 'Join')</label>
+        <action>CONCATMP3 &</action>
+      </button>
+    </hbox>
+  </frame>
+  <text><label>\"      \"</label></text>
+  <text><label>\"      \"</label></text>
+  <text><label>\"      \"</label></text>
+ </vbox>
+</notebook>
+<hbox>
+    <button>
+      <label>$(gettext 'Help')</label>
+      <action>HELP &</action>
+    </button>
+    <text><label>\"      \"</label></text>
+    <button>
+      <label>$(gettext 'Kill')</label>
+      <action>KILL &</action>
+    </button>
+    <button>
+       <label>$(gettext 'Clear')</label>
+       <action>Clear:ISOFILE</action>
+       <action>Clear:SOURCEFOLDER1</action>
+       <action>Clear:DVDSOURCE</action>
+       <action>Clear:VERISOFILE</action>
+       <action>Clear:SOURCEFOLDER2</action>
+       <action>Clear:TRACKS</action>
+       <action>Clear:TRACKFOLDER</action>
+       <action>Clear:SLIDEFILE</action>
+       <action>rm -f $HOME/.peasyslideshow</action>
+       <action>Clear:LASTIMAGEADDED</action>
+       <action>Clear:AUDIOCHECKFILE</action>
+       <action>Clear:CONCATFILE</action>
+    </button>
+    <button>
+      <label>$(gettext 'View')</label>
+      <action>VIEWOUTFOLDER &</action>
+    </button>
+    <button>
+      <label>$(gettext 'Eject')</label>
+      <action>EJECT</action>
+    </button>
+    <button><label>$(gettext 'Quit')</label></button>
+  </hbox>
+</vbox>
+</window>
+"
+
+gtkdialog3 -c --program PROG
+KILL

@@ -1,0 +1,776 @@
+#!/bin/bash
+#jwmthememaker
+#Copyright 2009 GPL
+#Trio Tjandradjaja
+#20130329 i18n L18L
+#new features & bugfixes in 2014 - Trio
+
+export TEXTDOMAIN=jwmthememaker
+export OUTPUT_CHARSET=UTF-8
+
+chooseCOLOR="$(gettext 'Please_choose_a_color')"
+fillALL="$(gettext 'Please fill in all color boxes')"
+
+case "$2" in
+	1)
+	number=1
+	;;
+	2)
+	number=2
+	;;
+	3)
+	number=3
+	;;
+	4)
+	number=4
+	;;
+	5)
+	number=5
+	;;
+	6)
+	number=6
+	;;
+	7)
+	number=7
+	;;
+	8)
+	number=8
+	;;
+	9)
+	number=9
+	;;
+	10)
+	number=10
+	;;
+	
+	esac
+
+case "$1" in
+
+-rgb2hex)
+	rgb2hexscript `cat /tmp/color.tmp` > /tmp/color.tmp
+	HEX=`cat /tmp/color.tmp` 
+	[ ! "$HEX" ] && exit 0
+	echo "#$HEX" > /tmp/color.tmp
+	exit
+	;;
+	
+-rgb2hexedit)
+	rgb2hexscript `cat /tmp/COLOR$number.tmp` > /tmp/COLOR$number.tmp
+	HEX=`cat /tmp/COLOR$number.tmp` 
+	[ ! "$HEX" ] && exit 0
+	echo "#$HEX" > /tmp/COLOR$number.tmp
+	exit
+	;;
+	
+-makefile)
+#saving the theme
+[ "$NAME" = 'Type_in_new_theme_name_(no_spaces)' ] && gxmessage -bg orange -center "Please type in new theme name" && exit 0
+[ "$COLOR1" = "$chooseCOLOR" ] && gxmessage -bg orange -center "$fillALL" && exit 0
+[ "$COLOR2" = "$chooseCOLOR" ] && gxmessage -bg orange -center "${fillALL}" && exit 0
+[ "$COLOR3" = "$chooseCOLOR" ] && gxmessage -bg orange -center "${fillALL}" && exit 0
+[ "$COLOR4" = "$chooseCOLOR" ] && gxmessage -bg orange -center "${fillALL}" && exit 0
+[ "$COLOR5" = "$chooseCOLOR" ] && gxmessage -bg orange -center "${fillALL}" && exit 0
+[ "$COLOR6" = "$chooseCOLOR" ] && gxmessage -bg orange -center "${fillALL}" && exit 0
+[ "$COLOR7" = "$chooseCOLOR" ] && gxmessage -bg orange -center "${fillALL}" && exit 0
+[ "$COLOR8" = "$chooseCOLOR" ] && gxmessage -bg orange -center "${fillALL}" && exit 0
+[ "$COLOR9" = "$chooseCOLOR" ] && gxmessage -bg orange -center "${fillALL}" && exit 0
+[ "$COLOR10" = "$chooseCOLOR" ] && gxmessage -bg orange -center "${fillALL}" && exit 0
+
+[ ! "$NAME" ] && gxmessage -bg orange -center "Please type in new theme name" && exit 0
+[ ! "$COLOR1" ] && gxmessage -bg orange -center "${fillALL}" && exit 0
+[ ! "$COLOR2" ] && gxmessage -bg orange -center "${fillALL}" && exit 0
+[ ! "$COLOR3" ] && gxmessage -bg orange -center "${fillALL}" && exit 0
+[ ! "$COLOR4" ] && gxmessage -bg orange -center "${fillALL}" && exit 0
+[ ! "$COLOR5" ] && gxmessage -bg orange -center "${fillALL}" && exit 0
+[ ! "$COLOR6" ] && gxmessage -bg orange -center "${fillALL}" && exit 0
+[ ! "$COLOR7" ] && gxmessage -bg orange -center "${fillALL}" && exit 0
+[ ! "$COLOR8" ] && gxmessage -bg orange -center "${fillALL}" && exit 0
+[ ! "$COLOR9" ] && gxmessage -bg orange -center "${fillALL}" && exit 0
+[ ! "$COLOR10" ] && gxmessage -bg orange -center "${fillALL}" && exit 0
+
+Xdialog --title "$(gettext 'JWM Theme Maker Splash')" --no-close --screen-center -no-buttons --infobox "Saving theme
+Trio Tj - GPL 2014" 10 30
+p=$!
+
+echo "#see /usr/local/jwmconfig2/theme-switcher script.
+MENU_BG=$COLOR7
+ACTIVE_BG=$COLOR1
+FOREGROUND=$COLOR5
+PAGER_BG=$COLOR7
+FG_SELECTED=$COLOR5 " > $HOME/.jwm/themes/$NAME-colors
+
+	echo "<JWM>
+
+<WindowStyle>
+    <Font>$FONT-$FONTSIZE</Font>
+    <Width>3</Width>
+    <Height>22</Height>     
+    <Active>
+       <Text>$COLOR5</Text>
+       <Title>$COLOR1:$COLOR2</Title>
+<!--       <Corner>$COLOR1</Corner> -->
+       <Outline>$COLOR10</Outline>
+    </Active>
+    <Inactive>
+       <Text>$COLOR6</Text>
+       <Title>$COLOR3:$COLOR4</Title>         
+<!--       <Corner>$COLOR3</Corner> -->
+       <Outline>$COLOR10</Outline>
+    </Inactive>
+</WindowStyle> 
+
+<TaskListStyle>
+<Font>$FONT-$FONTSIZE</Font>
+<ActiveForeground>$COLOR5</ActiveForeground>
+<ActiveBackground>$COLOR1:$COLOR2</ActiveBackground>
+<Background>$COLOR3:$COLOR4</Background>
+</TaskListStyle>
+
+	<!-- TRAY PROPERTIES -->
+
+	<TrayStyle>
+		<Font>$FONT-$FONTSIZE</Font>
+		<Foreground>$COLOR6</Foreground>
+		<Background>$COLOR7</Background>
+	</TrayStyle>
+
+	<!-- PAGER PROPERTIES -->
+
+	<PagerStyle>
+		<Outline>grey</Outline>
+		<Foreground>$COLOR4</Foreground>
+		<Background>$COLOR3</Background>
+		<ActiveForeground>$COLOR1</ActiveForeground>
+		<ActiveBackground>$COLOR2</ActiveBackground>
+	</PagerStyle>
+
+	<PopupStyle>
+		<Font>$FONT-$FONTSIZE</Font>
+		<Outline>$COLOR10</Outline>
+		<Foreground>$COLOR9</Foreground>
+		<Background>$COLOR8</Background>
+	</PopupStyle>
+
+	<MenuStyle>
+		<Font>$FONT-$FONTSIZE</Font>
+		<Foreground>$COLOR6</Foreground>
+		<Background>$COLOR7</Background>
+		<ActiveForeground>$COLOR5</ActiveForeground>
+		<ActiveBackground>$COLOR1:$COLOR2</ActiveBackground>
+	</MenuStyle>
+
+</JWM>" > $HOME/.jwm/themes/$NAME-jwmrc
+
+#restart jwm
+sleep 0.25
+NEWTHEME="$NAME"
+
+if [ "$NEWTHEME" != "" ];then
+ #select chosen theme...
+ cp -f /root/.jwm/themes/${NEWTHEME}-jwmrc /root/.jwm/jwmrc-theme
+ #set correct backgrounds for applets...
+ cp -f /root/.jwm/themes/${NEWTHEME}-colors /root/.jwm/jwm_colors
+ #...note, /root/.xinitrc reads this file to set background for absvolume.
+ #...note, jwm_colors is written to by /usr/local/jwmconfig2/gtk2jwm script
+
+. /root/.jwm/jwm_colors #gives MENU_BG, PAGER_BG
+
+ #########
+ #John Doe created code for the applet backgrounds, old jwmconfig, port here...
+ TrayFile="/root/.jwmrc-tray"
+ TrayFileBak="/root/.jwmrc-tray.bak"
+
+ BackgroundColor="$MENU_BG" #"#ffc100"
+ [ "$BackgroundColor" = "" ] && BackgroundColor='#ffc100'
+ IndentedBackgroundColor="$PAGER_BG"
+ [ "$IndentedBackgroundColor" = "" ] && IndentedBackgroundColor='#ffa100'
+ 
+
+ function GetLineIndex
+ {
+	lineVal=`fgrep -in "$1" $TrayFile | awk -F":" '{print $1}'`
+	#return `expr $lineVal`
+	return $lineVal
+ }
+
+ cp -f $TrayFile $TrayFileBak
+
+ GetLineIndex "blinkydelayed"
+ linenumber=$?
+ echo $linenumber
+
+ GetLineIndex "xload -nolabel"
+ linenumber2=$?
+ echo $linenumber2
+
+ lineNumber=`expr $linenumber`
+ lineNumber2=`expr $linenumber2`
+ 
+#Zigbert added this, because maybe somebody forgot to put
+blinkyline="blinkydelayed -bg \"$BackgroundColor\""
+xloadline=" xload -nolabel -fg red -hl white -bg \"$IndentedBackgroundColor\""
+
+
+#fixed by hairywill 20-01-09 handle case where linenumber/2 is zero
+[ ! "$lineNumber" = 0 ] && sed -ie "$lineNumber"d  $TrayFile && sed -ie "$lineNumber"i"$blinkyline" $TrayFile
+[ ! "$lineNumber2" = 0 ] && sed -ie "$lineNumber2"d $TrayFile && sed -ie "$lineNumber2"i"$xloadline" $TrayFile
+#sed -e "$lineNumber"i"$blinkyline" -e "$lineNumber"d -e "$lineNumber2"i"$xloadline" -e "$lineNumber2"d $TrayFileBak > $TrayFile
+ #end John Doe's code.
+ ########
+ 
+#Trio-this to make absvolume follows theme without reboot
+if [ -f /usr/bin/absvolume ];then
+if [ "$MENU_BG" = "" ];then
+killall absvolume
+absvolume &
+else
+killall absvolume
+absvolume -bg $MENU_BG &
+fi
+fi
+
+ 
+ sync
+ pidof jwm >/dev/null && jwm -restart
+fi
+
+#grab preview pics
+sleep 0.5
+FFMPEG=`which ffmpeg`
+
+if [ ! $FFMPEG ] ;then
+FFMPEG=avconv
+else
+FFMPEG=ffmpeg
+fi
+
+TRAYID=`xwininfo -name 'xload' -children | grep  'Parent window id:' | cut -f 2 -d ':'| awk '{print $1}'`
+YTRAYPOS=`xwininfo -id "$TRAYID" | grep -o '\Absolute upper-left Y: *.*' | awk '{print $4}'`
+TRAYHEIGHT=`xwininfo -id "$TRAYID" | grep -o '\Height.*' | cut -d ':' -f 2`
+
+	$FFMPEG -f x11grab -s "180"x"$TRAYHEIGHT" -r 25 -i "${DISPLAY}+0,$YTRAYPOS" -vframes 1 -pix_fmt rgb24 "$HOME/.jwm/themes/$NAME-tray.png" > /dev/null 2>&1
+    
+XWINDOW=`xwininfo -name "JWM Theme Maker" | grep -o '\-geometry.*x' | cut -f 2 -d ' ' | cut -f 1 -d 'x'`
+XPOSWINDOW=`xwininfo -name 'JWM Theme Maker' | grep -o '\Absolute upper-left X: *.*' | awk '{print $4}'`
+XPOS=$[$XPOSWINDOW+$XWINDOW-63]
+
+YPOSabsolute=`xwininfo -name 'JWM Theme Maker' | grep -o '\Absolute upper-left Y: *.*' | awk '{print $4}'`
+YPOSRelative=`xwininfo -name 'JWM Theme Maker' | grep -o '\Relative upper-left Y: *.*' | awk '{print $4}'`
+YPOS=$[$YPOSabsolute-$YPOSRelative]
+	
+	$FFMPEG -f x11grab -s "60"x"22" -r 25 -i "${DISPLAY}+$XPOS,$YPOS" -vframes 1 -pix_fmt rgb24 "$HOME/.jwm/themes/$NAME-window.png" > /dev/null 2>&1
+
+kill $p    
+exit
+;;
+
+-deltheme)
+ls -1 $HOME/.jwm/themes  | grep jwmrc | sed -e 's/-jwmrc//' | awk '{print "<item>"$1"</item>"}' > /tmp/jwmthemelist.txt
+THEMES=`cat /tmp/jwmthemelist.txt`
+export deltheme='	
+<window title="'"$(gettext 'Delete a theme')"'" allow-grow="false">
+  <frame    '"$(gettext 'Warning: Permanently delete')"'   >
+  <vbox> 
+   <text><label>'"$(gettext 'chosen theme')"'</label></text>
+   <combobox>
+   <variable>THEME</variable>
+   '$THEMES'
+   </combobox>
+   </vbox>
+   <hbox>
+   <button>
+    <input file stock="gtk-quit"></input>
+    <label>'"$(gettext 'Quit')"'</label>
+   </button>
+   <button>
+    <input file stock="gtk-delete"></input>
+    <label>'"$(gettext 'Delete a theme')"'</label>
+    <action>rm $HOME/.jwm/themes/"$THEME"-* &</action>
+    <action>exit: deltheme</action>
+   </button>
+   </hbox>	
+  </frame>
+</window>'
+
+#execute gtkdialog
+gtkdialog --center --program=deltheme
+
+unset deltheme
+
+#clear
+exit
+;;
+-edittheme)
+ls -1 $HOME/.jwm/themes  | grep jwmrc | sed -e 's/-jwmrc//' | awk '{print "<item>"$1"</item>"}' > /tmp/jwmthemelist.txt
+THEMES=`cat /tmp/jwmthemelist.txt`
+export edittheme='	
+<window title="'"$(gettext 'Edit a theme')"'" allow-grow="false">
+  <frame '"$(gettext '    Choose a theme made      ')"'>
+  <vbox>
+  <text><label>'"$(gettext ' only by Jwm Theme Maker')"'</label></text>
+   <combobox>
+   <variable>THEME</variable>
+   '$THEMES'
+   </combobox>
+   </vbox>
+   <hbox>
+   <button>
+    <input file stock="gtk-quit"></input>
+    <label>'"$(gettext 'Quit')"'</label>
+   </button>
+   <button>
+    <input file stock="gtk-refresh"></input>
+    <label>'"$(gettext 'Load theme')"'</label>
+    <action>. $WIDGET_DIR/jwmthememaker -editexecute &</action>
+    <action>exit: edittheme</action>
+   </button>
+   </hbox>	
+  </frame>
+</window>'
+
+#execute gtkdialog
+gtkdialog --center --program=edittheme
+
+unset edittheme
+#clear
+exit
+;;
+-editexecute)
+kill $(ps | grep "gtkdialog --center --program=jwmtheme" | awk '{print $1}')
+echo "`fc-list | grep '/'`" > /tmp/fontlist.txt
+TESTFCLIST=`cat /tmp/fontlist.txt | grep '/'`
+if [ ! "$TESTFCLIST" ] ;then
+echo "`fc-list | cut -d ":" -f 1 | sort | uniq`" > /tmp/fontlist.txt
+else
+echo "`fc-list | cut -d ":" -f 2 | sort | uniq`" > /tmp/fontlist.txt
+fi
+echo "$(cat /tmp/fontlist.txt  | awk '{print "<item>"$1" "$2" "$3" "$4"</item>"}')" > /tmp/fontlist.txt
+FONTS=$(cat /tmp/fontlist.txt)
+
+CURFONTSIZEORI=$(grep "<Font>" $HOME/.jwm/themes/$THEME-jwmrc | cut -d '>' -f2 | cut -d '<' -f1 | tail -1 | awk '{ print $NF }' )
+CURFONTSIZE=$(echo $CURFONTSIZEORI | cut -d "-" -f2)
+CURFONT=$(grep "<Font>" $HOME/.jwm/themes/$THEME-jwmrc | cut -d '>' -f2 | cut -d '<' -f1 | tail -1 | sed 's/['$CURFONTSIZEORI']//g' )
+CURCOLOR1=$(echo "$(grep "ACTIVE_BG" $HOME/.jwm/themes/$THEME-colors | cut -d '=' -f2)" > /tmp/COLOR1.tmp )
+CURCOLOR2=$(echo "$(cat $HOME/.jwm/themes/$THEME-jwmrc | grep "$CURCOLOR1" | grep "<ActiveBackground>" | tail -1 | cut -d ":" -f2 | cut -d "<" -f1)" > /tmp/COLOR2.tmp )
+CURCOLOR3=$(echo "$(cat -n $HOME/.jwm/themes/$THEME-jwmrc | grep "41" | grep "<Background>" | cut -d '>' -f2 | cut -d '<' -f1)" > /tmp/COLOR3.tmp )
+CURCOLOR4=$(echo "$(cat $HOME/.jwm/themes/$THEME-jwmrc | grep "<Title>$CURCOLOR3" | tail -1 | cut -d ':' -f2 | cut -d '<' -f1)" > /tmp/COLOR4.tmp )
+CURCOLOR5=$(echo "$(grep "FOREGROUND" $HOME/.jwm/themes/$THEME-colors | cut -d '=' -f2)" > /tmp/COLOR5.tmp )
+CURCOLOR6=$(echo "$(cat -n $HOME/.jwm/themes/$THEME-jwmrc | grep "55" | grep "<Foreground>" | cut -d '>' -f2 | cut -d '<' -f1)" > /tmp/COLOR6.tmp )
+CURCOLOR7=$(echo "$(grep "MENU_BG" $HOME/.jwm/themes/$THEME-colors | cut -d '=' -f2)" > /tmp/COLOR7.tmp )
+CURCOLOR8=$(echo "$(cat -n $HOME/.jwm/themes/$THEME-jwmrc | grep "50" | grep "<Background>" | cut -d '>' -f2 | cut -d '<' -f1)" > /tmp/COLOR8.tmp )
+CURCOLOR9=$(echo "$(cat -n $HOME/.jwm/themes/$THEME-jwmrc | grep "49" | grep "<Foreground>" | cut -d '>' -f2 | cut -d '<' -f1)" > /tmp/COLOR9.tmp )
+CURCOLOR10=$(echo "$(cat -n $HOME/.jwm/themes/$THEME-jwmrc | grep "48" | grep "<Outline>" | cut -d '>' -f2 | cut -d '<' -f1)" > /tmp/COLOR10.tmp )
+
+export jwmthemeedit='	
+<window title="'$(gettext 'JWM Theme Maker')'" allow-grow="false">
+ <vbox>
+  <frame '$(gettext 'Make your own JWM theme')'> 
+	<vbox>	
+	<pixmap><input file>/usr/local/lib/X11/pixmaps/paint48.png</input></pixmap>
+   <frame '$(gettext 'Window - Taskbar - Menu')'>
+   <hbox>
+   <text><label>'$(gettext 'Active')'    - '$(gettext 'fr')'</label></text>
+   <entry tooltip-text="'$(gettext 'Opened window color gradient start')'">
+   <input>cat /tmp/COLOR1.tmp</input>
+     <variable>COLOR1</variable>
+    </entry>
+    <button>
+     <input file>/usr/local/lib/X11/mini-icons/colorexplorer.xpm</input>
+     <action>Xdialog --stdout --colorsel "'$(gettext 'Please_choose_a_color')'" 22 75 [0 0 0] > /tmp/COLOR1.tmp</action>
+     <action>. $WIDGET_DIR/jwmthememaker -rgb2hexedit 1</action>
+     <action type="refresh">COLOR1</action>
+    </button>
+    <text><label>'$(gettext 'to')'</label></text>
+   <entry tooltip-text="Opened window color gradient end">
+   <input>cat /tmp/COLOR2.tmp</input>
+     <variable>COLOR2</variable>
+    </entry>
+    <button>
+     <input file>/usr/local/lib/X11/mini-icons/colorexplorer.xpm</input>
+     <action>Xdialog --stdout --colorsel "'$(gettext 'Please_choose_a_color')'" 22 75 [0 0 0] > /tmp/COLOR2.tmp</action>
+     <action>. $WIDGET_DIR/jwmthememaker -rgb2hexedit 2</action>
+     <action type="refresh">COLOR2</action>
+    </button>
+   </hbox>
+   <hbox>
+   <text><label>'$(gettext 'Inactive')' - '$(gettext 'fr')'</label></text>
+   <entry tooltip-text="'$(gettext 'Closed window color gradient start')'">
+   <input>cat /tmp/COLOR3.tmp</input>
+     <variable>COLOR3</variable>
+    </entry>
+    <button>
+     <input file>/usr/local/lib/X11/mini-icons/colorexplorer.xpm</input>
+     <action>Xdialog --stdout --colorsel "'$(gettext 'Please_choose_a_color')'" 22 75 [0 0 0] > /tmp/COLOR3.tmp</action>
+     <action>. $WIDGET_DIR/jwmthememaker -rgb2hexedit 3</action>
+     <action type="refresh">COLOR3</action>
+    </button>
+    <text><label>'$(gettext 'to')'</label></text>
+   <entry tooltip-text="'$(gettext 'Closed window color gradient end')'">
+   <input>cat /tmp/COLOR4.tmp</input>
+     <variable>COLOR4</variable>
+    </entry>
+    <button>
+     <input file>/usr/local/lib/X11/mini-icons/colorexplorer.xpm</input>
+     <action>Xdialog --stdout --colorsel "'$(gettext 'Please_choose_a_color')'" 22 75 [0 0 0] > /tmp/COLOR4.tmp</action>
+     <action>. $WIDGET_DIR/jwmthememaker -rgb2hexedit 4</action>
+     <action type="refresh">COLOR4</action>
+    </button>
+   </hbox>
+   <hbox>
+   <text><label>'$(gettext 'Active text')'</label></text>
+   <entry tooltip-text="'$(gettext 'Text for opened windows & cursor passed menu entry')'">
+   <input>cat /tmp/COLOR5.tmp</input>
+     <variable>COLOR5</variable>
+    </entry>
+    <button>
+     <input file>/usr/local/lib/X11/mini-icons/colorexplorer.xpm</input>
+     <action>Xdialog --stdout --colorsel "'$(gettext 'Please_choose_a_color')'" 22 75 [0 0 0] > /tmp/COLOR5.tmp</action>
+     <action>. $WIDGET_DIR/jwmthememaker -rgb2hexedit 5</action>
+     <action type="refresh">COLOR5</action>
+    </button>
+    <text><label>'$(gettext 'Inactive text')'</label></text>
+   <entry tooltip-text="'$(gettext 'Text for closed windows & menu entry')'">
+   <input>cat /tmp/COLOR6.tmp</input>
+     <variable>COLOR6</variable>
+    </entry>
+    <button>
+     <input file>/usr/local/lib/X11/mini-icons/colorexplorer.xpm</input>
+     <action>Xdialog --stdout --colorsel "'$(gettext 'Please_choose_a_color')'" 22 75 [0 0 0] > /tmp/COLOR6.tmp</action>
+     <action>. $WIDGET_DIR/jwmthememaker -rgb2hexedit 6</action>
+     <action type="refresh">COLOR6</action>
+    </button>
+   </hbox>
+   <hbox>
+   <text><label>'$(gettext 'Base background')'</label></text>
+   <entry tooltip-text="'$(gettext 'Background of taskbar & menu')'">
+   <input>cat /tmp/COLOR7.tmp</input>
+     <variable>COLOR7</variable>
+    </entry>
+    <button>
+     <input file>/usr/local/lib/X11/mini-icons/colorexplorer.xpm</input>
+     <action>Xdialog --stdout --colorsel "'$(gettext 'Please_choose_a_color')'" 22 75 [0 0 0] > /tmp/COLOR7.tmp</action>
+     <action>. $WIDGET_DIR/jwmthememaker -rgb2hexedit 7</action>
+     <action type="refresh">COLOR7</action>
+    </button>
+    <text><label>'$(gettext 'Border Outline')'</label></text>
+   <entry tooltip-text="'$(gettext 'Borders of windows and pop-up')'">
+   <input>cat /tmp/COLOR10.tmp</input>
+     <variable>COLOR10</variable>
+    </entry>
+    <button>
+     <input file>/usr/local/lib/X11/mini-icons/colorexplorer.xpm</input>
+     <action>Xdialog --stdout --colorsel "'$(gettext 'Please_choose_a_color')'" 22 75 [0 0 0] > /tmp/COLOR10.tmp</action>
+     <action>. $WIDGET_DIR/jwmthememaker -rgb2hexedit 10</action>
+     <action type="refresh">COLOR10</action>
+    </button>
+    </hbox>
+   <hbox>
+   <text><label>'$(gettext 'Font Name')'</label></text>
+   <combobox tooltip-text="'$(gettext 'Applied to all windows, taskbar and menu')'">
+   <variable>FONT</variable>
+   <item>'$CURFONT'</item>
+   '$FONTS'
+   </combobox>
+   <text><label>"'$(gettext '                           Font Size ')'"</label></text>
+   <combobox tooltip-text="'$(gettext 'Applied to all windows, taskbar and menu')'">
+   <variable>FONTSIZE</variable>
+   <item>'$CURFONTSIZE'</item>
+   <item>12</item>
+   <item>10</item>
+   <item>11</item>
+   <item>12</item>
+   <item>13</item>
+   <item>14</item>
+   <item>15</item>
+   </combobox>
+   </hbox>
+   </frame>
+   <frame '$(gettext 'Pop-Up Box')'>
+   <hbox>
+   <text><label>'$(gettext 'Background')'</label></text>
+   <entry tooltip-text="'$(gettext 'Applied only for pop-up info when cursor over pager on taskbar')'">
+   <input>cat /tmp/COLOR8.tmp</input>
+     <variable>COLOR8</variable>
+    </entry>
+    <button>
+     <input file>/usr/local/lib/X11/mini-icons/colorexplorer.xpm</input>
+     <action>Xdialog --stdout --colorsel "'$(gettext 'Please_choose_a_color')'" 22 75 [0 0 0] > /tmp/COLOR8.tmp</action>
+     <action>. $WIDGET_DIR/jwmthememaker -rgb2hexedit 8</action>
+     <action type="refresh">COLOR8</action>
+    </button>
+    <text><label>'$(gettext 'Text')'</label></text>
+   <entry tooltip-text="'$(gettext 'Applied only for pop-up info when cursor over pager on taskbar')'">
+   <input>cat /tmp/COLOR9.tmp</input>
+     <variable>COLOR9</variable>
+    </entry>
+    <button>
+     <input file>/usr/local/lib/X11/mini-icons/colorexplorer.xpm</input>
+     <action>Xdialog --stdout --colorsel "'$(gettext 'Please_choose_a_color')'" 22 75 [0 0 0] > /tmp/COLOR9.tmp</action>
+     <action>. $WIDGET_DIR/jwmthememaker -rgb2hexedit 9</action>
+     <action type="refresh">COLOR9</action>
+    </button>
+   </hbox>
+   </frame>
+   <frame '$(gettext 'Save Theme & Apply')'>
+   <hbox>
+    <text><label>'$(gettext 'Name')'</label></text>
+    <entry tooltip-text="'$(gettext 'No_empty_space_in_name, ex: Blue-Nice')'"> 
+     <variable>NAME</variable>
+	 <input>echo "$THEME"</input>
+   </entry>
+   <button tooltip-text="'$(gettext 'Make sure Jwm taskbar is not in auto hide mode')'">
+    <input file stock="gtk-save"></input>
+    <label>'$(gettext 'Save Theme')'</label>
+    <action>. $WIDGET_DIR/jwmthememaker -makefile</action>
+   </button>
+   </hbox>
+   </frame> 
+   </vbox>
+   <hbox>
+   <button>
+    <input file stock="gtk-quit"></input>
+    <label>'$(gettext 'Quit')'</label>
+   </button>
+   <button>
+    <input file>/usr/local/lib/X11/mini-icons/mini-opensshd.xpm</input>
+    <label>'$(gettext 'JWM Config')'</label>
+    <action>/usr/local/jwmconfig2/jwmConfigMgr &</action>
+   </button>
+   <button>
+    <input file stock="gtk-delete"></input>
+    <label>'$(gettext 'Delete a theme')'</label>
+    <action>. $WIDGET_DIR/jwmthememaker -deltheme &</action>
+   </button>
+   <button tooltip-text="'$(gettext 'Only for themes made by this tool')'">
+    <input file stock="gtk-edit"></input>
+    <label>'$(gettext 'Edit a theme')'</label>
+    <action>. $WIDGET_DIR/jwmthememaker -edittheme &</action>
+   </button>	
+   </hbox>
+   </frame>
+ </vbox>
+</window>'
+
+#execute gtkdialog
+gtkdialog --center --program=jwmthemeedit
+
+unset jwmthemeedit
+
+#clear
+exit
+;;
+esac
+
+#start with the GUI
+echo "$chooseCOLOR" > /tmp/color.tmp
+
+echo "`fc-list | grep '/'`" > /tmp/fontlist.txt
+TESTFCLIST=`cat /tmp/fontlist.txt | grep '/'`
+if [ ! "$TESTFCLIST" ] ;then
+echo "`fc-list | cut -d ":" -f 1 | sort | uniq`" > /tmp/fontlist.txt
+else
+echo "`fc-list | cut -d ":" -f 2 | sort | uniq`" > /tmp/fontlist.txt
+fi
+echo "$(cat /tmp/fontlist.txt  | awk '{print "<item>"$1" "$2" "$3" "$4"</item>"}')" > /tmp/fontlist.txt
+FONTS=$(cat /tmp/fontlist.txt)
+
+WIDGET_DIR="`dirname $0`"
+[ "$WIDGET_DIR" = "." ] && WIDGET_DIR="`pwd`"
+export WIDGET_DIR="$WIDGET_DIR"
+
+export jwmtheme='	
+<window title="'"$(gettext 'JWM Theme Maker')"'" allow-grow="false">
+ <vbox>
+  <frame '"$(gettext 'Make your own JWM theme')"'> 
+	<vbox>	
+	<pixmap><input file>/usr/local/lib/X11/pixmaps/paint48.png</input></pixmap>
+   <frame '"$(gettext 'Window - Taskbar - Menu')"'>
+   <hbox>
+   <text><label>'"$(gettext 'Active')"'    - '"$(gettext 'fr')"'</label></text>
+   <entry tooltip-text="'"$(gettext 'Opened window color gradient start')"'">
+   <input>cat /tmp/color.tmp</input>
+     <variable>COLOR1</variable>
+    </entry>
+    <button>
+     <input file>/usr/local/lib/X11/mini-icons/colorexplorer.xpm</input>
+     <action>Xdialog --stdout --colorsel "'"$(gettext 'Please_choose_a_color')"'" 22 75 [0 0 0] > /tmp/color.tmp</action>
+     <action>. $WIDGET_DIR/jwmthememaker -rgb2hex</action>
+     <action type="refresh">COLOR1</action>
+    </button>
+    <text><label>'"$(gettext 'to')"'</label></text>
+   <entry tooltip-text="'"$(gettext 'Opened window color gradient end')"'">
+   <input>cat /tmp/color.tmp</input>
+     <variable>COLOR2</variable>
+    </entry>
+    <button>
+     <input file>/usr/local/lib/X11/mini-icons/colorexplorer.xpm</input>
+     <action>Xdialog --stdout --colorsel "'"$(gettext 'Please_choose_a_color')"'" 22 75 [0 0 0] > /tmp/color.tmp</action>
+     <action>. $WIDGET_DIR/jwmthememaker -rgb2hex</action>
+     <action type="refresh">COLOR2</action>
+    </button>
+   </hbox>
+   <hbox>
+   <text><label>'"$(gettext 'Inactive')"' - '"$(gettext 'fr')"'</label></text>
+   <entry tooltip-text="'"$(gettext 'Closed window color gradient start')"'">
+   <input>cat /tmp/color.tmp</input>
+     <variable>COLOR3</variable>
+    </entry>
+    <button>
+     <input file>/usr/local/lib/X11/mini-icons/colorexplorer.xpm</input>
+     <action>Xdialog --stdout --colorsel "'"$(gettext 'Please_choose_a_color')"'" 22 75 [0 0 0] > /tmp/color.tmp</action>
+     <action>. $WIDGET_DIR/jwmthememaker -rgb2hex</action>
+     <action type="refresh">COLOR3</action>
+    </button>
+    <text><label>'"$(gettext 'to')"'</label></text>
+   <entry tooltip-text="'"$(gettext 'Closed window color gradient end')"'">
+   <input>cat /tmp/color.tmp</input>
+     <variable>COLOR4</variable>
+    </entry>
+    <button>
+     <input file>/usr/local/lib/X11/mini-icons/colorexplorer.xpm</input>
+     <action>Xdialog --stdout --colorsel "'"$(gettext 'Please_choose_a_color')"'" 22 75 [0 0 0] > /tmp/color.tmp</action>
+     <action>. $WIDGET_DIR/jwmthememaker -rgb2hex</action>
+     <action type="refresh">COLOR4</action>
+    </button>
+   </hbox>
+   <hbox>
+   <text><label>'"$(gettext 'Active text')"'</label></text>
+   <entry tooltip-text="'"$(gettext 'Text for opened windows & cursor passed menu entry')"'">
+   <input>cat /tmp/color.tmp</input>
+     <variable>COLOR5</variable>
+    </entry>
+    <button>
+     <input file>/usr/local/lib/X11/mini-icons/colorexplorer.xpm</input>
+     <action>Xdialog --stdout --colorsel "'"$(gettext 'Please_choose_a_color')"'" 22 75 [0 0 0] > /tmp/color.tmp</action>
+     <action>. $WIDGET_DIR/jwmthememaker -rgb2hex</action>
+     <action type="refresh">COLOR5</action>
+    </button>
+    <text><label>'"$(gettext 'Inactive text')"'</label></text>
+   <entry tooltip-text="'"$(gettext 'Text for closed windows & menu entry')"'">
+   <input>cat /tmp/color.tmp</input>
+     <variable>COLOR6</variable>
+    </entry>
+    <button>
+     <input file>/usr/local/lib/X11/mini-icons/colorexplorer.xpm</input>
+     <action>Xdialog --stdout --colorsel "'"$(gettext 'Please_choose_a_color')"'" 22 75 [0 0 0] > /tmp/color.tmp</action>
+     <action>. $WIDGET_DIR/jwmthememaker -rgb2hex</action>
+     <action type="refresh">COLOR6</action>
+    </button>
+   </hbox>
+   <hbox>
+   <text><label>'"$(gettext 'Base background')"'</label></text>
+   <entry tooltip-text="'"$(gettext 'Background of taskbar & menu')"'">
+   <input>cat /tmp/color.tmp</input>
+     <variable>COLOR7</variable>
+    </entry>
+    <button>
+     <input file>/usr/local/lib/X11/mini-icons/colorexplorer.xpm</input>
+     <action>Xdialog --stdout --colorsel "'"$(gettext 'Please_choose_a_color')"'" 22 75 [0 0 0] > /tmp/color.tmp</action>
+     <action>. $WIDGET_DIR/jwmthememaker -rgb2hex</action>
+     <action type="refresh">COLOR7</action>
+    </button>
+    <text><label>'"$(gettext 'Border Outline')"'</label></text>
+   <entry tooltip-text="'"$(gettext 'Borders of windows and pop-up')"'">
+   <input>cat /tmp/color.tmp</input>
+     <variable>COLOR10</variable>
+    </entry>
+    <button>
+     <input file>/usr/local/lib/X11/mini-icons/colorexplorer.xpm</input>
+     <action>Xdialog --stdout --colorsel "'"$(gettext 'Please_choose_a_color')"'" 22 75 [0 0 0] > /tmp/color.tmp</action>
+     <action>. $WIDGET_DIR/jwmthememaker -rgb2hex</action>
+     <action type="refresh">COLOR10</action>
+    </button>
+    </hbox>
+   <hbox>
+   <text><label>'"$(gettext 'Font Name')"'</label></text>
+   <combobox tooltip-text="'"$(gettext 'Applied to all windows, taskbar and menu')"'">
+   <variable>FONT</variable>
+   '$FONTS'
+   </combobox>
+   <text><label>"'"$(gettext '                           Font Size ')"'"</label></text>
+   <combobox tooltip-text="'"$(gettext 'Applied to all windows, taskbar and menu')"'">
+   <variable>FONTSIZE</variable>
+   <item>12</item>
+   <item>10</item>
+   <item>11</item>
+   <item>12</item>
+   <item>13</item>
+   <item>14</item>
+   <item>15</item>
+   </combobox>
+   </hbox>
+   </frame>
+   <frame '"$(gettext 'Pop-Up Box')"'>
+   <hbox>
+   <text><label>'"$(gettext 'Background')"'</label></text>
+   <entry tooltip-text="'"$(gettext 'Applied only for pop-up info when cursor over pager on taskbar')"'">
+   <input>cat /tmp/color.tmp</input>
+     <variable>COLOR8</variable>
+    </entry>
+    <button>
+     <input file>/usr/local/lib/X11/mini-icons/colorexplorer.xpm</input>
+     <action>Xdialog --stdout --colorsel "'"$(gettext 'Please_choose_a_color')"'" 22 75 [0 0 0] > /tmp/color.tmp</action>
+     <action>. $WIDGET_DIR/jwmthememaker -rgb2hex</action>
+     <action type="refresh">COLOR8</action>
+    </button>
+    <text><label>'"$(gettext 'Text')"'</label></text>
+   <entry tooltip-text="'"$(gettext 'Applied only for pop-up info when cursor over pager on taskbar')"'">
+   <input>cat /tmp/color.tmp</input>
+     <variable>COLOR9</variable>
+    </entry>
+    <button>
+     <input file>/usr/local/lib/X11/mini-icons/colorexplorer.xpm</input>
+     <action>Xdialog --stdout --colorsel "'"$(gettext 'Please_choose_a_color')"'" 22 75 [0 0 0] > /tmp/color.tmp</action>
+     <action>. $WIDGET_DIR/jwmthememaker -rgb2hex</action>
+     <action type="refresh">COLOR9</action>
+    </button>
+   </hbox>
+   </frame>
+   <frame '"$(gettext 'Save Theme & Apply')"'>
+   <hbox>
+    <text><label>'"$(gettext 'Name')"'</label></text>
+    <entry tooltip-text="'"$(gettext 'No_empty_space_in_name, ex: Blue-Nice')"'"> 
+     <variable>NAME</variable>
+	 <input>echo "'"$(gettext 'Type_in_new_theme_name_(no_spaces)')"'"</input>
+   </entry>
+   <button tooltip-text="'"$(gettext 'Make sure Jwm taskbar is not in auto hide mode')"'">
+    <input file stock="gtk-save"></input>
+    <label>'"$(gettext 'Save Theme')"'</label>
+    <action>. $WIDGET_DIR/jwmthememaker -makefile</action>
+    </button>
+   </hbox>
+   </frame> 
+   </vbox>
+   <hbox>
+   <button>
+    <input file stock="gtk-quit"></input>
+    <label>'"$(gettext 'Quit')"'</label>
+   </button>
+   <button>
+    <input file>/usr/local/lib/X11/mini-icons/mini-opensshd.xpm</input>
+    <label>'"$(gettext 'JWM Config')"'</label>
+    <action>/usr/local/jwmconfig2/jwmConfigMgr &</action>
+   </button>
+   <button>
+    <input file stock="gtk-delete"></input>
+    <label>'"$(gettext 'Delete a theme')"'</label>
+    <action>. $WIDGET_DIR/jwmthememaker -deltheme &</action>
+   </button>
+   <button tooltip-text="'"$(gettext 'Only for themes made by this tool')"'">
+    <input file stock="gtk-edit"></input>
+    <label>'"$(gettext 'Edit a theme')"'</label>
+    <action>. $WIDGET_DIR/jwmthememaker -edittheme &</action>
+   </button>	
+   </hbox>
+   </frame>
+ </vbox>
+</window>'
+
+#execute gtkdialog
+gtkdialog --center --program=jwmtheme
+
+unset jwmtheme
+
+#clear
+exit

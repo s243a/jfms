@@ -1,0 +1,112 @@
+#!/bin/sh
+# Originally a part of the FFConvert by shinobar <shino@pos.to>
+
+VERSION="0.1"
+APPNAME=$(basename $0)
+CREDIT="$APPNAME $VERSION"
+TITLE=$CREDIT
+#option
+NUMSORT="true"
+EXTS='mpg|mp4|avi'
+
+usage() {
+ echo "$CREDIT
+Make play list of multimedia files in a directory.
+  usage: $APPNAME [PLAYLIST_FORM] (FILES|-f FILELIST)
+  PLAYLIST_FORM: 'asx', 'pls' or 'm3u'"
+}
+
+DEBUGFLAG=""
+debug() {
+	[ "$DEBUGFLAG" ] || return 0
+	echo "$APPNAME: $@" >&2
+}
+echo $APPNAME| grep -q 'debug' && DEBUGFLAG="y"
+FORMS=""
+FLIST=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+  -d|*-debug) DEBUGFLAG="y"; shift;;
+  -v) echo "$CREDIT"; exit;;
+  -f) shift; FLIST=$(cat "$1"); shift;;
+  -*) usage; exit;;
+  asx|pls|m3u) FORMS="$FORMS $1"; shift;;
+  *) break;;
+  esac
+done
+
+[ "$FLIST" ] || [ "$1" ] || (usage; exit)
+
+PLAYLISTFORMATS='asx pls m3u'
+[ "$FORMS" ] && PLAYLISTFORMATS=$(echo $FORMS)
+
+ # file list
+ if [ "$FLIST" ]; then
+   DESTDIR=$(dirname "$(echo "$FILELIST"| grep '/' | head -n1)")
+   EXT1=""
+ elif [ $# -gt 1 ]; then
+   FLIST="$@"
+   DESTDIR=$(dirname "$1")
+   EXT1="_$(echo $1|rev| cut -s -f1 -d'.'|rev)"
+ elif [ -d "$1" ]; then
+    DESTDIR=$1
+    FLIST=$(find -L "$DESTDIR" -mindepth 1 -maxdepth 1 -type f | grep -ivE "\.(asx|pls|m3u|txt)$")
+    EXT1=""
+ else
+    DESTDIR=$(dirname "$1")
+    EXT1=$(echo $1|rev| cut -s -f1 -d'.'|rev)
+    FLIST=$(find -L "$DESTDIR" -mindepth 1 -maxdepth 1 -type f -name "*.$EXT1")
+ fi
+   [ "$FLIST" ] || (echo "No media files found in '$DESTDIR'.";exit)
+ #debug "$FLIST"
+
+ # sort by numbers
+ if [ "$NUMSORT" = "true" ]; then
+   add_numeric() {
+   while read ALINE; do
+     N=$(basename "$ALINE" $EXT1|tr -dc '0-9')
+     [ "$N" ] || N=0
+     echo $ALINE | sed -e "s,^,$N\t,"
+    done
+   }
+   [ "$DEBUGFLAG" ] &&  echo "$FLIST"| add_numeric
+   FLIST=$(echo "$FLIST"| add_numeric | sort -n | cut -f2-)
+ fi
+ # make play list entries
+ debug "$PLAYLISTFORMATS"
+ _EXT1="_$EXT1"
+  for PLAYLISTFORMAT in $PLAYLISTFORMATS;do
+   case "$PLAYLISTFORMAT" in
+   asx|ASX)
+     PLAYLIST="$DESTDIR/$(basename "$DESTDIR")$_EXT1.asx"
+     echo '<ASX VERSION="3.0">
+  <SETTINGS REPEAT="false" RANDOM="false"/>' >"$PLAYLIST"
+     echo "$FLIST" | while read ALINE; do
+       [ "$ALINE" ] || continue
+       echo "    <ENTRY>
+      <TITLE>$(basename "$ALINE" $EXT1| sed -e 's,\.$,,')</TITLE>
+       <REF HREF=\"file://$ALINE\"/>
+    </ENTRY>" >>"$PLAYLIST"
+     done
+     echo '</ASX>' >>"$PLAYLIST"
+     echo $PLAYLIST
+     ;;
+   pls) PLAYLIST="$DESTDIR/$(basename "$DESTDIR")$_EXT1.pls"
+     echo "[playlist]
+NumberOfEntries=$(echo "$FLIST"| wc -l)
+Version=2" >"$PLAYLIST"
+     N=0
+     echo "$FLIST" | while read ALINE; do
+       [ "$ALINE" ] || continue
+        N=$((N + 1))
+        echo "File$N=file://$ALINE
+Title$N=$(basename "$ALINE" $EXT1| sed -e 's,\.$,,')" >>"$PLAYLIST"
+     done
+     echo $PLAYLIST
+     ;;
+   *) PLAYLIST="$DESTDIR/$(basename "$DESTDIR")$_EXT1.m3u"
+     echo "$FLIST" | grep '.' | sed -e 's,^.*/,,' >"$PLAYLIST"
+     echo $PLAYLIST
+    ;;
+   esac
+  done

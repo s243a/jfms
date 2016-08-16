@@ -1,0 +1,26 @@
+#!/bin/sh
+#RPM=`Xdialog --title "Select file" --wrap --fselect *.rpm 0 0 2>&1`
+RPM="$1"
+if [ -e "$RPM" ]; then
+for i in "$RPM"
+do
+FOLDR=$(echo $i|sed 's/\.rpm$//')
+done
+mkdir "$FOLDR"
+cp "$RPM" "$FOLDR"
+cd "$FOLDR"
+RPM=`ls | grep ".rpm"`
+unrpm "$RPM"
+rm "$RPM"
+FOLDR=`basename "$FOLDR"`
+echo "PETMENUDESCR=''" > "$FOLDR.pet.specs"
+echo "PETOFFICIALDEPS=''" >> "$FOLDR.pet.specs"
+echo "PETREGISTER='yes'" >> "$FOLDR.pet.specs"
+cd ..
+tar -cf "$FOLDR.tar" "$FOLDR"
+gzip "$FOLDR.tar"
+tgz2pet "$FOLDR.tar.gz"
+rm -R -f "$FOLDR"
+rm "$FOLDR.rpm"
+#rox
+fi

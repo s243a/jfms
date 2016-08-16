@@ -1,0 +1,6 @@
+#!/bin/sh
+if find /sys/class/backlight/acpi_video0/brightness
+then
+brightness=`cat /sys/class/backlight/acpi_video0/brightness`
+echo $brightness > /root/.config/brightness.conf
+fi

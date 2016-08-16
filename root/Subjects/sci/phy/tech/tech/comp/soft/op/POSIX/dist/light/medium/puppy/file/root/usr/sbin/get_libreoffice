@@ -1,0 +1,852 @@
+#!/bin/bash -a
+#       This program is free software; you can redistribute it and/or modify
+#       it under the terms of the GNU General Public License as published by
+#       the Free Software Foundation; either version 2 of the License, or
+#       (at your option) any later version.
+#       
+#       This program is distributed in the hope that it will be useful,
+#       but WITHOUT ANY WARRANTY; without even the implied warranty of
+#       MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#       GNU General Public License for more details.
+#       
+#       SEE /usr/share/doc/legal/
+#       
+#       01micko@gmail.com
+#0.1 20110317 first version 
+#0.2 20110318 withdraw support for usb installs, bugfixes from Lobster
+#0.3 20110319 update for gtkdialog-splash, relaxed some code, added bootmanager pop up
+#0.4 20110319 fix size check function, check if Libre or Open office is installed and prompt to uninstall. 0.4.1 bugfix detecting if office installed
+#0.5 20110321 make sfs in a term on screen to show progress, add download check, fix fg issues. Add welcome screen. Add testing repo option.
+#0.6 20110406 add error check if testing version doesn't exist
+#0.7 20110607 fix for new versions
+#0.8 20110911 add support for FD64 and LHP64 TODO, fix gettext
+#0.9 20110917 fixed bug with extra packs, fix gettext, added "_Extra" appended to name if extras are chosen
+#0.10 20110918 take 2 fixing extras bug, en-US bug
+#0.11 20110921 German translation used for some fixes L18L
+#0.12 20111109 Fixed full install size check Jim1911
+#0.13 20120221 update gui for 3.5
+#0.14 20120409 fix for printer admin, playdayz, really delete javafilter.desktop
+#0.15 20120502 add libreoffice integration - playdayz
+#0.16 20120601 fix for weird new server bug
+#0.17 20120620 "testing" LibO version fix, added pemasu patch, fixes for fatdog
+#0.18 20120920 fixes for Unity in desktop files
+#0.19 20121022 add RAM mode for usb installs, default for any with large RAM, removed some block comments
+#0.20 20121027 fix ppt mime icon, fix "free" for lupu, fix wary bug
+#0.21 20130104 fatdog bugfix, runs in slackbones
+#0.22 20130209 fixes for RAM install, fix for LO-4.0
+#0.23 20130209 fix printeradmin, RAM fix again
+#0.24 20130217 fix 64 bit install, add logging
+#0.25 20130217 added pupmode 7, code cleanup
+#0.26 20130218 improve RAM test
+#0.27 20130219 added gui to opt out of RAM build
+#0.28 20130310 bugfix with default* files
+#0.29 20130807 bugfix for low RAM full installs
+
+MYPATH=$0
+MYNAME=$(basename "$0")      
+VERSION=0.29
+export TEXTDOMAIN=get_libreoffice
+export OUTPUT_CHARSET=UTF-8
+#eval_gettext() {
+#  local myMESSAGE=$(gettext "$1")
+#  eval echo \"$myMESSAGE\"
+#}
+TITLE="Get LibreOffice"
+DESCRIPTION=$(gettext "download libreoffice and make sfs")
+LONG_TITLE="$TITLE $DESCRIPTION $VERSION"
+
+# 120130217 logging
+DATE=`date|sed 's/ /_/g'`
+NM=LO_log_
+LOG=/tmp/${NM=LO_log_}${DATE}
+echo "saving ${NM=LO_log_}${DATE} to $LOG"
+echo -e "LO LOG \n------- \n${DATE} \nget_libreoffice-${VERSION}" > $LOG
+
+#Welcome message
+TXT1=$(gettext "Welcome to the LibreOffice Installer 
+
+This will download the Deb files from the LibreOffice server, 
+as well as your locale files (optional), unpack them and 
+convert them to the Puppy Squash File System (sfs). This is 
+over 150MB download and can take a long time on a slow 
+connection. The conversion to sfs can take a long time on 
+slow machines. 
+
+Do you want to continue?")
+YESLABEL=$(gettext "Yes")
+NOLABEL=$(gettext "No")
+Xdialog --title "$LONG_TITLE" --ok-label "$YESLABEL" --cancel-label "$NOLABEL" --yesno "$TXT1" 0 0 0
+RETVAL1="$?"
+case $RETVAL1 in
+0) echo ok ;;
+1) exit ;;
+255) exit ;;
+esac
+#choose stable or testing
+TXT2=$(gettext "Please choose whether you want the latest stable or the testing version")
+TXT2a=$(gettext "Please note that testing version is not always updated, recommend stable")
+OKLABEL=$(gettext "Stable")
+NOLABEL=$(gettext "Testing")
+Xdialog --title "LibreOffice" --ok-label "$OKLABEL" --cancel-label "$NOLABEL" --yesno "$TXT2 \n$TXT2a" 0 0 0
+RETVAL2="$?"
+case $RETVAL2 in
+0) STABILITY="stable" ;;
+1) STABILITY="testing" ;;
+255) exit ;;
+esac
+#set -x
+#set check boxes
+CHKBOX0=true #> /tmp/libre_check
+CHKBOX1=true #>> /tmp/libre_check
+#[ "`echo $LANG`|head -c5`" = "en_US" ] && CHKBOX1=false||CHKBOX1=true #insurance
+#get pupmode
+. /etc/rc.d/PUPSTATE
+echo "PUPMODE = ${PUPMODE}" >> $LOG 
+INFOMSG1=$(gettext "Please wait a moment")
+gtkdialog-splash  -close never -icon /usr/share/pixmaps/throbber.gif -bg green -text "$INFOMSG1" &
+sleep 1
+
+#check if we have libreoffice or openoffice installed and if so abort
+#if [ -x /opt/libreoffice/program/soffice ];then 
+if [ -x /opt/libreoffice*/program/soffice ] || [ -x /opt/libo-dev*/program/soffice ] ;then 
+ ALERTMSGa=$(gettext "You already have an installation of LibreOffice. Please unload it from the Bootmanager or if a full install, uninstall with PPM before you proceed to install this version of LibreOffice")
+ killall yaf-splash && gtkdialog-splash -icon gtk-dialog-warning -deco "Libreoffice Download" -bg thistle -close never -text "$ALERTMSGa"
+ exit
+# elif [ -x /opt/openoffice.org3/program/soffice ];then 
+ elif [ -x /opt/openoffice*/program/soffice ];then 
+ ALERTMSGb=$(gettext "You have an installation of OpenOffice. Please unload it from the Bootmanager or if a full install, uninstall with PPM before you proceed to install LibreOffice")
+ killall yaf-splash && gtkdialog-splash -icon gtk-dialog-warning -deco "Libreoffice Download" -bg thistle -close never -text "$ALERTMSGb"
+ exit
+fi
+#checkbox state for locale
+USELANG=`echo $LANG|head -c5`
+#sort out localisation
+case $USELANG in
+en_GB|en_AU|en_DK|en_NZ|en_HK|en_IN|en_SG|en_IE)
+LANGUAGE="en-GB" ;;
+en_ZA)
+LANGUAGE="en-ZA" ;;
+en_US)
+LANGUAGE="en-US" ;;
+ca_ES|ca_IT|ca_FR|ca_AD)
+Xdialog -yesno "¿Requereixen Valenciana?" 0 0 0  #*special case for libreoffice
+ case $? in
+ 0)LANGUAGE="ca-XV" ;;
+ 1)LANGUAGE="ca" ;; 
+ 255)LANGUAGE="ca" ;;
+ esac ;;
+be_BY)
+LANGUAGE="be-BY" ;;
+pa_IN)
+LANGUAGE="pa-IN" ;;
+pt_BR)
+LANGUAGE="pt-BR" ;;
+mai_I)
+LANGUAGE="mai-IN" ;;
+sa_IN)
+LANGUAGE="sa-IN" ;;
+zh_CN|ah_SG|zh_HK)
+LANGUAGE="zh-CN" ;;
+zh_TW)
+LANGUAGE="zh-TW" ;;
+*)LANGUAGE=`echo $LANG|cut -d '_' -f1` ;; #will get libre locale code, mostly first 2 letters of locale code
+esac
+#special case for chkbox1
+CBLANG="$LANGUAGE"
+#disable langpack checkbox for US
+echo $LANGUAGE
+echo $LANGUAGE >> $LOG
+if [ "$LANGUAGE" = "en-US" ];then
+ STATE="disabled"
+ CHKBOX1=false
+ else
+ STATE="enabled"
+fi
+
+#size check function
+SFSSIZEEXPANDED=750000 #approx size needed to expand libreoffice and recompress in KB
+. /etc/DISTRO_SPECS
+case $DISTRO_NAME in
+*64)HOMESAVE=$PUP_HOME ;; #FD, slackbone
+*)HOMESAVE=`echo $PUPSAVE|cut -d ',' -f1` ;;
+esac
+
+# new # reworked 20130218
+ramcheck(){ #check if we can build in RAM, makes it possible to use PUPMODE=13
+	ARAM=$(free|grep -iE "Mem"|awk '{print $4}') #gets free RAM
+	ASWAP=$(free|grep  -iE "Swap"|awk '{print $4}') #gets free Swap
+	TOTMEM=$((${ARAM}+${ASWAP}))
+	[ "$TOTMEM" -gt 1000000 ] && BUILDRAMOK=yes || BUILDRAMOK=no #we build if we can fit into 900M, allow some breathing space #130219 upped to 1GB
+	case $PUPMODE in
+	2|6|12) #can't be slow media
+	if [ "$BUILDRAMOK" = "yes" ];then #simple yes/no to opt out of RAM build 130219
+	  DLGEx1=$(gettext "Do you want to build in RAM?")
+	  TT1=$(gettext "By default, if you have large RAM the program will build Libreoffice in RAM. Choosing No forces the build to your hard disk. If you do not have large RAM this is handled automatically.")
+	  export ramchoice="<window>
+	  <vbox>
+	   <text use-markup=\"true\" tooltip-text=\"$TT1\"><label>\"<big><big>$DLGEx1</big></big>\"</label></text>
+	   <hbox homogeneous=\"true\">
+	    <button yes></button>
+	    <button no></button>
+	   </hbox>
+      </vbox>
+      </window>"
+      eval `gtkdialog -p ramchoice -c`
+      
+	  [ "$EXIT" = "No" ] && BUILDRAMOK=no && gtkdialog-splash -timeout 2 -bg yellow -text "$(gettext "Not building in RAM")"
+	fi
+	;;
+	esac
+	echo "Is it ok to build in RAM? $BUILDRAMOK"
+	echo "Is it ok to build in RAM? $BUILDRAMOK" >> $LOG
+}
+
+sizecheck(){ #Check if we have space to convert the libo debs to an sfs
+	#only supports fast partitions #and RAM 130209
+	case $PUPMODE in
+	12|6)
+	ramcheck
+	if [ "$BUILDRAMOK" = "yes" ];then #if yes we build in /tmp by default
+	BASEDIR=/tmp
+	HOMEDIR="/initrd$PUP_HOME"
+	[[ "$DISTRO_NAME" = "Fatdog64" || "$DISTRO_NAME" = "slackbone64" ]]&& HOMEDIR=$PUP_HOME
+	else
+	  FREESIZEAVAIL=`df -k|grep -w $HOMESAVE|awk '{print $4}'` #bugfix -w 120502
+	  ERRMSG1=$(gettext "Sorry, you don't have the space to construct a libreoffice sfs")
+	  if [[ "$FREESIZEAVAIL" -lt "$SFSSIZEEXPANDED" ]];then killall yaf-splash && Xdialog --timeout 5 -msgbox "$ERRMSG1" 0 0 0
+	  exit
+	  fi
+	  BASEDIR="/initrd$PUP_HOME" HOMEDIR="/initrd$PUP_HOME"
+	  [[ "$DISTRO_NAME" = "Fatdog64" || "$DISTRO_NAME" = "slackbone64" ]]&& BASEDIR=$PUP_HOME HOMEDIR=$BASEDIR
+	fi 
+	;;
+	2)
+	ramcheck
+	if [ "$BUILDRAMOK" = "yes" ];then #if yes we build in /tmp by default
+	BASEDIR=/tmp HOMEDIR="/"
+	 else
+	  FREESIZEAVAIL=`df -k |head -n2|tail -n1| tr -s ' '| cut -f4 -d ' '` #`df -k |  grep '/dev/root' | tr -s ' '| cut -f4 -d ' '` 
+	  ERRMSG2=$(gettext "Sorry, you don't have the space to install libreoffice")
+	  if [[ $FREESIZEAVAIL -lt $SFSSIZEEXPANDED ]];then killall yaf-splash && Xdialog --timeout 5 -msgbox "$ERRMSG2" 0 0 0
+	  exit
+	  #BASEDIR="/" HOMEDIR="/"
+	  fi
+	  BASEDIR="/" HOMEDIR="/" #20130807
+	fi
+	;;
+	3|7|13) #120217 added 7
+	ramcheck
+	if [ "$BUILDRAMOK" = "yes" ];then #if yes we build in /tmp by default
+	BASEDIR=/tmp HOMEDIR="/initrd$PUP_HOME"
+	  else ERRMSG2c=$(gettext "USB low RAM installs are unsupported, Sorry")
+	  killall yaf-splash && Xdialog --timeout 5 -msgbox "$ERRMSG2c" 0 0 0 
+	  exit
+	fi
+	;;
+	*)ERRMSG2c=$(gettext "USB low RAM and DVD installs are unsupported, Sorry")
+	killall yaf-splash && Xdialog --timeout 5 -msgbox "$ERRMSG2c" 0 0 0 
+	exit
+	;;
+	esac
+	echo "building in $BASEDIR"
+	echo "building in $BASEDIR" >> $LOG
+	[ "$BASEDIR" != "$HOMEDIR" ] && echo "moving to $HOMEDIR" \
+	&& echo "moving to $HOMEDIR" >> $LOG
+	
+}
+
+sizecheck
+
+#size check passed so we create working dirs
+[ -d $BASEDIR/libre_download ] && rm -rf $BASEDIR/libre_download #in case we had previous failure
+mkdir $BASEDIR/libre_download
+DLDIR="$BASEDIR/libre_download"	
+#probe server
+#Interesting note that this server does not like being probed too much. The idea was to put more rigorous code
+#in here but it resulted in too many "download failed" messages
+####http://download.documentfoundation.org/libreoffice/ base uri 
+#get the database (current version, langpack info, helpack info)
+#ARCH="x86" #edit this if you have 64 bit arch, no doesn't work, 64 supported from 20110911
+GETARCH="`uname -m`"
+case $GETARCH in 
+i486|i586|i686) ARCH="x86" ; DIRARCH="x86" ;;
+*) ARCH="x86-64" ; DIRARCH="x86_64" ;;
+esac
+LIBO_URI="http://download.documentfoundation.org/libreoffice/$STABILITY"     #eg /3.3.1/deb/x86/"
+CNT=0
+#until [ -f /tmp/index.html ] || [ $CNT = 5 ]; do
+until [ -f /tmp/$STABILITY ] || [ -f /tmp/index.html ] || [ $CNT = 5 ]; do
+ wget -t0 -T5 -4 -q -P /tmp ${LIBO_URI}
+ sleep 0.5
+ CNT=`expr $CNT + 1`
+ done
+[ -f /tmp/index.html ] && mv /tmp/index.html /tmp/$STABILITY
+#ok, this is the danger with an app like this. The server has changed format of the pages!
+#get version
+LIBO_VER_DIR=`grep [0-9] /tmp/$STABILITY|grep '\.'|grep -v "html"|cut -d '>' -f6|cut -d '/' -f1`
+grep [0-9] /tmp/$STABILITY|grep '\.'|grep -v "html"|cut -d '>' -f6|cut -d '/' -f1 > /tmp/office_VERS
+#sort out how many versions are available
+num_LIBO_VER_DIR=`echo $LIBO_VER_DIR | wc -w`
+if [ $num_LIBO_VER_DIR -gt 1 ];then 
+	#LIBOVER1=`echo $LIBO_VER_DIR|cut -d ' ' -f1`
+	#LIBOVER2=`echo $LIBO_VER_DIR|cut -d ' ' -f2`
+	TEXT="$(gettext "There are $num_LIBO_VER_DIR versions available, choose the one you want")"
+	 export LIBOVERSgui="<window title=\"Libreoffice\">
+	  <vbox>
+	   <text><label>$TEXT</label></text>
+	   <tree>
+         <label>Choose which version</label>
+         <variable>LIBO_VER_DIR</variable>
+         <input>cat /tmp/office_VERS</input>
+         
+         <action signal=\"button-release-event\">exit:chosen</action>
+       </tree>
+	  </vbox>
+	 </window>"
+	 eval $(gtkdialog -p LIBOVERSgui -c)
+	 [ "$EXIT" = "abort" ] && exit
+	 
+	 gtkdialog-splash -bg green -timeout 2 -text "$LIBO_VER_DIR chosen"
+	
+	 else
+	LIBO_VER_DIR="`echo $LIBO_VER_DIR|head -n1`"
+fi
+if [ "`echo $LIBO_VER_DIR|grep '\-'`" != "" ];then LIBO_VER=`echo "$LIBO_VER_DIR"|sed 's/\-//'`
+ else LIBO_VER="$LIBO_VER_DIR"
+fi
+#testing names have changed
+if [ "$STABILITY" = "testing" ];then
+  LIBO_VER=${LIBO_VER}test
+fi
+LIBO_MAJ_VER=${LIBO_VER_DIR%.*}
+echo "this is $LIBO_VER" #debug
+echo "this is $LIBO_VER" >> $LOG
+echo "major ver: $LIBO_MAJ_VER"
+echo "major ver: $LIBO_MAJ_VER" >> $LOG
+rm -f /tmp/index.html #UNCOMMENT
+rm /tmp/office*
+#read
+#echo $LIBO_VER_DIR > /tmp/libo_version
+BADMSG1=$(gettext "Unable to get the version information. If you selected the testing version then it is likely that the testing version is unavailable. Try the stable version.")
+BADMSG2=$(gettext "Unable to get the version information. It is possible that the LibreOffice servers are too busy, please try again later.")
+if [ "$STABILITY" = "testing" ];then
+  if [ "$LIBO_VER_DIR" = "" ];then  
+   killall yaf-splash && gtkdialog-splash -close box -icon gtk-dialog-error -bg hotpink -text "$BADMSG1"
+   exit
+  fi
+ else
+  if [ "$LIBO_VER_DIR" = "" ];then
+   killall yaf-splash && gtkdialog-splash -close box -icon gtk-dialog-error -bg hotpink -text "$BADMSG2"
+   exit
+  fi
+fi
+#get database info
+CNT=0
+#echo ${LIBO_URI}/${LIBO_VER_DIR}/deb/${DIRARCH}/
+until [ -f /tmp/index.html ] || [ $CNT = 5 ]; do
+ wget -t0 -T5 -4 -q -P /tmp ${LIBO_URI}/${LIBO_VER_DIR}/deb/${DIRARCH}/
+ sleep 0.5
+ CNT=`expr $CNT + 1`
+ done
+grep Lib /tmp/index.html|cut -d '=' -f3|cut -d '"' -f2|grep gz$ |grep -v "install" > /tmp/office_online_database_extrapacks 
+#grep LibO /tmp/index.html|cut -d '>' -f6|cut -d '=' -f2|grep gz\"$ |grep -v "install" > /tmp/office_online_database_extrapacks #why am I doing this?
+#LIBO_EN_US=`grep LibO /tmp/index.html|cut -d '>' -f6|cut -d '=' -f2|grep "install-deb_en-US.tar.gz\"$" |grep -v "^\"LibO-SDK"|sed -e 's/\"//g'` 
+LIBO_EN_US=`grep Lib /tmp/index.html|cut -d '=' -f3|cut -d '"' -f2|grep gz$ |grep -E "install-deb_en-US.tar.gz$|Linux_x86_deb.tar.gz$|Linux_x86-64_deb.tar.gz$" |grep -v SDK` #added new for 4.0 130208, 130217
+rm -f /tmp/index.html #fix 120620
+LIBO_VERSION=${LIBO_EN_US%_*_*_*_*}
+[ $(echo $LIBO_VERSION|grep -i "beta") ] && LOEXEC=lodev || LOEXEC=libreoffice
+ERRMSG3=$(gettext "ABORTING")
+ERRMSG4=$(gettext "failed to get package info")
+[ "$LIBO_EN_US" = "" ]&& killall yaf-splash && gtkdialog-splash -close box -icon gtk-dialog-error -bg red -text "**********$ERRMSG3************ $ERRMSG4" && exit
+
+#rm -f /tmp/libre_extras
+#for extras fn
+function chooser(){
+	echo $EXTCHOICE >> /tmp/libre_extras
+}
+#extras function for extra languages
+extras(){
+	DLG7=$(gettext "Here you can chose to add some extra help and language packs. Don't add too many, as if the download breaks you will have to start again")
+	DLG8=$(gettext "Choose your extras")
+	DLG9=$(gettext "Check extras")
+	DLG10=$(gettext "Start again")
+	echo "#extras" > /tmp/libre_extras
+	export EXTRAS="<window title=\"LibreOffice $DLG6\">
+	 <vbox>
+	  <hbox homogeneous=\"true\">
+	   <text><label>$DLG7</label></text>
+	  </hbox>
+	  <hbox height-request=\"400\">
+	   <tree>
+        <label>$DLG8</label>
+        <variable>EXTCHOICE</variable>
+        <input>cat /tmp/office_online_database_extrapacks</input>
+        <action signal=\"button-release-event\">chooser</action>
+       </tree>
+      </hbox>
+      <hbox>
+       <button ok>
+        <action>getlibre &</action>
+        <action>exit:getlibre</action>
+       </button>
+       <button>
+        <input file stock=\"gtk-dialog-question\"></input>
+        <label>$DLG9</label>
+        <action>xmessage -c -file /tmp/libre_extras</action>
+       </button>
+       <button>
+        <input file stock=\"gtk-clear\"></input>
+        <label>$DLG10</label>
+        <action>rm -f /tmp/libre_extras</action>
+       </button>
+       <button cancel></button>
+      </hbox>
+     </vbox>
+    </window>"
+    gtkdialog3 -p EXTRAS
+    unset EXTRAS
+}
+
+#download function (called from gui)
+getlibre(){
+	MAJ_MAJ=${LIBO_MAJ_VER%.*}
+	[ "$MAJ_MAJ" -ge 4 ] && LIBO_VERSION=LibreOffice_${LIBO_VER} #oh crap! who is the freakin webmaster here? .. makes Barry look like a linux saint! 
+	[ "$MAJ_MAJ" -ge 4 ] && DEB='' || DEB='-deb'
+	[ "$MAJ_MAJ" -ge 4 ] && NEWDEB="_deb" || NEWDEB=''
+	echo $CHKBOX0
+	echo $CHKBOX1
+	echo "help enabled? $CHKBOX0" >> $LOG
+	echo "lang enabled? $CHKBOX1" >> $LOG
+	
+	if [[ $CHKBOX0 = false && $CHKBOX1 = false ]];then LANGUAGE="en-US"
+	fi
+	sleep 1
+	#. /tmp/libre_check
+	#download error text
+	ERRDLD=$(gettext "Failed to download $THISPKG. Please try again later")
+	#get helppack #fix 120620
+	HELPPACKURI=""${LIBO_VERSION}"_Linux_${ARCH}${NEWDEB}_helppack${DEB}_"
+	echo $HELPPACKURI
+	echo $HELPPACKURI >> $LOG
+	if [ "$CHKBOX0" = "true" ];then
+	 TITLE1=$(gettext "Help files")
+	 HELPPACK="${HELPPACKURI}${LANGUAGE}.tar.gz" 
+	 echo "rxvt -background yellow -foreground black -title \"$TITLE1\" -geometry 80x10  -e wget -t0 --waitretry=5 -4 -P $DLDIR -c ${LIBO_URI}/${LIBO_VER_DIR}/deb/${DIRARCH}/$HELPPACK" > /tmp/getlibre_help
+	 . /tmp/getlibre_help
+	 #test if we got it
+	 if [ ! -f $DLDIR/$HELPPACK ];then 
+	  THISPKG=$HELPPACK
+	  gtkdialog-splash -bg hotpink -icon gtk-dialog-error -timeout 6 -text "$ERRDLD"
+	  exit
+	  rm -f /tmp/getlibre_help
+	 fi
+     rm -f /tmp/getlibre_help
+	fi
+	#get langpack #en_US disabled #fix 120620
+	LANGPACKURI=""${LIBO_VERSION}"_Linux_${ARCH}${NEWDEB}_langpack${DEB}_"
+	echo $LANGPACKURI
+	echo $LANGPACKURI >> $LOG
+	if [ "$CHKBOX1" = "true" ];then 
+	 TITLE2=$(gettext "Locale files")
+	 LANGPACK="${LANGPACKURI}${CBLANG}.tar.gz"
+	 echo "rxvt -background lightblue -foreground black -title \"$TITLE2\" -geometry 80x10  -e wget -t0 --waitretry=5 -4 -P $DLDIR -c ${LIBO_URI}/${LIBO_VER_DIR}/deb/${DIRARCH}/$LANGPACK" > /tmp/getlibre_lang
+	 . /tmp/getlibre_lang
+	 #test if we got it
+	 if [ ! -f $DLDIR/$LANGPACK ];then 
+	  THISPKG=$LANGPACK
+	  gtkdialog-splash -bg hotpink -icon gtk-dialog-error -timeout 6 -text "$ERRDLD"
+	  rm -f /tmp/getlibre_lang
+	  LANGUAGE=$CBLANG
+	  exit
+	 fi
+     #rm -f /tmp/getlibre_lang
+	fi
+	TITLE3=$(gettext "Downloading LibreOffice")
+	echo "rxvt -background lightgreen -foreground black -title \"$TITLE3\" -geometry 80x10  -e wget -t0 --waitretry=5 -4 -P $DLDIR -c ${LIBO_URI}/${LIBO_VER_DIR}/deb/${DIRARCH}/$LIBO_EN_US" > /tmp/getlibre
+    . /tmp/getlibre
+    if [ ! -f $DLDIR/$LIBO_EN_US ];then 
+	 THISPKG=$LIBO_EN_US
+	 gtkdialog-splash -bg hotpink -icon gtk-dialog-error -timeout 6 -text "$ERRDLD"
+	 rm -f /tmp/getlibre
+	 exit
+	fi
+	rm -f /tmp/getlibre
+	#grab extras if chosen
+	if [ -f /tmp/libre_extras ];then
+	 echo "ok" > /tmp/libre_xtra_for_naming
+	 TITLE4=$(gettext "Downloading extra packs")
+	  
+	   grep -v '#' /tmp/libre_extras|\
+	   while read LINE; 
+	    do 
+	     echo "rxvt -background black -foreground white -title \"$TITLE4\" -geometry 80x10  -e wget -t0 --waitretry=5 -4 -P $DLDIR -c ${LIBO_URI}/${LIBO_VER_DIR}/deb/${DIRARCH}/$LINE" > /tmp/getlibre_extra_packs
+	     . /tmp/getlibre_extra_packs
+	     if [ $? -ne 0 ];then gtkdialog-splash -bg hotpink -icon gtk-dialog-error -timeout 6 -text "$ERRDLD" && break
+	       else continue
+	     fi
+	   done
+    fi
+    ######at this stage we got everything.... unpack
+    INFOMSG2a=$(gettext "Please wait while")
+    INFOMSG2b=$(gettext "is unpacked and repacked into an sfs")
+    gtkdialog-splash -close never -icon /usr/share/pixmaps/throbber.gif -bg yellow -text "$INFOMSG2a $LIBO_EN_US $INFOMSG2b" &
+    sleep 1
+    #kill `ps| grep  MAIN_DLG|grep -v "grep"|awk '{print $1}'`
+    cd $DLDIR
+    sleep 5
+	#extract tarballs
+	for I in *
+	 do tar -xzf $I
+	 rm -f $I #remove tarballs
+	done
+	
+	sync
+    sleep 1 #extracted names of dirs are not the same as name of tarball :|
+    #LIBO_PKGDIR=`ls -l|grep ^d| grep install|tr ' ' '\n'|grep install` 
+    PRE_LIBO_PKGDIR=`find . -type d -name *install*`
+    [ ! "$PRE_LIBO_PKGDIR" ] && PRE_LIBO_PKGDIR=`find . -type d -name *_deb`
+    LIBO_PKGDIR=`basename $PRE_LIBO_PKGDIR` 
+    #LIBO_HELPDIR=`ls -l |grep ^d| grep helppack|tr ' ' '\n'|grep helppack` 
+    if [ $CHKBOX0 = true ];then PRE_LIBO_HELPDIR=`find . -type d -name *helppack*` 
+      LIBO_HELPDIR=`basename $PRE_LIBO_HELPDIR`
+    fi
+    #echo $LIBO_HELPDIR
+	for h in $LIBO_HELPDIR
+	 do mv -f ./$h/DEBS/* $LIBO_PKGDIR/DEBS
+	 done
+	#LIBO_LANGDIR=`ls -l |grep ^d| grep langpack|tr ' ' '\n'|grep langpack` 
+    if [ $CHKBOX1 = true ];then PRE_LIBO_LANGDIR=`find . -type d -name *langpack*` 
+      LIBO_LANGDIR=`basename $PRE_LIBO_LANGDIR`
+	fi
+	for lg in $LIBO_LANGDIR
+	 do mv -f ./$lg/DEBS/* $LIBO_PKGDIR/DEBS
+	 done
+	sync
+	#[ "$LIBO_HELPDIR" != "" ] && mv -f ./$LIBO_HELPDIR/DEBS/* $LIBO_PKGDIR/DEBS
+	#[ "$LIBO_LANGDIR" != "" ] && mv -f ./$LIBO_LANGDIR/DEBS/* $LIBO_PKGDIR/DEBS
+	cd $LIBO_PKGDIR/DEBS
+	#cd DEBS
+	echo `pwd` #debug
+	echo "Current working dir is `pwd`" >> $LOG
+	mv -f ./desktop-integration/* ./
+	rm -rf ./desktop-integration
+	mkdir workdir
+	DIR="workdir"
+	#unpack debs
+	    LIST=`ls|grep deb$` 
+		for i in $LIST;do
+		ONEBINARYPKG=$i
+		PKGNAME="`basename $ONEBINARYPKG .deb`" #ex: bash_3.2-4ububtu1_i386
+		dpkg-deb -x $ONEBINARYPKG $DIR/
+		if [ $? -ne 0 ];then
+		echo "ERROR: failed to unpack $PKGNAME"
+		echo "ERROR: failed to unpack $PKGNAME" >> $LOG
+		continue
+		fi
+		done
+    #fixup DOTdesktop files for puppy
+	cd `pwd`/workdir/opt/${LOEXEC}${LIBO_MAJ_VER}/share/xdg
+	rm -f javafilter.desktop
+	rm -f qstart.desktop
+	DESKLIST=`ls|grep desktop$`
+	for j in $DESKLIST
+	 do
+	 #fix icon
+	 ICON=`grep -w Icon $j|cut -d '=' -f2`
+	 #ICON=${ICON#*-}
+	 BETA=$(echo $LIBO_PKGDIR|grep -i beta) 
+	 [ "$BETA" ] && ICON_PREFIX=${LOEXEC}${LIBO_MAJ_VER}- || ICON_PREFIX=""
+	 [ "$ICON_PREFIX" ] && EXEC_PREFIX=${ICON_PREFIX}
+	 LIB4=$(echo $LIBO_PKGDIR|grep "_4\.[0-9]")
+	 [ "$LIB4" ] && EXEC_PREFIX=${LOEXEC}${LIBO_MAJ_VER}- || EXEC_PREFIX="" #130209
+	 NEWICON="/usr/share/icons/hicolor/48x48/apps/${ICON_PREFIX}${ICON}.png"
+     sed -i "s%$ICON%$NEWICON%" $j #playdayz 120409 # 1,5 reverted 130209
+     #fix category
+     CATEGORY=`grep -w Categories $j|cut -d '=' -f2`
+     [[ "$j" = "startcenter.desktop" || "$j" = "printeradmin.desktop" || "$j" = "writer.desktop" ]]&& NEWCATEGORY='WordProcessor;GNOME;GTK;X-Red-Hat-Base;'
+     [[ "$j" = "base.desktop" || "$j" = "math.desktop" || "$j" = "calc.desktop" ]]&& NEWCATEGORY='Office;Database;Spreadsheet;Science;Math;GNOME;GTK;'
+     [[ "$j" = "draw.desktop" || "$j" = "impress.desktop" ]]&& NEWCATEGORY='RasterGraphics'
+     sed -i "s|Categories=$CATEGORY|Categories=$NEWCATEGORY|" $j 2>/dev/null
+     #fix exec #changed 20110607
+     LIBOminorver=`echo $LIBO_VER|cut -d '.' -f2` #ex if 3.4.0 is 4
+     if [[ "$MAJ_MAJ" = 3 && $LIBOminorver -lt 4 ]];then
+     EXEC=`grep -w Exec $j|cut -d '=' -f2`
+     EXECEXACT=`echo $EXEC|cut -d '-' -f2|cut -d ' ' -f1`
+     [ "$j" = "startcenter.desktop" ]&& EXECEXACT=office
+     [ "$j" = "printeradmin.desktop" ]&& EXECEXACT=padmin
+     NEWEXEC="/opt/libreoffice${DIRVER}/program/s${EXECEXACT}"
+     sed -i "s|Exec=$EXEC|Exec=$NEWEXEC|" $j 2>/dev/null
+      else
+       #if [[ $BETA || "$LIB4" ]];then #experimental for betas 120621 # add 4.0 130209
+        sed -i "s|%U||g" $j 2>/dev/null #-e 
+               #-e "s|libreoffice|${LOEXEC}${LIBO_MAJ_VER}|" $j 2>/dev/null
+       #fi
+     UNITYCOMPAT=$(grep "^X" $j)
+     fi
+     if [ "$UNITYCOMPAT" ];then
+        cat $j|while read XLINE
+          do 
+             if [ "$XLINE" = "$UNITYCOMPAT" ];then
+              break
+              else echo $XLINE >> /tmp/$j
+             fi
+          done
+     fi
+     if [ -f /tmp/$j ];then cp -af /tmp/$j $j
+     rm /tmp/$j
+     fi
+     #now say 50 Hail Mary's
+    done #!
+    rm sed* 2>/dev/null
+    #uh.. check printer admin
+    EXECP=`grep -w Exec printeradmin.desktop`
+    if [[ "$MAJ_MAJ" = 3 && $LIBOminorver -lt 4 ]];then
+    sed -i "s|$EXECP|padmin|" printeradmin.desktop
+      else
+    sed -i "s|$EXECP|Exec=${EXEC_PREFIX}printeradmin|" printeradmin.desktop
+    fi
+    
+    LANGLIB="_${LANGUAGE}"
+    [ "$DIRARCH" = "x86_64" ]&& LANGLIB="_64_${LANGUAGE}"
+    
+    killall yaf-splash
+    INFOMSG3=$(gettext "Now creating") 
+    #using throbber in gtkdialog-splash, required a hack 20110319
+    #gtkdialog-splash -close never -bg lightgreen -icon /usr/share/pixmaps/throbber.gif -text "$INFOMSG3 LibreOffice-${LIBO_VER}${LANGLIB}.sfs" &
+	cd ../
+	cd ../
+	cd ../
+	cd ../
+	cd ../
+	sync
+	#get installed size
+	#INSTALLEDSIZE=`du -s -k workdir|awk '{print $1}'`
+	#echo $INSTALLEDSIZE > /tmp/libre_installed_size
+	#remove invalid symlinks
+	rm -f ./workdir/usr/share/applications/${LOEXEC}*-javafilter.desktop #120409 fix
+	
+	#120502 add integration ########################################################
+	#mimeicons ############################################# This is bad, need to get away from root!
+	MIMEICONDIR=root/.config/rox.sourceforge.net/MIME-icons
+	#MIMEICONDIR=usr/local/apps/ROX-Filer/ROX/MIME #fails, maybe need to create a skeleton and move to $HOME
+	mkdir -p ./workdir/${MIMEICONDIR}
+	cd ./workdir
+	#word
+	for word in application_msword application_rtf application_vnd.oasis.opendocument.text application_vnd.oasis.opendocument.text-template application_vnd.openxmlformats-officedocument.wordprocessingml.document
+	 do
+	 cp usr/share/icons/hicolor/48x48/apps/${LOEXEC}${LIBO_MAJ_VER}-writer.png  ${MIMEICONDIR}/${word}.png 2>/dev/null
+	 done
+	#spread
+	for spread in application_vnd.ms-excell application_vnd.oasis.opendocument.spreadsheet application_vnd.oasis.opendocument.spreadsheet-template application_vnd.openxmlformats-officedocument.spreadsheetml.sheet text_cvs
+	 do 
+	 cp usr/share/icons/hicolor/48x48/apps/${LOEXEC}${LIBO_MAJ_VER}-calc.png  ${MIMEICONDIR}/${spread}.png 2>/dev/null
+	 done
+	 #ppoint #fix 20121027
+	for ppoint in application_ms-powerpoint application_vnd.ms-powerpoint application_vnd.oasis.opendocument.presentation application_vnd.oasis.opendocument.presentation-template application_vnd.openxmlformats-officedocument.presentationml.presentation
+	 do 
+	 cp usr/share/icons/hicolor/48x48/apps/${LOEXEC}${LIBO_MAJ_VER}-impress.png  ${MIMEICONDIR}/${ppoint}.png 2>/dev/null
+	 done
+	#draw
+	for draw in application_vnd.oasis.opendocument.graphics application_vnd.oasis.opendocument.graphics-template
+	 do 
+	 cp usr/share/icons/hicolor/48x48/apps/${LOEXEC}${LIBO_MAJ_VER}-draw.png  ${MIMEICONDIR}/${draw}.png 2>/dev/null
+	 done
+	#math
+	cp usr/share/icons/hicolor/48x48/apps/${LOEXEC}${LIBO_MAJ_VER}-math.png  ${MIMEICONDIR}/application_vnd.oasis.opendocument.formula.png 2>/dev/null
+	#base
+	cp usr/share/icons/hicolor/48x48/apps/${LOEXEC}${LIBO_MAJ_VER}-base.png  ${MIMEICONDIR}/application_vnd.oasis.opendocument.database.png
+	
+	cd -
+	#END MIME ICONS
+	#mime scripts ###########################################
+	SH='#!/bin/bash'
+	
+	#MIMEDIR=./workdir/etc/xdg/rox.sourceforge.net/MIME-types
+	MIMEDIR=./workdir/root/.config/rox.sourceforge.net/MIME-types
+	mkdir -p ${MIMEDIR}
+	#WORD
+	WORD=application_vnd.oasis.opendocument.text-template
+	echo -e ""$SH" \nexec defaultwordprocessor \"\$@\"" > ${MIMEDIR}/$WORD
+	#SPREAD
+	for SPREAD in application_vnd.ms-excel application_vnd.oasis.opendocument.spreadsheet-template application_vnd.openxmlformats-officedocument.spreadsheetml.sheet text_csv
+	 do echo -e ""$SH" \nexec defaultspreadsheet \"\$@\"" > ${MIMEDIR}/$SPREAD
+	done
+	#PPOINT
+	PPOINT=application_vnd.ms-powerpoint 
+	echo -e ""$SH" \nexec defaultpresentation \"\$@\"" > ${MIMEDIR}/$PPOINT
+	#MATH
+	MATH=application_vnd.oasis.opendocument.formula
+	echo -e ""$SH" \nexec "${LOEXEC}""${LIBO_MAJ_VER}" --math \"\$@\"" > ${MIMEDIR}/$MATH
+	#DRAW
+	for DRAW in application_vnd.oasis.opendocument.graphics application_vnd.oasis.opendocument.graphics-template
+	 do echo -e ""$SH" \nexec defaultdraw \"\$@\"" > ${MIMEDIR}/$DRAW
+	done
+	#BASE
+	BASE=application_vnd.oasis.opendocument.database
+	echo -e ""$SH" \nexec "${LOEXEC}""${LIBO_MAJ_VER}" --base \"\$@\"" > ${MIMEDIR}/$BASE
+	#make executable
+	for SCRIPT in ${MIMEDIR}/*
+	 do chmod 755 $SCRIPT
+	 done
+	#END MIME
+	
+# set defaults
+for DEFAULT in draw impress calc writer
+ do
+  case $DEFAULT in
+   draw)XX=draw ;;
+   impress)XX=presentation ;;
+   calc)XX=spreadsheet ;;
+   writer)XX=wordprocessor ;;
+  esac
+ echo "#!/bin/sh
+exec ${LOEXEC}${LIBO_VER_DIR%.*} --${DEFAULT} \"\$@\"" > ./workdir/usr/bin/default${XX}
+ chmod 755 ./workdir/usr/bin/default${XX}
+ done
+
+	#woohoo, time for the business end
+	#############perhaps later fork the full install here 
+	#make the sfs #now in a fancy terminal
+	echo ${LANGLIB}
+	
+	if [ -f /tmp/libre_xtra_for_naming ];then EXTRA="_Extra"
+	 else EXTRA=""
+	fi
+	##test mksquashfs for xz compression
+	#mksquashfs -help &>/tmp/mk
+	#grep -qw "xz" /tmp/mk && OPTION="-comp xz" COMP=_xz|| OPTION="" COMP=_gz #bug with wary, we use kernel > 3 for xz
+	KVER=`uname -r`
+	KMAJVER=${KVER%%.*}
+	if [ "$KMAJVER" -ge 3 ];then
+	  OPTION="-comp xz" COMP=_xz
+	  else
+	  OPTION="" COMP=_gz
+	fi
+	rm -f /tmp/libre_xtra_for_naming
+	LIBOBUILD=LibreOffice-${LIBO_VER}${LANGLIB}${EXTRA}${COMP}
+	echo "rxvt -bg darkgreen -fg yellow -geometry 80x10 -title \"$INFOMSG3 ${LIBOBUILD}.sfs\" -e mksquashfs workdir ${LIBOBUILD}.sfs "$OPTION"" > /tmp/get_libre_sfs
+	. /tmp/get_libre_sfs
+	rm -f /tmp/get_libre_sfs
+	sleep 1 
+	sync
+	#sanity check
+	INFOMESSAGE4a=$(gettext "Sorry, constructing")
+	INFOMESSAGE4b=$(gettext "has failed")
+	#check it made ok
+	if [ ! -f ${LIBOBUILD}.sfs ];then
+	 gtkdialog-splash -timeout 5 -close box -icon gtk-dialog-warning -bg red -text "$INFOMESSAGE4a ${LIBOBUILD}.sfs $INFOMESSAGE4b" && exit
+	cd $BASEDIR 
+	rm -rf $DLDIR #remove on failure #UNCOMMENT
+	fi
+	#doublecheck
+	SFSSIZE=`stat -c %s ${LIBOBUILD}.sfs`
+	if [[ $SFSSIZE -lt 125000000 ]];then 
+	#there is no way to calculate exact size (that I know of) of sfs before construction. 
+	#140000000 assumes that "we got this far, surely we'll make it now!" #will reduce this number when I move to xz compression (DONE)#reduced to 125000000
+	 gtkdialog-splash -timeout 5 -close box -icon gtk-dialog-warning -bg red -text "$INFOMESSAGE4a ${LIBOBUILD}.sfs $INFOMESSAGE4b" && exit #fail
+	cd $BASEDIR
+	rm -rf $DLDIR #remove on failure #UNCOMMENT
+	fi
+	#ok above 2 checks ok we announce success
+	INFOMESSAGE5a=$(gettext "Success")
+	INFOMESSAGE5b=$(gettext "has been created.") #130209 removed pinstall.sh
+    gtkdialog-splash -timeout 5 -close box -bg green -icon gtk-apply -text "$INFOMESSAGE5a ... ${LIBOBUILD}.sfs $INFOMESSAGE5b"
+	#move to /mnt/home or '/'
+	mv -f ${LIBOBUILD}.sfs $HOMEDIR
+	sync
+	cd $HOME
+	#cleanup
+	rm -rf $DLDIR #UNCOMMENT
+	sync
+	#loading options
+	if [ -x /usr/sbin/sfs_load ];then
+	 /usr/sbin/sfs_load $HOMEDIR/${LIBOBUILD}.sfs #use shino's sfs_load first if there
+	 exit
+	fi
+	if [ `which load_sfs.sh` != "" ];then #fatdog and slackbone
+	 load_sfs.sh $HOMEDIR/${LIBOBUILD}.sfs #use jamesbond's load_sfs.sh if there
+	 exit
+	fi
+	if [ -x /usr/sbin/sfs_installation.sh ];then
+	 /usr/sbin/sfs_installation.sh $HOMEDIR/${LIBOBUILD}.sfs #use my sfs_installation if there
+	 exit
+	 #neither there then use traditional method
+	 else
+	  if [[ $PUPMODE = 2 ]];then
+	    killall yaf-splash && gtkdialog-splash -timeout 5 -close box -bg -icon gtk-dialog-info lightgreen -text "you must now unpack the sfs to install, this will be addressed soon"
+	   else
+	    INFOMSG6a=$(gettext "You can now load")
+	    INFOMSG6b=$(gettext "from the Bootmanager Utility")
+	    killall yaf-splash && gtkdialog-splash -timeout 5 -close box -bg -icon gtk-dialog-info lightgreen -text "$INFOMSG6a  ${LIBOBUILD}.sfs $INFOMSG6b"
+	    #pop up bootmanager
+	    bootmanager extrasfs quiet
+	  fi
+	 exit
+	fi
+	
+}
+
+#kill splash
+killall yaf-splash
+#GUI
+#. /tmp/libre_check
+DLG1=$(gettext "Welcome to the Libre Office Installer")
+DLG2=$(gettext "needs to be downloaded anyway. You can choose to download the help files and your language pack")
+DLG3=$(gettext "Current locale:")
+DLG4=$(gettext "Help file")
+DLG5=$(gettext "Language pack")
+DLG6=$(gettext "Extras")
+export MAIN_DLG="<window title=\"$TITLE $VERSION\">
+ <vbox>
+   <pixmap>
+    <input file>/usr/share/pixmaps/libreoffice-main.png</input>
+   </pixmap>
+  <hbox homogeneous=\"true\">
+   <text><label>$DLG1</label></text>
+  </hbox>
+  <hbox homogeneous=\"true\"> 
+   <text use-markup=\"true\"><label>\"<b>$LIBO_EN_US</b>\"</label></text>
+  </hbox>
+  <hbox homogeneous=\"true\">
+   <text><label>$DLG2</label></text>
+  </hbox>
+  <hbox homogeneous=\"true\">
+   <text use-markup=\"true\"><label>\"<b>$DLG3 $LANG</b>\"</label></text>
+  </hbox>
+   <checkbox>
+    <label>$DLG4</label>
+    <variable>CHKBOX0</variable>
+    <default>$CHKBOX0</default>
+   </checkbox> 
+   <checkbox>
+    <label>$DLG5 $LANGUAGE</label>
+    <variable>CHKBOX1</variable>
+    <default>$CHKBOX1</default>
+    <visible>$STATE</visible>
+   </checkbox>
+  <hbox>
+   <button ok>
+    <action>export $CHKBOX0</action>
+    <action>export $CHKBOX1</action>
+    <action>exit:getlibre</action>
+   </button>
+   <button>
+    <input file stock=\"gtk-add\"></input>
+    <label>$DLG6</label>
+    <action>extras &</action>
+    <action>export $CHKBOX0</action>
+    <action>export $CHKBOX1</action>
+    <action>exit:extra</action>
+   </button>
+   <button cancel></button>
+  </hbox>
+ </vbox>
+</window>"
+eval $(gtkdialog3 -p MAIN_DLG)
+
+case $EXIT in
+getlibre)getlibre;;
+*)exit;;
+esac
+  
+#END

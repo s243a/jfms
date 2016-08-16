@@ -1,0 +1,32 @@
+#!/bin/bash 
+
+t=`echo "$1" | sed "s/\/$//"` 
+z=`echo "$1" | sed "s/\/$//"` 
+
+if [ ! -d "$t" ];then 
+
+  echo "error: no valid folder specified!" 
+  exit 0 
+
+fi 
+
+if [ -f "$z.iso" ];then 
+
+  echo "$z.iso already exists, refusing to overwrite it!" 
+  exit 0 
+
+fi 
+
+mkisofs -D -R -o "$z.iso" "$t" 
+md5sum "$z.iso" > "$z.iso-md5.txt" 
+sync 
+
+
+echo 
+echo 
+s=`du -m "$z.iso" | sed "s/\s.*//"` 
+echo "created: $z.iso ( $s MB )" 
+echo "created: $z.iso-md5.txt" 
+echo 
+echo "...byebye..." 
+echo

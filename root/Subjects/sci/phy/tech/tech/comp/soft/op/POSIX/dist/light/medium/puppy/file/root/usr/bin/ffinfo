@@ -1,0 +1,115 @@
+#!/bin/sh
+# 22 May 2012 shinobar
+# v1.3 - 17 Jun 2012: upport avconv
+VERSION=1.0
+APPNAME=$(basename $0)
+
+CREDIT="$APPNAME $VERSION"
+usage() {
+ echo "$CREDIT"
+ echo "Report multimedia file information 
+usage: $APPNAME [-c] FILENAME"
+}
+CLI=""
+case "$1" in
+-c|--cli) CLI="y"; shift;;
+-v) echo $CREDIT; exit;;
+-*) usage; exit;;
+esac
+if [ -z "$1" ]; then
+  usage
+  exit
+fi
+
+export FILE1=$1
+FNAME=$(basename $1)
+TITLE="$APPNAME-$VERSION $FNAME"
+
+[ "$DISPLAY" ] || CLI="y"
+if [ -z "$CLI" ]; then
+ THUMBNAILSIZE="128x96"	### enable thumbnail
+ THUMBNAILPOS=10
+ THUMBNAIL="/tmp/${APPNAME}-thumbnail.png"
+ rm -f $THUMBNAIL
+ #icons
+ for F in /usr/local/apps/ROX-Filer/ROX/MIME/audio.png  /usr/local/apps/ROX-Filer/ROX/MIME/mime-audio.png /usr/share/pixmaps/pmusic.png /usr/local/lib/X11/mini-icons/mini.audiovol.xpm;do
+  [ -s "$F" ] && AUDIOICON=$F && break
+ done
+ for F in /usr/local/apps/ROX-Filer/ROX/MIME/video.png  /usr/local/apps/ROX-Filer/ROX/MIME/mime-video.png /usr/local/lib/X11/pixmaps/multimedia48.png /usr/local/lib/X11/mini-icons/Animation.xpm;do
+  [ -s "$F" ] && VIDEOICON=$F && break
+ done
+ for F in /usr/local/lib/X11/pixmaps/xinvaders.png /usr/local/lib/X11/pixmaps/question.xpm;do
+  [ -s "$F" ] && NOMEDIAICON=$F && break
+ done
+ # which gtkdialog
+ for P in gtkdialog4 gtkdialog3 gtkdialog; do
+  GTKDIALOG=$(which "$P") && break
+ done
+ if [ -z "$GTKDIALOG" ]; then
+  "'gtkdialog' not found."
+  exit 1
+ fi
+fi
+#v1.3: avconv
+for P in avconv ffmpeg; do
+  FFMPEG=$(which $P) && break
+done
+
+# dummy
+errmsg() {
+	return
+}
+
+NOVIDEO=
+NOAUDIO=
+
+  SRCINFO=$($FFMPEG -i "$FILE1" 2>&1 |grep -E '(#|Duration)')
+  VSTREAM=$(echo "$SRCINFO"| grep 'Stream .*Video')
+  ASTREAM=$(echo "$SRCINFO"| grep 'Stream .*Audio')
+  CONTAINERS=$(echo "$SRCINFO"| grep 'Input #0' | cut -s -f2- -d',')
+  CONTAINERS=$(echo $CONTAINERS | cut -f1 -d' '| sed -e 's/,$//')
+  DURATION=$(echo "$SRCINFO"|grep -w 'Duration' | head -n1 | cut -s -f2- -d':'| cut -f1 -d',')
+  BITRATE=$(echo "$SRCINFO"|grep -w 'Duration' | head -n1 | grep -o 'bitrate: [^,]*' | cut -s -f2- -d':')
+  SIZE=$(echo "$VSTREAM"| head -n1 | grep -o '[1-9][0-9]*x[1-9][0-9]*')
+  VIDEO_CODEC=$(echo "$VSTREAM"| head -n1 | cut -s -f3 -d':'| cut -f1 -d',')
+  AUDIO_CODEC=$(echo "$ASTREAM"| head -n1 | cut -s -f3 -d':'| cut -f1 -d',')
+  #echo "$VSTREAM" >&2
+  #echo "$ASTREAM" >&2
+
+  [ "$VSTREAM" ] && NOVIDEO="" || NOVIDEO="true"
+  [ "$ASTREAM" ] && NOAUDIO="" || NOAUDIO="true"
+
+if [ "$CLI" ]; then
+  echo "SRCINFO=\"$SRCINFO\"
+NOVIDEO='$NOVIDEO'
+NOAUDIO='$NOAUDIO'
+CONTAINERS='$(echo $CONTAINERS)'
+DURATION='$(echo $DURATION)'
+BITRATE='$(echo $BITRATE)'
+SIZE='$(echo $SIZE)'
+VIDEO_CODEC='$(echo $VIDEO_CODEC)'
+AUDIO_CODEC='$(echo $AUDIO_CODEC)'"
+  exit
+fi
+
+if [ "$NOVIDEO" -a "$NOAUDIO" ]; then
+ ICONFILE=$NOMEDIAICON
+ SRCINFO=$(printf "$(gettext 'No video nor audio stream in %s.')" "$FILE1")
+elif [ "$NOVIDEO" ];then
+ ICONFILE=$AUDIOICON
+else
+ ICONFILE=$VIDEOICON
+ if [ "$THUMBNAILSIZE" ]; then
+  #rm -f $THUMBNAIL
+  [ "$DURATION" ] && echo $DURATION | grep -q '00:00:0' && THUMBNAILPOS=0
+  $FFMPEG -i "$FILE1" -vcodec png -s $THUMBNAILSIZE -ss $THUMBNAILPOS -dframes 1 -an $THUMBNAIL &>/dev/null
+  [ -s $THUMBNAIL ] && ICONFILE=$THUMBNAIL
+ fi
+fi
+SHOWTHUMB='<pixmap><input file>'$ICONFILE'</input></pixmap>'
+export INFO_DIALOG="<window title=\"$TITLE $(gettext 'Source')\"><vbox>
+$SHOWTHUMB
+<text><label>\"$SRCINFO\"</label></text>
+<hbox><button ok></button></hbox></vbox></window>"
+$GTKDIALOG -p INFO_DIALOG
+rm -f $THUMBNAIL

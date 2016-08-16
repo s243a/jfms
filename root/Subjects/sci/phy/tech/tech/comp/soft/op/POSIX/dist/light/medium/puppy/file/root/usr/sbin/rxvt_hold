@@ -1,0 +1,9 @@
+#!/bin/bash
+
+# rxvt_hold
+# place this in /usr/sbin
+# open a new terminal do the command and keep the terminal open
+rxvt -e sh -c " ${*} ; read -p 'FINISHED. PRESS ENTER KEY TO CLOSE THIS WINDOW'"
+
+
+

@@ -1,0 +1,617 @@
+#!/bin/sh
+# rcrsn51 2011-08-09
+# version 2.3 2012-11-15
+# gettexted by esmourguit 2013/02/13
+
+export TEXTDOMAIN=peasypdf
+export OUTPUT_CHARSET=UTF-8
+
+export JOINPATH="/tmp/PDFJoin"
+export EXTRACTPATH="/tmp/PDFExtract"
+export CONVERTPATH="/tmp/PDFConvert"
+
+#. gettext.sh   #old Puppies don't have this
+
+eval_gettext () {
+  local myMESSAGE=$(gettext "$1")
+  eval echo -n \"$myMESSAGE\"
+}
+export -f eval_gettext
+
+HELP () {
+  defaulthtmlviewer http://www.murga-linux.com/puppy/viewtopic.php?p=551954#551954 &
+}
+export -f HELP
+
+CONVERT () {
+  OPTIONS="-noturn -center"
+  [ "$RESIZE" = "false" ] && OPTIONS=$OPTIONS" -equalpixels"
+
+  if [ ! -f "$CONVERTNAME" ]; then
+    Xdialog --title " "  --msgbox "$(eval_gettext 'File $CONVERTNAME not found!')" 0 0
+    exit 
+  fi
+    
+  Xdialog --title " " --msgbox "$(eval_gettext 'Converting $CONVERTNAME ...')" 0 0 &
+  MSGPID=$!
+
+  TYPE=$(file -L "$CONVERTNAME" | cut -d ":" -f 2 | cut -d " " -f 2)
+  case $TYPE in
+    JPEG)
+      jpegtopnm "$CONVERTNAME" | pnmtops $OPTIONS > /tmp/pptemp.ps 
+      ;;
+    PNG)
+      pngtopnm "$CONVERTNAME" | pnmtops $OPTIONS > /tmp/pptemp.ps
+      ;;
+    TIFF)
+      tifftopnm "$CONVERTNAME" | pnmtops $OPTIONS > /tmp/pptemp.ps
+      ;;
+    PostScript)
+      cp "$CONVERTNAME" /tmp/pptemp.ps
+      ;;
+    *) kill $MSGPID
+       Xdialog --title " " --msgbox "$(gettext 'Not a valid graphics file!')" 0 0
+       exit
+       ;;
+  esac
+
+  OUTNAME=$CONVERTNAME".pdf"
+  ps2pdf /tmp/pptemp.ps "$OUTNAME"
+  rm /tmp/pptemp.ps
+  kill $MSGPID
+  Xdialog --title " " --msgbox "$(eval_gettext 'File saved as $OUTNAME')" 0 0
+
+}
+export -f CONVERT 
+
+CONVERTALL () {
+
+  mkdir -p $CONVERTPATH
+  rm -f $CONVERTPATH/*
+  
+  [ $ORIENT = $(gettext 'Letter') ] && OPTIONS="-setpage -imagewidth=8.5 -imageheight=11 -width=8.5 -height=11"
+  [ $ORIENT = $(gettext 'Legal') ] && OPTIONS="-setpage -imagewidth=8.5 -imageheight=14 -width=8.5 -height=14"
+  [ $ORIENT = "A4" ] && OPTIONS="-setpage -imagewidth=8.3 -imageheight=11.7 -width=8.3 -height=11.7"
+  [ $ORIENT = "5x7" ] && OPTIONS="-setpage -imagewidth=5 -imageheight=7 -width=5 -height=7"
+  [ $ORIENT = "7x5" ] && OPTIONS="-setpage -imagewidth=7 -imageheight=5 -width=7 -height=5"
+  [ $ORIENT = $(gettext 'None') ] && OPTIONS="-noturn -center -equalpixels"
+
+  if [ ! -d "$CONVERTFOLDER" ]; then
+    Xdialog --title " "  --msgbox "$(eval_gettext 'Folder $CONVERTFOLDER not found!')" 0 0
+    exit 
+  fi
+
+  Xdialog --title " " --msgbox "$(eval_gettext 'Converting $CONVERTFOLDER ...')" 0 0 &
+  MSGPID=$!
+
+  for F in "$CONVERTFOLDER"/*; do
+
+  TYPE=$(file -L "$F" | cut -d ":" -f 2 | cut -d " " -f 2)
+  case $TYPE in
+    JPEG)
+      jpegtopnm "$F" | pnmtops $OPTIONS > /tmp/pptemp.ps 
+      ;;
+    PNG)
+      pngtopnm "$F" | pnmtops $OPTIONS > /tmp/pptemp.ps
+      ;;
+    TIFF)
+      tifftopnm "$F" | pnmtops $OPTIONS > /tmp/pptemp.ps
+      ;;
+    PostScript)
+      cp "$F" /tmp/pptemp.ps
+      ;;
+    *)
+      continue
+      ;;
+  esac
+
+  OUTNAME=$CONVERTPATH/$(basename "$F")".pdf"
+  ps2pdf /tmp/pptemp.ps "$OUTNAME"
+
+  done
+
+  if [ $CONVERTCOMBINE = "true" ]; then
+    if [ $(which pdfunite) ]; then
+      pdfunite $CONVERTPATH/*.pdf $CONVERTPATH/CONVERTED.PDF
+    else 
+      gs -sDEVICE=pdfwrite -dNOPAUSE -dBATCH -dSAFER -sOutputFile=$CONVERTPATH/CONVERTED.PDF $CONVERTPATH/*.pdf
+    fi
+  fi
+
+  kill $MSGPID
+  Xdialog --title " " --msgbox "$(gettext 'Click View to see the converted files.')" 0 0
+
+}
+export -f CONVERTALL 
+
+CVTVIEW () {
+  rox $CONVERTPATH
+}
+export -f CVTVIEW 
+
+
+PROJVIEW () {
+  rox $JOINPATH
+}
+export -f PROJVIEW 
+
+NEWPROJECT () { 
+  mkdir -p $JOINPATH
+  rm -f $JOINPATH/*
+  echo "0" > $JOINPATH/.filecounter
+  Xdialog --title " " --msgbox "$(eval_gettext 'New project started in $JOINPATH')" 0 0
+}
+export -f NEWPROJECT
+
+ADD () {
+
+  if [ ! -f $JOINPATH/.filecounter ]; then
+    Xdialog --title " "  --msgbox "$(gettext 'Please start a new project!')" 0 0
+    exit
+  fi
+
+  if [ -z "$JOINNAME" ]; then
+    Xdialog --title " " --msgbox "$(gettext 'Nothing to add!')" 0 0
+    exit
+  fi
+
+  if [ ! -f "$JOINNAME" ]; then
+    Xdialog --title " "  --msgbox "$(eval_gettext 'File $JOINNAME not found!')" 0 0
+    exit
+  fi
+    
+  Xdialog --title " " --msgbox "$(eval_gettext 'Adding $JOINNAME ...')" 0 0 &
+  MSGPID=$!
+
+  FC=$(cat $JOINPATH/.filecounter)
+  let FC=FC+1
+  FN=$(printf "%3.3d" $FC)".pdf"
+  echo $FC > $JOINPATH/.filecounter
+
+  TYPE=$(file "$JOINNAME" | cut -d ":" -f 2 | cut -d " " -f 2)
+  case $TYPE in
+    PDF)
+      Xdialog --title " " --infobox "$(eval_gettext 'Adding $JOINNAME ...')" 0 0 1000
+      if [ "${JOINNAME:0:4}" = "/tmp" ]; then
+        cp "$JOINNAME" $JOINPATH/$FN
+      else
+        ln -s "$JOINNAME" $JOINPATH/$FN
+      fi
+      ;;
+    *) kill $MSGPID
+       Xdialog --title " " --msgbox "$(gettext 'Not a valid PDF file!')" 0 0
+       exit
+       ;;
+    esac
+    
+    kill $MSGPID
+}
+export -f ADD
+
+JOIN () {
+  rm -f $JOINPATH/PROJECT.PDF
+
+  ls $JOINPATH/*.pdf > /dev/null
+  if [ $? -gt 0 ]; then
+    Xdialog --title " " --msgbox "$(gettext 'Nothing to join!')" 0 0 
+    exit
+  fi
+
+  Xdialog --title " " --msgbox "$(gettext 'Joining ...')" 0 0 &
+  MSGPID=$!
+  
+  gs -dBATCH -dNOPAUSE -q -sDEVICE=pdfwrite -sOutputFile=$JOINPATH/PROJECT.PDF $JOINPATH/*.pdf
+
+  kill $MSGPID
+  Xdialog --title " " --msgbox "$(eval_gettext 'Project saved as $JOINPATH/PROJECT.PDF')" 0 0
+}
+export -f JOIN
+
+EXTRACT () {
+
+if [ -z "$PDFNAME" -o -z "$PAGELIST" -o -z "$DPI" ]; then
+  Xdialog --title " " --msgbox "$(gettext 'Missing data!')" 0 0
+  exit
+fi 
+
+if [ ! -f "$PDFNAME" ]; then
+  Xdialog --title " " --msgbox "$(gettext 'File not found!')" 0 0
+  exit
+fi
+
+PAGELIST=$(echo $PAGELIST | tr -s "," " ")
+
+BIGLIST=""
+for N in $PAGELIST; do
+  FIRST=${N%-*}
+  LAST=${N#*-}
+  [ -z "$LAST" ] && LAST=$(pdfinfo "$PDFNAME" | grep "Pages" | awk '{print $2}')
+  BIGLIST=$BIGLIST" "$(seq $FIRST $LAST)
+done
+
+mkdir -p $EXTRACTPATH
+
+LOGFOLDER=/tmp/peasypdf.log
+rm -f $LOGFOLDER
+
+for PAGE in $BIGLIST; do
+
+PAGENUM=$(printf "%3.3d" $PAGE)
+
+Xdialog --title " " --msgbox "$(eval_gettext 'Extracting page $PAGE of $PDFNAME')" 0 0 &
+MSGPID=$!
+
+if [ $EXTRACTJPG = "true" ]; then
+  gs -sDEVICE=jpeg -dNOPAUSE -dBATCH -dSAFER -r$DPI -sOutputFile=$EXTRACTPATH/$PAGENUM.jpg -dFirstPage=$PAGE -dLastPage=$PAGE "$PDFNAME" >>$LOGFOLDER 2>&1
+elif [ $EXTRACTPNG = "true" ]; then
+  gs -sDEVICE=png16m -dNOPAUSE -dBATCH -dSAFER -r$DPI -sOutputFile=$EXTRACTPATH/$PAGENUM.png -dFirstPage=$PAGE -dLastPage=$PAGE "$PDFNAME" >>$LOGFOLDER 2>&1
+elif [ $EXTRACTTXT = "true" ]; then
+  pdftotext -f $PAGE -l $PAGE "$PDFNAME" - >> $EXTRACTPATH/EXTRACTED.TXT
+elif [ $EXTRACTPDF = "true" ]; then
+  gs -sDEVICE=pdfwrite -dNOPAUSE -dBATCH -dSAFER -sOutputFile=$EXTRACTPATH/$PAGENUM.pdf -dFirstPage=$PAGE -dLastPage=$PAGE "$PDFNAME" >>$LOGFOLDER 2>&1
+fi
+
+kill $MSGPID
+done
+
+if [ $EXTRACTPDF = "true" -a $COMBINE = "true" ]; then
+  Xdialog --title " " --msgbox "$(gettext 'Still working ...')" 0 0 &
+  MSGPID=$!
+  rm -f $EXTRACTPATH/EXTRACTED.PDF
+  gs -sDEVICE=pdfwrite -dNOPAUSE -dBATCH -dSAFER -sOutputFile=$EXTRACTPATH/EXTRACTED.PDF $EXTRACTPATH/*.pdf >>$LOGFOLDER 2>&1
+  kill $MSGPID
+fi
+
+Xdialog --title " " --msgbox "$(gettext 'Click View to see the extracted files.')" 0 0
+
+}
+export -f EXTRACT
+
+EXTVIEW () {
+  rox $EXTRACTPATH
+}
+export -f EXTVIEW 
+
+CLEAR () {
+  rm -f $EXTRACTPATH/*
+  Xdialog --title " " --msgbox "$(gettext 'The folder /tmp/PDFExtract has been cleared.')" 0 0
+}
+export -f CLEAR
+
+PRINT () {
+
+  if [ ! -f "$PRINTPDFNAME" ]; then
+    Xdialog --title " "  --msgbox "$(eval_gettext 'File $PRINTPDFNAME not found!')" 0 0
+    exit 
+  fi
+
+  OPTIONS="-o fit-to-page -o media="$PAPERSIZE
+  if [ -n "$PRINTPAGELIST" ]; then
+    PRINTPAGELIST=$(echo -n $PRINTPAGELIST | tr " " "," | tr -s ",")
+    OPTIONS=$OPTIONS" -P "$PRINTPAGELIST
+  fi
+
+  if [ "$NUP" != "1" -a -z "$PRINTPAGELIST" ]; then  #can only nup the whole document, not a selection
+    OPTIONS=$OPTIONS" -o number-up="$NUP
+  fi
+
+  Xdialog --title " " --infobox "$(gettext 'Printing ...')" 0 0 3000 &
+  if [ "$SENDASPS" = "true" ]; then
+    pdf2ps "$PRINTPDFNAME" /tmp/pptemp.ps
+    lp $OPTIONS -d $PRINTER /tmp/pptemp.ps
+    rm -f /tmp/pptemp.ps
+  else
+    lp $OPTIONS -d $PRINTER "$PRINTPDFNAME"
+  fi
+}
+export -f PRINT
+
+CANCELPRINT () {
+  cancel -a
+  rm -f /var/spool/cups/tmp/*
+  Xdialog --title " "  --msgbox "$(gettext 'All print jobs cancelled!')" 0 0
+}
+export -f CANCELPRINT
+
+MUPDF () {
+
+  if [ -z $(which mupdf) ]; then
+    Xdialog --title " "  --msgbox "$(gettext 'MuPDF not installed!')" 0 0
+    exit 
+  fi
+
+  if [ ! -f "$MUPDFNAME" ]; then
+    Xdialog --title " "  --msgbox "$(eval_gettext 'File $MUPDFNAME not found!')" 0 0
+    exit 
+  fi
+
+  mupdf "$MUPDFNAME"
+
+}
+export -f MUPDF
+
+MUPDFCONTROLS () {
+Xdialog --left --wrap --title "MuPDF Keyboard Controls" --msgbox "$(gettext '\nPgUp/PgDn  page through the document\nUp/Down     scroll the page\ng/G              go to the first/last page\nxxxg            jump to page xxx\n\n+/-     zoom in/out\nf         toggle full screen mode\nW       fit page to the width of the window\nH        fit page to the height of the window\nL/R     rotate left/right\n\n?       search for text\nn/N   find the next/previous search result\n\nq       quit')" 0 0
+}
+export -f MUPDFCONTROLS
+
+#########################
+
+PRINTERLIST=`lpstat -v | cut -d " " -f 3 | cut -d ":" -f 1`
+COMBOLIST=""
+for P in $PRINTERLIST
+do
+ COMBOLIST="$COMBOLIST<item>$P</item>"
+done
+
+export DIALOG="
+<window title=\"PeasyPDF v3.1\">
+<vbox>
+  <notebook labels=\"$(gettext 'Convert|Join|Extract|Print|MuPDF')\">
+    <vbox>
+      <frame>
+        <text xalign=\"0\">
+          <label>$(gettext 'This tool converts JPG, PNG, TIFF graphics files to PDF format.  To convert a text document, load it into a word processor and use Print > Print to File.')</label>
+        </text>
+      </frame>
+      <frame $(gettext 'Select a file')>
+        <hbox>
+          <entry accept=\"filename\"><variable>CONVERTNAME</variable></entry>
+          <button>
+            <input file stock=\"gtk-open\"></input>
+            <action type=\"fileselect\">CONVERTNAME</action>
+          </button>
+        </hbox>
+        <hbox>
+          <checkbox>
+            <label>$(gettext 'Resize graphics to fill the page')        </label>
+            <variable>RESIZE</variable>
+          </checkbox>
+          <button>
+            <label>$(gettext 'Convert')</label>
+            <action>CONVERT</action>
+            <action>Clear:CONVERTNAME</action>
+          </button>
+        </hbox>
+      </frame>
+      <frame $(gettext 'Or select a folder of graphics')>
+        <hbox>
+          <entry accept=\"directory\"><variable>CONVERTFOLDER</variable></entry>
+          <button>
+            <input file stock=\"gtk-open\"></input>
+            <action type=\"fileselect\">CONVERTFOLDER</action>
+          </button>
+        </hbox>
+        <hbox>
+          <checkbox>
+            <label>$(gettext 'Combine into one PDF')     </label>
+            <variable>CONVERTCOMBINE</variable>
+          </checkbox>
+          <combobox>
+            <variable>ORIENT</variable>
+            <item>$(gettext 'Letter')</item><item>$(gettext 'Legal')</item>
+            <item>A4</item><item>5x7</item><item>7x5</item>
+            <item>$(gettext 'None')</item>
+          </combobox>
+        </hbox>
+        <hbox>
+          <button>
+            <label>$(gettext 'Convert')</label>
+            <action>CONVERTALL</action>
+            <action>Clear:CONVERTFOLDER</action>
+          </button>
+          <button>
+            <label>$(gettext 'View')</label>
+            <action>CVTVIEW</action>
+          </button>
+        </hbox>
+      </frame>
+     </vbox>
+    <vbox>
+      <frame>
+        <text xalign=\"0\">
+          <label>$(gettext 'This tool joins individual PDF files into a single PDF document. Click New to start a new project. Select a file and click Add. Repeat. When all files are added, click Join. Click View to see the project folder in /tmp.')</label>
+        </text>
+      </frame>
+      <frame $(gettext 'Select a PDF file')>
+        <hbox>
+          <entry accept=\"filename\"><variable>JOINNAME</variable></entry>
+          <button><input file stock=\"gtk-open\"></input><action type=\"fileselect\">JOINNAME</action></button>
+        </hbox>
+      </frame>
+      <hbox>
+        <button>
+          <label>$(gettext 'New')</label>
+          <action>NEWPROJECT</action>
+        </button>
+        <button>
+          <label>$(gettext 'Add')</label>
+          <action>ADD</action>
+          <action>Clear:JOINNAME</action>
+        </button>
+        <button>
+          <label>$(gettext 'Join')</label>
+          <action>JOIN</action>
+        </button>
+        <button>
+          <label>$(gettext 'View')</label>
+          <action>PROJVIEW</action>
+        </button>
+      </hbox>
+      <text><label>\"    \"</label></text>
+      <text><label>\"    \"</label></text>
+      <text><label>\"    \"</label></text>
+      <text><label>\"    \"</label></text>
+    </vbox>
+    <vbox>
+      <frame>
+        <text xalign=\"0\">
+          <label>$(gettext 'This tool extracts pages from a PDF document and optionally combines them. Pages can be selected with a list, a range like 1-10 or both.')</label>
+        </text>
+      </frame>
+      <frame $(gettext 'Select a PDF file')>
+        <hbox>
+          <entry accept=\"filename\">
+            <variable>PDFNAME</variable>
+          </entry>
+          <button>
+            <input file stock=\"gtk-open\"></input>
+            <action type=\"fileselect\">PDFNAME</action>
+          </button>
+        </hbox>
+      </frame>
+      <hbox>
+        <text><label>$(gettext 'Extract to: ')</label></text>
+        <radiobutton>
+          <variable>EXTRACTJPG</variable>
+          <label>JPG</label>
+        </radiobutton>
+        <radiobutton> 
+          <variable>EXTRACTPNG</variable>
+          <label>PNG</label>
+        </radiobutton>
+        <radiobutton> 
+          <variable>EXTRACTTXT</variable>
+          <label>TXT</label>
+        </radiobutton>
+        <radiobutton> 
+          <variable>EXTRACTPDF</variable>
+          <label> PDF +</label>
+        </radiobutton>
+        <checkbox>
+          <label>$(gettext 'Combine')</label>
+          <variable>COMBINE</variable>
+         </checkbox>
+      </hbox>
+      <frame $(gettext 'Page Number(s)                  DPI')>
+        <hbox>
+          <entry>
+            <variable>PAGELIST</variable>
+          </entry>
+          <entry>
+            <variable>DPI</variable>
+            <default>300</default>
+          </entry>
+        </hbox> 
+      </frame>
+      <hbox>
+        <button>
+          <label>$(gettext 'Clear')</label>
+          <action>CLEAR</action>
+          <action>Clear:PDFNAME</action>
+        </button>
+        <button>
+          <label>$(gettext 'Extract')</label>
+          <action>EXTRACT</action>
+          <action>Clear:PAGELIST</action>
+        </button>
+        <button>
+          <label>$(gettext 'View')</label>
+          <action>EXTVIEW</action>
+        </button>
+      </hbox>
+      <text><label>\"    \"</label></text>
+      <text><label>\"    \"</label></text>
+    </vbox>
+    <vbox>
+      <frame $(gettext 'Select a PDF file')>
+        <hbox>
+          <entry accept=\"filename\">
+            <variable>PRINTPDFNAME</variable>
+          </entry>
+          <button>
+            <input file stock=\"gtk-open\"></input>
+            <action type=\"fileselect\">PRINTPDFNAME</action>
+          </button>
+        </hbox>
+      </frame>
+      <frame $(gettext 'Select a printer')>
+        <combobox>
+          <variable>PRINTER</variable>
+           $COMBOLIST 
+        </combobox>
+      </frame>
+      <frame $(gettext 'Page Selection (optional)')>
+        <hbox>
+          <entry>
+            <variable>PRINTPAGELIST</variable>
+          </entry>
+          <checkbox>
+            <label>$(gettext 'Send to CUPS as PS')</label>
+            <variable>SENDASPS</variable>
+          </checkbox>
+         </hbox>
+       </frame>
+       <frame $(gettext 'Paper Size                      N-Up Printing (see the Help)')>
+         <hbox>
+           <combobox>
+             <variable>PAPERSIZE</variable>
+             <item>Letter</item><item>Legal</item><item>A4</item>
+           </combobox>
+           <combobox>
+             <variable>NUP</variable>
+             <item>1</item><item>2</item><item>4</item><item>6</item>
+           </combobox>
+           <text><label>\"           \"</label></text>
+         </hbox>
+       </frame>
+       <hbox>
+          <button>
+            <label>$(gettext 'Clear')</label>
+            <action>Clear:PRINTPDFNAME</action>
+            <action>Clear:PRINTPAGELIST</action>
+          </button>
+          <button>
+            <label>$(gettext 'Cancel')</label>
+            <action>CANCELPRINT</action>
+          </button>
+          <button>
+            <label>$(gettext 'Print')</label>
+            <action>PRINT</action>
+          </button>
+       </hbox>
+      <text><label>\"    \"</label></text>
+    </vbox>
+    <vbox>
+      <frame>
+        <text xalign=\"0\">
+          <label>$(gettext 'MuPDF is a fast, accurate PDF viewer that may work better than your regular viewer. Look in the Help for a download link. MuPDF uses keyboard controls.')</label>
+        </text>
+      </frame>
+      <frame $(gettext 'Select a PDF file')>
+        <hbox>
+          <entry accept=\"filename\"><variable>MUPDFNAME</variable></entry>
+          <button><input file stock=\"gtk-open\"></input><action type=\"fileselect\">MUPDFNAME</action></button>
+        </hbox>
+      </frame>
+      <hbox>
+        <button>
+          <label>$(gettext 'Controls')</label>
+          <action>MUPDFCONTROLS &</action>
+        </button>
+        <button>
+          <label>$(gettext 'View')</label>
+          <action>MUPDF &</action>
+          <action>Clear:MUPDFNAME</action>
+        </button>
+      </hbox>
+      <text><label>\"    \"</label></text>
+      <text><label>\"    \"</label></text>
+      <text><label>\"    \"</label></text>
+      <text><label>\"    \"</label></text>
+      <text><label>\"    \"</label></text>
+      <text><label>\"    \"</label></text>
+    </vbox>
+  </notebook>
+  <hbox>
+    <button>
+      <label>$(gettext 'Help')</label>
+      <action>HELP</action>
+    </button>
+    <button><label>$(gettext 'Quit')</label></button>
+  </hbox>
+</vbox>
+</window>
+"
+
+gtkdialog3 --program DIALOG > /dev/null

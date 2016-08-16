@@ -1,0 +1,69 @@
+#! /bin/bash
+[ ! -e /tmp/mytags ] && echo "\"i\" <i>Italic</i>
+\"b\" <b>Bold</b>
+\"u\" <u>underlined</u>
+\"s\" <s>strikethrough</s>
+\"small\" <small>Small</small>
+\"big\" <big>Large</big>
+\"tt\" <tt>Monospace</tt>
+\"sup\" <sup>Supercript</sup>
+\"sub\" <sub>Subscript</sub>
+\"span\" <span color='"'blue'"'>Blue colour</span>" > /tmp/mytags
+
+export MAIN_DIALOG='<window window_position="1" title="Text tags">
+<vbox>
+
+<hbox>
+<frame Tags>
+<text use-markup="true"><input>echo "$(cat /tmp/mytags)"</input></text>
+  </frame>
+  
+<frame Example>
+<text use-markup="true"><label>"<span color='"'red'"' font-family='"'purisa'"' weight='"'bold'"' size='"'x-large'"'><big>What Great Text ! </big></span>"</label></text>
+<text width_request="600" selectable="true"><label>Tag: "span" attribute: color="red" font-family="arial" weight="bold" size="x-large"</label></text>
+<text width_request="600" use-markup="true"><label>"
+<i>When using a span tag within a script, double quotes should be protected by apostrophes. No separate text file needed! The color can be indicated in hexadecimal form or by the name of the color.</i>"</label></text>
+ </frame>
+</hbox>
+
+<text width_request="800" selectable="true"><label>"<i></i>     <b></b>     <u></u>     <s></s>     <small></small>     <big></big>     <tt></tt>     <sup></sup>     <sub></sub>     <span></sapn>"</label></text>
+
+<hbox>
+  <frame Edit pane>
+    <edit>
+    <input file>/tmp/tag_editor.txt</input>
+      <variable>EDITOR</variable>
+      <width>350</width><height>250</height>
+    </edit>
+    </frame>
+    
+    <frame Results pane>
+    <text use-markup="true" height_request="250" width_request="350" selectable="true"><variable>RETOUR</variable><input>echo "$(cat /tmp/tag_editor.txt)"</input></text>
+  </frame>
+</hbox>
+
+<hbox>
+<button cancel>
+    <action type="exit">close</action>
+     </button>
+<button><input file icon="gtk-save"></input>
+    <label> Save file </label>
+    <action>cp /tmp/tag_editor.txt $HOME</action>
+   </button>
+<button><input file icon="gtk-refresh"></input>
+    <label> Show result </label>
+    <action>echo "$EDITOR" > /tmp/tag_editor.txt</action>
+    <action type="exit">refresh</action>
+    </button>
+    </hbox>
+</vbox>
+</window>'
+EXIT="refresh"
+while [ "$EXIT" = "refresh" ]
+do
+GUI=$(gtkdialog3 --program=MAIN_DIALOG)
+eval $(grep EXIT <<< "$GUI")
+[ -z "$GUI" ] && exit
+done
+
+exit

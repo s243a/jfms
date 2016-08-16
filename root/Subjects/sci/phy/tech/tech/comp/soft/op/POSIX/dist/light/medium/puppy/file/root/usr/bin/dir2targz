@@ -1,0 +1,46 @@
+#!/bin/sh
+# A simple script to tar.gz all folders in a directory
+#enjoy ttuuxxx
+#!/bin/sh
+
+# ----------------------------------------------------------
+# PROGRAM:      mktgz
+# ----------------------------------------------------------
+# PURPOSE:      To create tar.gz archive from
+#            files or dir
+# DEPENDENCIES:   tar
+# AUTHOR:         vovchik
+# MODDED:         vovchik, 19.02.10, for rox
+# VERSION:      0.1
+# DATE:         19.09.09
+# ----------------------------------------------------------
+
+myspec="$@"
+mydir=`dirname "$myspec"`
+cd "$mydir"
+
+# ---------------------
+function mk_archive()
+# ---------------------
+{
+   if [ -n "$myspec" ]; then
+      echo "Archive object: ""$myspec"
+      mynewspec=`basename "$myspec"`
+      echo "Processing under way..."
+      tar -pczf "$mynewspec".tar.gz "$mynewspec"
+      echo "All done."
+   else
+      echo "Usage: mktgz"" [dir] or [file]"
+      echo "in dir which contains target dir or file"
+   fi
+}
+
+# ---------------------
+# MAIN
+# ---------------------
+
+mk_archive
+
+# ---------------------
+# END MAIN
+# ---------------------

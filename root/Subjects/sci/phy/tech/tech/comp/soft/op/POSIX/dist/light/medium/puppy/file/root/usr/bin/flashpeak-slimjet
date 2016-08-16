@@ -1,0 +1,34 @@
+#!/bin/bash
+#
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+# Check if the CPU supports SSE2. If not, try to pop up a dialog to explain the
+# problem and exit. Otherwise the browser will just crash with a SIGILL.
+# http://crbug.com/348761
+grep ^flags /proc/cpuinfo|grep -qs sse2
+if [ $? != 0 ]; then
+  SSE2_DEPRECATION_MSG="This computer can no longer run FlashPeak Slimjet because \
+its hardware is no longer supported."
+  if which zenity &> /dev/null; then
+    zenity --warning --text="$SSE2_DEPRECATION_MSG"
+  elif which gmessage &> /dev/null; then
+    gmessage "$SSE2_DEPRECATION_MSG"
+  elif which xmessage &> /dev/null; then
+    xmessage "$SSE2_DEPRECATION_MSG"
+  else
+    echo "$SSE2_DEPRECATION_MSG" 1>&2
+  fi
+  exit 1
+fi
+
+# Sanitize std{in,out,err} because they'll be shared with untrusted child
+# processes (http://crbug.com/376567).
+exec < /dev/null
+exec > >(exec cat)
+exec 2> >(exec cat >&2)
+
+# Note: exec -a below is a bashism.
+#exec -a "$0" /opt/slimjet/slimjet --user-data-dir=/root/.config/slimjet --disable-setuid-sandbox --disable-namespace-sandbox --disable-infobars "$@"
+exec -a "$0" /opt/slimjet/slimjet --user-data-dir=/root/spot/.config/slimjet --disable-setuid-sandbox --disable-namespace-sandbox --disable-infobars "$@"

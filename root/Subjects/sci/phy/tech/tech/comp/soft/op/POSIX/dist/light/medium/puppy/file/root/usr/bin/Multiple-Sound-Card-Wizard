@@ -1,0 +1,109 @@
+#!/bin/bash
+#120323 npierce: remove OK button if no cards detected. refer: http://murga-linux.com/puppy/viewtopic.php?t=76182&start=90
+#120815 rodin.s: i18n
+#130216 01micko, BK: fix retrovol.
+
+export TEXTDOMAIN=multiple_soundcard
+export OUTPUT_CHARSET=UTF-8
+. gettext.sh
+
+# Puppy has different versions of gtkdialog
+GTKDIALOG="gtkdialog" #130216 BK: don't bother with all of this...
+#if [ "`which gtkdialog3`" != "" ]; then
+#GTKDIALOG=gtkdialog3
+#elif [ "`which gtkdialog`" != "" ]; then
+#GTKDIALOG=gtkdialog
+#elif [ "$GTKDIALOG" = "" ]; then
+#echo "$(gettext 'you need to install gtkdialog')"
+#exit 0
+#fi
+
+echo "export MAIN_DIALOG='
+<window title=\"$(gettext 'Choose which sound card to make the default.')\">
+  <vbox>
+    <list>
+	<height>200</height>
+	<width>650</width>
+     <variable>LIST</variable>" > /tmp/mscw.tmp
+	 
+aplay -l | grep card | sed 's/^/<item> /g' | sed 's/$/ <\/item>/g' >> /tmp/mscw.tmp	 
+	 
+if grep "<item>" /tmp/mscw.tmp; then
+echo "</list>
+    <hbox>
+      <button ok></button>" >> /tmp/mscw.tmp
+else
+echo "      <item>$(gettext 'Unable to find any sound card.  Please press Cancel.')</item>
+    </list>
+    <hbox>" >> /tmp/mscw.tmp
+fi                                                                      
+echo "      <button cancel></button> 
+    </hbox>
+  </vbox>
+</window>
+'" >> /tmp/mscw.tmp	 
+
+. /tmp/mscw.tmp
+
+I=$IFS; IFS=""
+     for STATEMENTS in  $($GTKDIALOG --program MAIN_DIALOG); do
+       eval $STATEMENTS
+     done
+     IFS=$I
+
+     if [ "$EXIT" = "OK" ]; then
+       if [ "$LIST" = "" ];then
+        xmessage "You failed to choose, aborting. Please run the program again"
+        exit 1
+       fi
+       Card="$(echo $LIST | cut -d ":" -f 1 | sed -e 's/\(^.*\)\(.$\)/\2/')"
+	   Device="$(echo $LIST | cut -d ":" -f 2 | sed -e 's/\(^.*\)\(.$\)/\2/')"
+	   echo "$(gettext 'Card')="$Card
+	   echo "$(gettext 'Device')="$Device
+     else
+       echo "$(gettext 'You pressed the Cancel button.')"
+	   exit
+     fi
+cp /etc/asound.conf /etc/asound.conf-old
+rm /etc/asound.conf
+echo "defaults.pcm.card "$Card >> /etc/asound.conf
+echo "defaults.pcm.device "$Device >> /etc/asound.conf
+
+#130216 01micko, BK: fix retrovol...
+RETROVOL=$(which retrovol)
+if [ "$RETROVOL" ];then
+
+ killall retrovol
+
+ if [ -f $HOME/.retrovolrc ];then #created when retrovol 1st starts..
+  sed -i -e '/^card=hw/d' $HOME/.retrovolrc
+  rPTN1='s%^#card=%#card=hw:0\ncard=%'
+  rPTN2="s%^card=.*%card=hw:${Card}%"
+  sed -i -e "$rPTN1" -e "$rPTN2" $HOME/.retrovolrc
+ else
+  echo "# $(gettext 'Config file for retrovol')
+# $(gettext "This file should reside in the user's home directory and be named:") .retrovolrc
+
+#card=hw:0
+card=hw:${Card}" > $HOME/.retrovolrc #'geany
+ fi
+
+ echo '<window title="'$(gettext "Multiple Sound Card Wizard")'"><vbox>
+  <frame Card '$Card'>
+  <text use-markup="true">
+    <label>"<b>'$(gettext "Sound card now set as default:")'  <big>'hw:${Card}'</big></b>
+
+'$(gettext "The audio mixer <i>Retrovol</i> has been set to use this card. The next window will be the configuration window for Retrovol -- adjust settings to suite yourself.")'
+
+'$(gettext "<b>Note:</b> The Retrovol settings can be adjusted at any time in the future by right-clicking on the loadspeaker-icon in the tray.")'"</label>
+  </text>
+  </frame>
+  <hbox><button ok></button></hbox>
+ </vbox></window>' | ${GTKDIALOG} -s
+
+ retrovol & 
+
+else
+ xmessage "Now configure your sound program"
+fi
+

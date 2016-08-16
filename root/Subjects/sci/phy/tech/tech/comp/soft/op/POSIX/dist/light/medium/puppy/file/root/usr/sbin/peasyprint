@@ -1,0 +1,327 @@
+#!/bin/sh
+# rcrsn51 2012-04-24
+# version 1.9 fixed problem with photos being deleted
+# version 2.0 converts PS to PDF so CUPS does not choke on large pics
+# gettexted by esmourguit 2013/02/12
+
+export TEXTDOMAIN=peasyprint
+export OUTPUT_CHARSET=UTF-8
+
+CUPSVER=$(cups-config --version)
+if [ "$CUPSVER" = "1.3.11" ]; then
+  Xdialog --title " " --msgbox "$(gettext 'PeasyPrint requires at least CUPS 1.4!')" 0 0
+  exit
+fi
+
+TMP="/tmp"
+if [ -f $HOME/.peasyprint ]; then
+  TMP=$(cat $HOME/.peasyprint)
+  if [ ! -d "$TMP" ]; then
+    Xdialog --title " " --msgbox "$(gettext 'Temporary folder not found!')" 0 0
+    exit 
+  else
+    Xdialog --title " " --infobox "$(gettext 'Using temporary folder') $TMP" 0 0 2000
+  fi
+fi
+export TMP
+
+STARTCOPY () {
+  TYPE=`file "$FILENAME" | cut -d ":" -f 2 | cut -d " " -f 2`
+  case $TYPE in
+    JPEG)
+      cp "$FILENAME" /tmp/PPCOPY.JPG
+      Xdialog --title " " --msgbox "$(gettext 'File copied to /tmp/PPCOPY.JPG. Select it instead.')" 0 0
+      ;;
+    PNG)
+      cp "$FILENAME" /tmp/PPCOPY.PNG
+      Xdialog --title " " --msgbox "$(gettext 'File copied to /tmp/PPCOPY.PNG. Select it instead.')" 0 0
+      ;;
+    *)
+      Xdialog --title " " --msgbox "$(gettext 'Nothing Copied!')" 0 0
+      ;;
+  esac
+}
+export -f STARTCOPY
+
+STARTVIEWER () {
+   defaultimageviewer "$FILENAME" &
+}
+export -f STARTVIEWER
+
+STARTMTPAINT () {
+   mtpaint "$FILENAME" &
+}
+export -f STARTMTPAINT
+
+STARTRPHOTO () {
+   RPhoto "$FILENAME" &
+}
+export -f STARTRPHOTO
+
+STARTCAMERA () {
+
+   [ -z "$(which gphotofs)" ] && exit
+
+   if [ ! -d /mnt/camera ]; then
+     mkdir /mnt/camera
+     gphotofs /mnt/camera
+     ls /mnt/camera
+     if [ $? -eq 0 ]; then
+       rox /mnt/camera
+       Xdialog --title " " --infobox "$(gettext 'Camera mounted at /mnt/camera.\n\nUse the ROX Rescan button if needed.')" 0 0 3000
+     else
+       fusermount -u /mnt/camera
+       rmdir /mnt/camera
+       Xdialog --title " " --msgbox "$(gettext 'Camera not detected!')" 0 0
+     fi
+   else
+     rox -D /mnt/camera
+     fusermount -u /mnt/camera
+     rmdir /mnt/camera
+     Xdialog --title " " --infobox "$(gettext 'Camera unmounted.')" 0 0 3000
+   fi
+}
+export -f STARTCAMERA
+
+STARTPRINT () {
+
+if [ ! -f "$FILENAME" ]; then
+  Xdialog --title " " --msgbox "$(gettext 'File not found!')" 0 0
+  exit
+fi
+
+if [ -z "$MEASURE" ]; then
+  Xdialog --title " " --msgbox "$(gettext 'No measurement chosen!')" 0 0
+  exit
+fi
+
+if [ "$CM" = "true" ]; then
+  MEASURE=$(echo "scale=2; $MEASURE/2.54" | bc)
+fi 
+
+Xdialog --title " " --msgbox "$(gettext 'Printing ...')" 0 0 &
+MSGPID=$!
+
+TYPE=`file "$FILENAME" | cut -d ":" -f 2 | cut -d " " -f 2`
+case $TYPE in
+  JPEG)
+    jpegtopnm "$FILENAME" > $TMP/out.pnm 2> /dev/null
+    ;;
+  PNG)
+    pngtopnm "$FILENAME" > $TMP/out.pnm 2> /dev/null
+    ;;
+  Netpbm)
+    ln -s "$FILENAME" $TMP/out.pnm 2> /dev/null
+    ;;
+  *)
+     Xdialog --title " " --msgbox "$(gettext 'Not a valid graphics file!')" 0 0
+     kill $MSGPID
+     exit
+     ;;
+esac
+
+if [ $DATE = "true" ]; then
+  YVAL=$(pnmfile $TMP/out.pnm | awk '{print $6}')
+  SIZE=$((YVAL/100))
+  X=$((SIZE*2))
+  Y=$((YVAL-X))
+  COLOR="#FFFFFF"
+  ppmlabel -background transparent -x $X -y $Y -size $SIZE -color $COLOR -text $(date +%F) -x $((++X)) -y $Y -size $SIZE -color $COLOR -text $(date +%F) $TMP/out.pnm > $TMP/dateout.pnm
+  rm $TMP/out.pnm; mv $TMP/dateout.pnm $TMP/out.pnm
+fi
+
+OPTIONS="-setpage"
+if [ "$WIDTH" = "true" ]; then
+  OPTIONS=$OPTIONS" -imagewidth=$MEASURE"
+else
+  OPTIONS=$OPTIONS" -imageheight=$MEASURE"
+fi
+
+if [ "$ROTATE" = "false" ]; then
+  OPTIONS=$OPTIONS" -noturn"
+fi 
+
+if [ "$LETTER" = "true" ]; then
+  OPTIONS=$OPTIONS" -width=8.5 -height=11.0"
+elif [ "$A4" = "true" ]; then
+  OPTIONS=$OPTIONS" -width=8.3 -height=11.7"
+elif [ "$PHOTO" = "true" ]; then
+  OPTIONS=$OPTIONS" -width=4.0 -height=6.0"
+fi
+
+pnmtops $OPTIONS $TMP/out.pnm > $TMP/out.ps 2> /dev/null
+ps2pdf $TMP/out.ps $TMP/out.pdf
+rm $TMP/out.pnm $TMP/out.ps
+lp -d $PRINTER $TMP/out.pdf > /dev/null
+
+kill $MSGPID
+}
+export -f STARTPRINT
+
+STARTCANCEL () {
+  cancel -a
+  rm -f /var/spool/cups/tmp/*
+  Xdialog --title " " --msgbox "$(gettext 'All print jobs cancelled!')" 0 0
+}
+export -f STARTCANCEL
+
+STARTHELP () {
+  defaulthtmlviewer http://www.murga-linux.com/puppy/viewtopic.php?t=70133 &
+}
+export -f STARTHELP 
+
+STARTCUPS () {
+  defaultbrowser http://localhost:631/printers/$PRINTER &
+}
+export -f STARTCUPS 
+
+# -------- End of Functions -----------
+
+PRINTERLIST=`lpstat -v | cut -d " " -f 3 | cut -d ":" -f 1`
+COMBOLIST=""
+for P in $PRINTERLIST
+do
+ COMBOLIST="$COMBOLIST<item>$P</item>"
+done
+
+DEFAULTFILENAME=\"\"
+[ $# -eq 1 ] && DEFAULTFILENAME=$1
+
+export DIALOG="
+<window title=\"PeasyPrint v2.6\">
+<vbox>
+  <frame $(gettext 'Select a file:  JPG, PNG, PNM')>
+    <hbox>
+      <entry accept=\"filename\">
+       <variable>FILENAME</variable>
+        <default>$DEFAULTFILENAME</default>
+      </entry>
+      <button>
+        <input file stock=\"gtk-open\"></input>
+        <action type=\"fileselect\">FILENAME</action>
+      </button>
+      <button>
+       <input file stock=\"gtk-clear\"></input>
+       <action>Clear:FILENAME</action>
+      </button>
+    </hbox>
+  </frame>
+  <frame $(gettext 'Editing tools')>
+   <hbox> 
+    <checkbox>
+      <label>$(gettext 'Date')</label>
+      <variable>DATE</variable>
+    </checkbox>
+    <button>
+      <label>$(gettext 'Camera')</label>
+      <action>STARTCAMERA</action>
+    </button>
+    <button>
+      <label>$(gettext 'RPhoto')</label>
+      <action>STARTRPHOTO</action>
+    </button>
+    <button>
+      <label>$(gettext 'mtPaint')</label>
+      <action>STARTMTPAINT</action>
+    </button>
+    <button>
+      <label>$(gettext 'View')</label>
+      <action>STARTVIEWER</action>
+    </button>
+    <button>
+     <label>$(gettext 'Copy')</label>
+     <action>STARTCOPY</action>
+    </button>
+   </hbox>
+  </frame>
+  <frame $(gettext 'Print this side')>
+    <hbox>
+      <radiobutton> 
+       <variable>WIDTH</variable>
+       <label>$(gettext 'Width')</label>
+     </radiobutton>
+     <radiobutton> 
+       <variable>HEIGHT</variable>
+       <label>$(gettext 'Height')</label>
+     </radiobutton>
+    </hbox>
+  </frame>
+  <frame $(gettext 'With this measurement')>
+   <hbox>
+     <entry>
+        <variable>MEASURE</variable>
+        <default>4.0</default>
+     </entry>
+     <radiobutton> 
+       <variable>INCH</variable>
+       <label>$(gettext 'inch')</label>
+     </radiobutton>
+     <radiobutton> 
+       <variable>CM</variable>
+       <label>cm</label>
+     </radiobutton>
+   </hbox>
+  </frame>
+  <frame $(gettext 'Rotate Landscape to Portrait?')>
+    <hbox>
+      <checkbox>
+        <label>$(gettext 'If checked, the short side becomes the width')</label>
+        <variable>ROTATE</variable>
+        <default>true</default>
+      </checkbox>
+     </hbox>
+  </frame>
+  <frame $(gettext 'Select a printer')>
+    <combobox>
+      <variable>PRINTER</variable>
+     $COMBOLIST 
+    </combobox>
+  </frame>
+  <frame $(gettext 'Paper size')>
+    <hbox>
+      <radiobutton> 
+       <variable>PHOTO</variable>
+       <label>4x6 Photo</label>
+      </radiobutton>
+      <radiobutton> 
+       <variable>LETTER</variable>
+       <label>$(gettext 'Letter')</label>
+      </radiobutton>
+      <radiobutton> 
+        <variable>A4</variable>
+        <label>A4</label>
+      </radiobutton>
+    </hbox>
+    <text>
+      <label>$(gettext '(Set the CUPS printer options to match this paper)')</label>
+    </text>
+  </frame>
+  <hbox>
+    <button>
+      <label>$(gettext 'Help')</label>
+      <action>STARTHELP</action>
+    </button>
+    <button>
+      <label>$(gettext 'CUPS')</label>
+      <action>STARTCUPS</action>
+    </button>
+    <button>
+      <label>$(gettext 'Cancel')</label>
+      <action>STARTCANCEL</action>
+    </button>
+    <button>
+      <label>$(gettext 'Print')</label>
+      <action>STARTPRINT</action>
+    </button>
+    <button><label>$(gettext 'Quit')</label></button>
+  </hbox>
+</vbox>
+</window>
+"
+
+gtkdialog3 --program DIALOG > /dev/null
+
+rm -f $TMP/out.pnm $TMP/out.ps $TMP/out.pdf
+if [ -d /mnt/camera ]; then
+  rox -D /mnt/camera; fusermount -u /mnt/camera; rmdir /mnt/camera
+fi

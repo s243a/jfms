@@ -1,0 +1,55 @@
+#!/bin/sh
+#(c) Barry Kauler July 2008, licence: GPL2
+#130517 L18L: i18n.
+
+. gettext.sh
+export TEXTDOMAIN=pplog_gui
+export OUTPUT_CHARSET=UTF-8
+TITLE="$(gettext 'PPLOG personal blog')"
+BUTTON_START="$(gettext 'START')"
+BUTTON_STOP="$(gettext 'STOP')"
+BUTTON_EXIT="$(gettext 'EXIT')"
+BUTTON_PPLOG="$(gettext 'PPLOG')"
+
+PSSTATUS="`ps`"
+if [ "`echo "$PSSTATUS" | grep ' hiawatha'`" = "" ];then
+ xmessage -center -bg '#ffc0c0' -buttons ${BUTTON_START}:10,${BUTTON_EXIT}:11 -title "${TITLE}" "$(eval_gettext '${TITLE} requires the Hiawatha web server to be running.')
+$(eval_gettext 'Click the ${BUTTON_START} button to do this, otherwise click ${BUTTON_EXIT} to abort.')"
+ [ $? -ne 10 ] && exit
+
+ echo '' > /tmp/hiawatha_error
+ hiawatha 2>/tmp/hiawatha_error
+
+ if [ $? -ne 0 ];then
+  ERRMSG="`cat /tmp/hiawatha_error`"
+  xmessage -center -bg 'red' -buttons ${BUTTON_EXIT}:10 -title "${TITLE}" "$(gettext 'There was an error when attempting to start Hiawatha, this error message:')
+
+${ERRMSG}
+
+$(eval_gettext 'Click ${BUTTON_EXIT} button to quit:')"
+  exit
+ fi
+fi
+
+xmessage -center -bg 'orange' -buttons ${BUTTON_PPLOG}:10,${BUTTON_STOP}:11,${BUTTON_EXIT}:12 -title "${TITLE}" "
+$(eval_gettext 'Click the ${BUTTON_PPLOG} button to run the ${TITLE}.')
+
+$(gettext 'The Hiawatha web server is currently running, which is required for PPLOG.')
+$(eval_gettext 'If you want to stop the server and exit, click the ${BUTTON_STOP} button.')
+
+$(eval_gettext 'To just quit, click the ${BUTTON_EXIT} button:')"
+
+case $? in
+ 10)
+  exec defaulthtmlviewer http://127.0.0.1:80/blog/pup_pplog.pl
+ ;;
+ 11)
+  hiawatha.run stop
+  exit
+ ;;
+ *)
+  exit
+ ;;
+esac
+
+###END###

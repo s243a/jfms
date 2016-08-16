@@ -1,0 +1,50 @@
+#!/bin/sh
+# /usr/local/bin/Extract-Debian
+## 2009-8 TazOC
+# 2010-04 TazOC partial CL fix
+
+APPTITLE="Extract-Rar"
+
+# Set up buttons for gxmessage Nathan Fisher 2007-01
+# For more, gtk-demo, click stock items and icon browser
+B_OK="GTK_STOCK_OK"
+
+RARFILE="$1"
+BASERARFILE=`basename "$RARFILE"`
+DIRRARFILE=`dirname "$RARFILE"`
+PKGLONGNAME="`basename "$RARFILE" .rar`"
+PKGSHORTNAME="`echo "$PKGLONGNAME" | cut -f 1 -d '_'`"
+
+# Check for a valid .deb file
+FILE="$PKGLONGNAME"
+FILE=`ls "$DIRRARFILE/$FILE".rar`
+FILE=`basename "$FILE"`    # if no .deb file present, result will be blank
+
+if [ $FILE ]; then
+   WORKINGDIR="$DIRRARFILE/extracted-rar"
+   mkdir -p "$WORKINGDIR"
+   cp  "$RARFILE" "$WORKINGDIR"
+   cd "$WORKINGDIR"
+   unrar x "$RARFILE"
+   if [ $Err -gt 0 ] ;then
+    MSG=`which gxmessage` || MSG=xmessage
+    $MSG -title "$APPTITLE" -center -buttons "$B_OK:101" "
+'unrar "$DEBFILE"' failed in
+ "$WORKINGDIR" with error code $Err."
+   		   rm -f "$WORKINGDIR"/"$BASERARFILE"
+       exit $Err # END SCRIPT
+        fi
+    rm -f "$WORKINGDIR"/"$BASERARFILE"
+   MSG=`which gxmessage` || MSG=xmessage
+! [ "$2" = "-q" -o "$2" = "--quiet" ] && $MSG -center -title "$APPTITLE" -timeout 20 -buttons "$B_OK" \
+   "                                                  Autoclose in 20 sec
+   
+   '$BASERARFILE' was extracted into the folder
+   '$WORKINGDIR'" &
+else
+   echo "(II) $APPTITLE looked for a .rar file in '$RARFILE' but did not find one."
+   MSG=`which gxmessage` || MSG=xmessage
+   $MSG -center -title "$APPTITLE" -buttons "$B_OK" "
+   Filename must end with .rar. $APPTITLE did not extract '$RARFILE'." &
+fi
+exit #END SCRIPT

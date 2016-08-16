@@ -1,0 +1,38 @@
+#!/bin/sh -e
+
+# Find the most suitable version of ndiswrapper-utils to use:
+# - first check what API is required by currently installed kernel module
+# - fallback to detection of latest utility version
+utils_version() {
+	UTILS_VERSION=$(/sbin/modinfo -F parm ndiswrapper 2>/dev/null | \
+			sed -n 's/^utils_version:.*([^:]\+: \([0-9\.]\+\))$/\1/p')
+
+	if [ "${UTILS_VERSION}" ]; then
+		echo ${1}-${UTILS_VERSION}
+	else
+		for file in ${1}-[\.0-9][\.0-9]*; do
+			[ -x "${file}" ] && echo ${file}
+		done | sort -n -t - -k 2 | tail -1
+	fi
+}
+
+# invoked by ndiswrapper module
+if [ "${#}" -ge "3" ]; then
+	# /sbin/loadndisdriver <ioctl command> <debug value> <utils version> \
+	#	<vendor> <device> <subdevice> <subvendor> <bus>
+	exec /sbin/loadndisdriver-${3} "${@}"
+fi
+
+# invoked interactively
+LOADNDISDRIVER=$(utils_version /sbin/loadndisdriver)
+if [ -x "${LOADNDISDRIVER}" ]; then
+	exec ${LOADNDISDRIVER} "${@}"
+fi
+	
+if [ "${LOADNDISDRIVER}" ]; then
+	echo "Error: ndiswrapper-utils-${LOADNDISDRIVER##*-} not installed!" 1>&2
+else
+	echo "Error: unable to find a version of loadndisdriver!" 1>&2
+fi
+
+exit 1

@@ -1,0 +1,10 @@
+#!/bin/bash
+
+FLASH_VERSION=$(grep '"version":' /usr/lib/PepperFlash/manifest.json | cut -d\" -f4)
+CHROMIUM_FLAGS="--user-data-dir --ppapi-flash-path=/usr/lib/PepperFlash/libpepflashplayer.so --ppapi-flash-version=$FLASH_VERSION"
+
+export CHROME_WRAPPER=$(readlink -f "$0")
+export CHROME_DESKTOP=chromium.desktop
+
+exec /usr/lib/chromium/chromium $CHROMIUM_FLAGS "$@"
+

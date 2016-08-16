@@ -1,0 +1,81 @@
+#!/bin/sh
+# /usr/local/bin/Extract-txz
+## 2009-9 TazOC
+# 2010-03 TazOC updated for Sakura terminal
+# 2010-04 TazOC CL partial fix
+
+APPTITLE="Extract-txz"
+
+# Set up buttons for gxmessage Nathan Fisher 2007-01
+# For more, gtk-demo, click stock items and icon browser
+B_OK="GTK_STOCK_OK"
+
+TXZFILE="$1"
+BASETXZFILE=`basename "$TXZFILE"`
+DIRTXZFILE=`dirname "$TXZFILE"`
+
+# Check for a valid .txz file
+FILE="`echo "$TXZFILE" | grep '\.txz$'`" # if no .tgz file present, result will be blank # if no .txz file present, result will be blank
+
+if ! [ "$FILE" = "" ]; then
+   PKGLONGNAME="`basename "$TXZFILE" .txz`"
+   WORKINGDIR="$DIRTXZFILE/extracted-txz"
+   mkdir -p "$WORKINGDIR"
+   cp  "$TXZFILE" "$WORKINGDIR"
+   cd "$WORKINGDIR"
+   tar -xf "$TXZFILE"
+   Err=$?
+   if [ $Err -gt 0 ] ;then
+    MSG=`which gxmessage` || MSG=xmessage
+    $MSG -title " $APPTITLE" -center -buttons "$B_OK:101" "
+'tar "$TXZFILE"' failed in
+ "$WORKINGDIR" with error code $Err."
+   	rm -f "$BASETXZFILE"
+    exit $Err # END SCRIPT
+   fi
+   rm -f "$BASETXZFILE"
+   if [ -e ./install/doinst.sh ]; then
+    echo -e "echo \"Please wait...\"" > ./doinst.sh
+    cat ./install/doinst.sh >> ./doinst.sh
+    chmod 0755 doinst.sh
+    echo -e "echo; read -p \"doinst.sh ran in ./extracted-txz. Press Enter or close this window to continue.\"" >> doinst.sh
+    sakura -t "$APPTITLE doinst.sh" -r 12 -e "./doinst.sh"
+    rm -f ./doinst.sh
+   fi 
+   if [ -d install ]; then
+     PKGSHORTNAME="`echo "$PKGLONGNAME" | cut -f 1 -d '-'`"
+     DESC="`cat install/slack-desc | grep "$PKGSHORTNAME" | grep ":"`"
+     mkdir -p var/log/packages
+     echo -e "PACKAGE NAME:     $PKGLONGNAME" > var/log/packages/$PKGLONGNAME
+     echo -e "COMPRESSED PACKAGE SIZE: \nUNCOMPRESSED PACKAGE SIZE: \nPACKAGE LOCATION: \nPACKAGE DESCRIPTION: " >> var/log/packages/$PKGLONGNAME
+     echo "$DESC" >> var/log/packages/$PKGLONGNAME
+     rm -fR ./install
+   fi
+   MSG=`which gxmessage` || MSG=xmessage
+   ! [ "$2" = "-q" -o "$2" = "--quiet" ] && $MSG  -center -title " $APPTITLE" -timeout 20 -buttons "$B_OK" \
+   "                                                  Autoclose in 20 sec
+   
+   '$BASETXZFILE' was extracted into the folder
+   '$WORKINGDIR'" &
+else
+FILE="`echo "$TXZFILE" | grep '\.tar.xz$'`" # if no .tar.xz file present, result will be blank 
+
+if ! [ "$FILE" = "" ]; then
+   WORKINGDIR="$DIRTXZFILE/extracted-tar.xz"
+   mkdir -p "$WORKINGDIR"
+   cp  "$TXZFILE" "$WORKINGDIR"
+   cd "$WORKINGDIR"
+#   tar -xJf "$TXZFILE"
+    xz -dc  "$TXZFILE"  | tar xf  -
+   rm -f "$BASETXZFILE"
+   yaf-splash  -margin 42 -bg orange -fg black -placement center -font "9x15B" -outline 0 -text "`basename "$TXZFILE"` has been extracted into the folder
+$WORKINGDIR" 	
+
+else
+   echo "(II) $APPTITLE looked for a .txz file in '$TXZFILE' but did not find one."
+   MSG=`which gxmessage` || MSG=xmessage
+   $MSG -center -title " $APPTITLE" -buttons "$B_OK" "
+   Filename must end with .txz. '$TXZFILE' not extracted." &
+fi
+fi
+exit #END SCRIPT

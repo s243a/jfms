@@ -1,0 +1,3 @@
+#!/bin/sh
+rm /usr/bin/palemoon
+ln -s /opt/palemoon/palemoon /usr/bin/palemoon

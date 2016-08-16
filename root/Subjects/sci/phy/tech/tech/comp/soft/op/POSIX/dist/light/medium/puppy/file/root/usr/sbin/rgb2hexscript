@@ -1,0 +1,79 @@
+#!/bin/bash
+
+
+declare -r HEX_DIGITS="0123456789ABCDEF"
+
+HEX1=`
+dec_value=$1
+hex_value=""
+
+until [ $dec_value == 0 ]; do
+
+    rem_value=$((dec_value % 16))
+    dec_value=$((dec_value / 16))
+
+    hex_digit=${HEX_DIGITS:$rem_value:1}
+    hex_value="${hex_digit}${hex_value}"
+
+done
+
+if [ $1 -gt 15 ] ;then
+echo -e "${hex_value}"
+else
+	if [ $1 = 0 ] ;then
+	echo -e '00'
+	else
+	echo -e '0'"${hex_value}"
+	fi
+fi`
+
+HEX2=`
+dec_value=$2
+hex_value=""
+
+until [ $dec_value == 0 ]; do
+
+    rem_value=$((dec_value % 16))
+    dec_value=$((dec_value / 16))
+
+    hex_digit=${HEX_DIGITS:$rem_value:1}
+    hex_value="${hex_digit}${hex_value}"
+
+done
+
+if [ $2 -gt 15 ] ;then
+echo -e "${hex_value}"
+else
+	if [ $2 = 0 ] ;then
+	echo -e '00'
+	else
+	echo -e '0'"${hex_value}"
+	fi
+fi`
+
+HEX3=`
+dec_value=$3
+hex_value=""
+
+until [ $dec_value == 0 ]; do
+
+    rem_value=$((dec_value % 16))
+    dec_value=$((dec_value / 16))
+
+    hex_digit=${HEX_DIGITS:$rem_value:1}
+    hex_value="${hex_digit}${hex_value}"
+
+done
+
+if [ $3 -gt 15 ] ;then
+echo -e "${hex_value}"
+else
+	if [ $3 = 0 ] ;then
+	echo -e '00'
+	else
+	echo -e '0'"${hex_value}"
+	fi
+fi`
+
+
+echo $HEX1$HEX2$HEX3

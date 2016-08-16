@@ -1,0 +1,18 @@
+#this file called from rc.sysinit
+#you can edit this file
+#When firewall is installed, will append lines to this file...
+
+echo enabled > /sys/bus/usb/devices/usb1/power/wakeup
+echo enabled > /sys/bus/usb/devices/usb2/power/wakeup
+echo enabled > /sys/bus/usb/devices/usb3/power/wakeup
+echo enabled > /sys/bus/usb/devices/usb4/power/wakeup
+echo enabled > /sys/bus/usb/devices/usb5/power/wakeup
+echo enabled > /sys/bus/usb/devices/usb6/power/wakeup
+echo enabled > /sys/bus/usb/devices/usb7/power/wakeup
+echo enabled > /sys/bus/usb/devices/usb8/power/wakeup
+echo enabled > /sys/bus/usb/devices/usb9/power/wakeup
+echo enabled > /sys/bus/usb/devices/usb10/power/wakeup
+
+if [ -x /etc/rc.d/rc.firewall ]; then
+  /etc/rc.d/rc.firewall start
+fi

@@ -1,0 +1,292 @@
+#!/bin/sh
+
+# Copyright (C) 2006-2013 Bart Martens <bartm@knars.be>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+set -e
+
+return_0() {
+	return 0
+}
+
+trap "return_0" 0
+
+die_hard() {
+	echo "ERROR: $1" >&2
+	echo "More information might be available at:" >&2
+	echo "  http://wiki.debian.org/PepperFlashPlayer" >&2
+	exit 1
+}
+
+[ `whoami` = "root" ] || die_hard "must be root"
+
+show_usage() {
+	echo "Usage:"
+	echo "  update-pepperflashplugin-nonfree --install"
+	echo "  update-pepperflashplugin-nonfree --uninstall"
+	echo "  update-pepperflashplugin-nonfree --status"
+	echo "Additional options:"
+	echo "  --verbose"
+	echo "  --quiet"
+	exit 1
+}
+
+getopt_temp=`getopt -o iusfvq --long install,uninstall,status,fast,verbose,quiet,beta,unstable,unverified \
+	-n 'update-pepperflashplugin-nonfree' -- "$@"` || show_usage
+eval set -- "$getopt_temp" || show_usage
+
+ACTION=none
+fast=no
+verbose=no
+quiet=no
+variant=stable
+verified=yes
+
+while [ true ]
+do
+	case "$1" in
+		-i|--install)
+			ACTION="--install"
+			shift
+			;;
+		-u|--uninstall)
+			ACTION="--uninstall"
+			shift
+			;;
+		-s|--status)
+			ACTION="--status"
+			shift
+			;;
+		-f|--fast)
+			fast=yes
+			shift
+			;;
+		-v|--verbose)
+			verbose=yes
+			shift
+			;;
+		-q|--quiet)
+			quiet=yes
+			shift
+			;;
+		--beta)
+			variant=beta
+			shift
+			;;
+		--unstable)
+			variant=unstable
+			shift
+			;;
+		--unverified)
+			verified=no
+			shift
+			;;
+		--)
+			shift
+			break
+			;;
+		*)
+			echo "Internal error!"
+			exit 1
+			;;
+	esac
+done
+
+[ "$ACTION" != "none" -a $# -eq 0 ] || show_usage
+[ "$quiet" != "yes" ] || verbose=no
+
+[ "$verbose" != "yes" ] || echo "options : $getopt_temp"
+
+latestfile=latest-$variant-verified.txt
+[ "$verified" != "no" ] || latestfile=latest-$variant.txt
+
+UNPACKDIR=`mktemp -d /tmp/pepperflashplugin-nonfree.XXXXXXXXXX` || die_hard "mktemp failed"
+echo "$UNPACKDIR" | grep -q "^/tmp/pepperflashplugin-nonfree\." || die_hard "paranoia"
+cd "$UNPACKDIR" || die_hard "cd failed"
+
+[ "$verbose" != "yes" ] || echo "temporary directory: $UNPACKDIR"
+
+do_cleanup() {
+	[ "$verbose" != "yes" ] || echo "cleaning up temporary directory $UNPACKDIR ..."
+	cd /
+	echo "$UNPACKDIR" | grep -q "^/tmp/pepperflashplugin-nonfree\." || die_hard "paranoia"
+	rm -rf "$UNPACKDIR"
+}
+
+die_hard_with_a_cleanup() {
+	return_0
+	do_cleanup
+	die_hard "$1"
+}
+
+trap "die_hard_with_a_cleanup interrupted" INT
+
+cachedir=/var/cache/pepperflashplugin-nonfree
+
+wgetquiet=' -q '
+wgetfast='-t 3 -T 15 '
+wgetalways=' -nd -P . '
+wgetprogress=' -v --progress=dot:default '
+
+if [ "$ACTION" = "--install" -o "$ACTION" = "--status" ]
+then
+	installed=`strings /usr/lib/pepperflashplugin-nonfree/libpepflashplayer.so 2> /dev/null | grep LNX | cut -d ' ' -f 2 | sed -e "s/,/./g"`
+
+	if [ -f $cachedir/$latestfile ]
+	then
+		chromeversion=`head -n 1 $cachedir/$latestfile`
+		flashversion=`tail -n 1 $cachedir/$latestfile`
+	else
+		chromeversion=0
+		flashversion=0
+	fi
+
+	mkdir -p var/lib/apt/lists var/cache/apt/archives etc/apt/apt.conf.d etc/apt/preferences.d
+
+	cat > apt.conf <<-EOF
+	Dir ".";
+	Dir::Etc::trusted "pubring.gpg";
+	Debug::NoLocking "true";
+	EOF
+
+	arch=`dpkg --print-architecture`
+
+	cat > etc/apt/sources.list <<-EOF
+	deb [arch=$arch] http://dl.google.com/linux/chrome/deb/ stable main
+	EOF
+
+	gpg --quiet --no-permission-warning --homedir "etc/apt" --import /usr/lib/pepperflashplugin-nonfree/pubkey-google.txt
+
+	[ "$verbose" != "yes" ] || echo "doing apt-get update on google repository"
+	stdouterr=`APT_CONFIG=apt.conf apt-get --quiet --quiet update 2>&1`
+	[ "$stdouterr" = "" ] || die_hard_with_a_cleanup "failed to retrieve status information from google : $stdouterr"
+
+	newchromeversion=`APT_CONFIG=apt.conf apt-cache show google-chrome-$variant | grep "^Version: " | sed -e "s,^Version: ,,"`
+	poolfile=`APT_CONFIG=apt.conf apt-cache show google-chrome-$variant | grep "^Filename: " | sed -e "s,^Filename: ,,"`
+	deburl="http://dl.google.com/linux/chrome/deb/$poolfile"
+	debfile=`echo $poolfile|sed -e "s,.*/,,"`
+	debsize=`APT_CONFIG=apt.conf apt-cache show google-chrome-$variant | grep "^Size: " | sed -e "s,^Size: ,,"`
+	debsha1=`APT_CONFIG=apt.conf apt-cache show google-chrome-$variant | grep "^SHA1: " | sed -e "s,^SHA1: ,,"`
+	debmd5=`APT_CONFIG=apt.conf apt-cache show google-chrome-$variant | grep "^MD5sum: " | sed -e "s,^MD5sum: ,,"`
+
+	if [ "$chromeversion" = "$newchromeversion" ]
+	then
+		upstream=$flashversion
+	else
+		downloadurl="http://people.debian.org/~bartm/pepperflashplugin-nonfree/$latestfile"
+		wgetoptions="$wgetquiet $wgetalways"
+		[ "$fast" != "yes" ] || wgetoptions="$wgetoptions $wgetfast"
+
+		[ "$verbose" != "yes" ] || echo "downloading $downloadurl"
+		HOME=/root wget $wgetoptions $downloadurl || die_hard_with_a_cleanup "wget failed to download $downloadurl"
+
+		mv $latestfile $cachedir
+
+		chromeversion=`head -n 1 $cachedir/$latestfile`
+		flashversion=`tail -n 1 $cachedir/$latestfile`
+
+		upstream=$flashversion
+	fi
+fi
+
+case "$ACTION" in
+
+	--install)
+		[ "$verbose" != "yes" ] || echo "selected action = $ACTION"
+
+		[ "$upstream" != "" ] || die_hard_with_a_cleanup "failed to determine upstream version"
+
+		if [ "$installed" != "" -a "$upstream" != "" -a "$installed" = "$upstream" ]
+		then
+
+			[ "$verbose" != "yes" ] || echo "upstream version $upstream is already installed"
+
+		else
+
+			if [ -f $cachedir/$debfile ]
+			then
+				cp -p $cachedir/$debfile .
+			fi
+	
+			if [ ! -f $debfile ]
+			then
+				wgetoptions="$wgetalways $wgetprogress"
+				[ "$quiet" != "yes" ] || wgetoptions="$wgetquiet $wgetalways"
+				[ "$fast" != "yes" ] || wgetoptions="$wgetoptions $wgetfast"
+				wgetoptions="$wgetoptions -O $UNPACKDIR/$debfile" # to change wget message : Saving to ...
+	
+				HOME=/root wget $wgetoptions $deburl || die_hard_with_a_cleanup "wget failed to download $deburl"
+	
+				[ `stat --format=%s $debfile` = "$debsize" ] || die_hard_with_a_cleanup "rejecting $debfile : wrong size"
+				[ `sha1sum $debfile|sed -e "s, .*,,"` = "$debsha1" ] || die_hard_with_a_cleanup "rejecting $debfile : wrong sha1sum"
+				[ `md5sum $debfile|sed -e "s, .*,,"` = "$debmd5" ] || die_hard_with_a_cleanup "rejecting $debfile : wrong md5sum"
+			fi
+	
+			dpkg-deb -x $debfile unpackchrome
+
+			sofile=unpackchrome/opt/google/chrome/PepperFlash/libpepflashplayer.so
+			[ -e $sofile ] || sofile=unpackchrome/opt/google/chrome-unstable/PepperFlash/libpepflashplayer.so
+			[ -e $sofile ] || sofile=unpackchrome/opt/google/chrome/PepperFlash/libpepflashplayer.so
+
+			mv -f $sofile /usr/lib/pepperflashplugin-nonfree
+			chown root:root /usr/lib/pepperflashplugin-nonfree/libpepflashplayer.so
+			chmod 644 /usr/lib/pepperflashplugin-nonfree/libpepflashplayer.so
+			mv $debfile $cachedir
+		fi
+
+		[ "$verbose" != "yes" ] || echo "end of action $ACTION"
+
+		[ ! -e /etc/chromium/default ] || \
+		grep -q pepperflashplugin-nonfree /etc/chromium/default \
+			|| cat /usr/lib/pepperflashplugin-nonfree/etc-chromium-default.txt >> /etc/chromium/default
+		[ ! -e /etc/chromium-browser/default ] || \
+		grep -q pepperflashplugin-nonfree /etc/chromium-browser/default \
+			|| cat /usr/lib/pepperflashplugin-nonfree/etc-chromium-default.txt >> /etc/chromium-browser/default
+
+		;;
+
+	--uninstall)
+		[ "$verbose" != "yes" ] || echo "selected action = $ACTION"
+
+		[ "$verbose" != "yes" ] || echo "removing files ..."
+		rm -f /usr/lib/pepperflashplugin-nonfree/libpepflashplayer.so
+
+		[ "$verbose" != "yes" ] || echo "end of action $ACTION"
+
+		;;
+
+	--status)
+		[ "$verbose" != "yes" ] || echo "selected action = $ACTION"
+
+		echo "Flash Player version installed on this system  : $installed"
+		echo "Flash Player version available on upstream site: $upstream"
+
+		[ "$verbose" != "yes" ] || echo "end of action $ACTION"
+
+		;;
+
+	*)
+
+		do_cleanup
+		show_usage
+
+		;;
+
+esac
+
+do_cleanup
+
+[ "$verbose" != "yes" ] || echo "end of update-pepperflashplugin-nonfree"
+

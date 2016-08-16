@@ -1,0 +1,82 @@
+#! /bin/bash
+#Checks for firewall and provides an opportunity to turn it off
+ if [ -f /etc/rc.d/rc.firewall ]
+ then
+	export MAIN_DIALOG='
+ <window window-position="1" title="Disable Firewall" resizable="false" icon-name="gtk-no">
+ <vbox>
+    <text>
+     <label>
+     "It appears you have a firewall installed. Select Yes then OK to Disable, or No then OK to Enable."
+     </label>
+    </text>
+  <hbox>
+    <button yes><action>/etc/rc.d/rc.firewall stop &</action></button>
+    <button no><action>/etc/rc.d/rc.firewall stop &</action></button>
+    <button ok></button>
+    </hbox>
+ </vbox>
+    </window>'
+   gtkdialog3 --program=MAIN_DIALOG 
+    fi 
+###Sound Script begins. Looks for .psip.conf, if found test record, playback and opens defaultaudiomixer
+	if [ ! -f /root/.psip.conf ]
+	then
+	Xdialog --title "Psip - Sound Wizard Help" --msgbox "For Psip to work you need to be able to Record and Play sound.\n
+					After you click OK, you will be presented with some test utilities.\n
+					Click on the record button and speak into your Mic for 5 seconds.\n
+					Now press the Play button to listen to your own voice.\n
+					If you didn't hear sound then click on Audio Mixer. This will allow\n
+					you to adjust you input and output settings. For input settings, look\n
+					for Mic, Capture or Digital. For Output settings look for Master & PCM.\n
+					If you have selected the correct Inputs and Outputs, and you are still\n
+					not getting sound, try turning off the Firewall. Providing you have a\n
+					hardware firewall in your router you should be safe.\n\n
+					This wizard will only run once by default." 0 0
+	export MAIN_DIALOG='
+	<window window-position="1" title="Psip - Sound Wizard" resizable="false" icon-name="gtk-help">
+	<vbox>
+	<hbox>
+		<button tooltip-text="Click on this button to conduct a 5 second recording test">
+			<label>Record     </label>
+			<input file icon="gtk-no"></input>
+			<action>/usr/bin/arecord -r 16000 -d 5 /tmp/test.wav &</action>
+		</button>
+		<button tooltip-text="Click on this button to playback your recording">
+			<label>Play       </label>
+			<input file icon="gtk-yes"></input>
+			<action>aplay /tmp/test.wav &</action>
+			</button>
+		<button tooltip-text="Click on this button to open your audio mixer">
+			<input file icon="gtk-preferences"></input>
+			<label>Audio Mixer </label>
+			<action>/usr/local/bin/defaultaudiomixer &</action>
+		</button>
+		<button tooltip-text="Quit">
+			<input file icon="gtk-quit"></input>
+			<label>Quit       </label>
+		</button>
+	</hbox>
+	</vbox>
+	</window>'
+	gtkdialog3
+	fi
+#Run Psip	
+	cd /usr/local/psip32
+	./psip32
+#Check for firewall, if exists, prompt to turn on
+	if [ -f /etc/rc.d/rc.firewall ]
+ then
+	export SHUTDOWN='   
+<window window-position="1" title="Enable Firewall" resizable="false" icon-name="gtk-yes">
+   <vbox>
+   <text><label>"Click Yes, then OK to Enable or No then OK Disable."</label></text>
+    <hbox>
+    <button yes><action>/etc/rc.d/rc.firewall start &</action></button>
+    <button no><action>/etc/rc.d/rc.firewall stop &</action></button>
+    <button ok></button>
+    </hbox>
+  </vbox>
+    </window>'
+    gtkdialog3 --program=SHUTDOWN
+    fi

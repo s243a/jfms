@@ -1,0 +1,83 @@
+#!/bin/sh
+
+# txz2pet - converts a Slax txz package to a pet file
+# so it can be installed normally, using the PPM.
+# sc0ttman, GPL, do as you like with this
+
+# usage: tzx2pet /path/txz/package
+
+# set vars
+export version="0.1"
+
+export file="$1" 	# full path, filename and extension
+export basedir=`dirname "$1"` # full path 
+export basename=`basename "$1"` 	# filename and extension only
+export filename=${basename%.*} 	# filename, no extension
+export extension=${basename##*.} # extension only
+export petdir="${basedir}/${filename}" # the dir from which the pet is created
+export petfile="${petdir}.pet" # the full path and filename of the pet file
+export petname=`basename "$petfile"` # the filename of the pet file
+
+echo file: $file
+echo basedir: $basedir
+echo basename: $basename
+echo filename: $filename
+echo extension: $extension
+echo petdir: $petdir
+echo petfile: $petfile
+echo petname: $petname
+echo dir2pet $petdir
+
+# error checking
+if [ ! -f "$1" ];then
+	echo "You must supply the path to a txz file"
+	exit
+fi
+
+# create the pet directory, if needed
+[ ! -e "$petdir" ] && mkdir "$petdir"
+
+if [ ! -d "$petdir" ];then
+	echo "PET dir not created or found."
+	exit
+fi
+
+# unpack the file
+tar -Jxvf "$1" -C "$petdir"
+
+# delete the slackware package management files
+if [ -d "${petdir}/install" ];then
+	rm -v -r "${petdir}/install"
+	rmdir -v "${petdir}/install"
+fi
+
+if [ -d "$petdir" ];then
+	cd "$petdir"
+	cd ..
+	dir2pet "./$filename"
+else 
+	echo "PET working directory not found"
+fi
+
+if [ -f "$petfile" ];then
+	# remove the pet file working directory
+	rm -v -r "$petdir"
+	rmdir -v "$petdir"
+	# report the file was created
+	echo "PET file '$petname' created successfully."
+	echo "Location:  ${petfile}"
+	sleep 1
+	# ask to install the pet file
+	petget "$petfile"
+else
+	echo "PET file not created"
+fi
+
+# ask to delete original file
+Xdialog --title "Delete File" --yesno "Do you want to delete the file listed below?\n'${file}'" 0 0
+reply=$?
+if [ "$reply" = 0 ];then
+	rm -v "$file"
+fi
+
+exit

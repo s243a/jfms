@@ -1,0 +1,195 @@
+#! /bin/bash
+# PGPRS SETUP: Puppy Generic GPRS Modem Setup Utility
+#(c) Copyright Aug. 2008 Lloyd Standish www.voluntary-simplicity.org/linux                         
+#2007 Lesser GPL licence v2 (http://www.fsf.org/licensing/licenses/lgpl.html)
+# version 1.3 Aug. 16, 2008  
+#101204 Dejan: if there's no pin gtkdialog has errors, put 1234 instead blank.
+#120131 rodin.s: i18n
+#120228 fix errors in gettext.
+#130812 Modification as version 1.5 by Richard Erwin for Puppy integration, to use a configuration file, move 'user' and 'noauth' statements to a separate file in peers directory, place provider-specific chat commands in separate files accessed by the connect chat and use generic APN default.
+#140129 Rework gtkdialog result evaluation to avoid syntax error from space character in EXIT variable.
+#150214 Allow absence of user and password, to indicate 'no authentication'.
+
+export TEXTDOMAIN=pgprs-setup
+export OUTPUT_CHARSET=UTF-8
+. gettext.sh
+
+#130812 The following values are maintained in /etc/ppp/gprs.conf and copied to operational locations at time of connection....
+# device file: argument to pppd invocation, not copied
+# user: /etc/ppp/peers/pgprs_auth (also pap-secrets)
+#       (If no user specified, pgprs_auth contains 'noauth'.)
+# password: etc/ppp/pap-secrets
+# phone: /etc/ppp/chatscripts/gprs-dial_command
+# APN /etc/ppp/chatscripts/gprs-cgdcont_command
+# PIN /etc/ppp/chatscripts/gprs-cpin_command
+
+[ -f /etc/ppp/gprs.conf ] \
+ || echo -e "GPRSDEV=\nGPRSNBR=\nGPRSAPN=\nGPRSPIN=\nGPRSUSER=\nGPRSPAPONLY=" > /etc/ppp/gprs.conf #130812
+
+while true
+do
+. /etc/ppp/gprs.conf #130812 Get GPRSDEV, GPRSUSER, GPRSNBR, GPRSAPN, GPRSPIN.
+ 
+DETECTED=""
+for DEVICE in /dev/ttyUSB0 /dev/usb/ttyUSB0 /dev/ttyACM0 /dev/ircomm0 /dev/ttyUB0 /dev/rfcomm0 /dev/ttyS0 #130812
+do
+	if [ "`file $DEVICE 2>&1 | grep 'character special'`" != "" -a "`echo ATZ 2>&1 > "$DEVICE"`" = "" ]; then
+		DETECTED="$DETECTED $DEVICE"
+	fi
+done
+if [ "$DETECTED" = "" ]; then
+	DETECTED="`gettext \"No devices detected. If USB, plug device and click 'RE-PROBE MODEMS'\"`"
+else
+	DETECTED="$(gettext 'Detected devices:') $DETECTED" #130812
+fi
+
+[ "$GPRSUSER" ] \
+ && GPRSPSWD="$(cat /etc/ppp/*secrets | grep "^\"$GPRSUSER\"" | tail -n 1 | tr '\t' ' ' | tr -s ' ' | cut -f 3 -d ' ' | tr -d '\"' | tr -d '\n')" \
+ || GPRSPSWD="" #130812
+
+export MAIN_DIALOG="
+ <window title=\"$(gettext 'pgprs-setup')\" icon-name=\"gtk-preferences\">
+ <vbox>
+<text use-markup=\"true\"> <label>\"<b>$(gettext 'PGPRS Modem Setup')</b>\"</label></text>
+<text><label>$(gettext "If you do not know the APN or phone number to dial for connection, you can exit and run this setup program again later (by clicking the 'connect' icon on the desktop, then 'Wireless GPRS modem').")</label></text> 
+ <frame>
+  <hbox>
+    <text>
+      <label>$(gettext 'Modem Device File:')</label>
+    </text>
+    <entry>
+      <input>echo -n $GPRSDEV</input>
+      <variable>GPRSDEV</variable>
+    </entry>
+  </hbox>
+  <hbox>
+    <text><label>($DETECTED)</label></text>
+  </hbox>
+  <hbox>
+    <text>
+      <label>APN:</label>
+    </text>
+    <entry>
+      <input>echo -n $GPRSAPN</input>
+      <variable>GPRSAPN</variable>
+    </entry>
+  </hbox>
+  
+  <hbox>
+    <text>
+      <label>$(gettext 'Phone number:')</label>
+    </text>
+    <entry>
+      <input>echo -n $GPRSNBR</input>
+      <variable>GPRSNBR</variable>
+    </entry>
+  </hbox>
+
+  <hbox>
+    <text>
+      <label>$(gettext 'Phone PIN:')</label>
+    </text>
+    <entry>
+      <input>echo -n $GPRSPIN</input>
+      <variable>GPRSPIN</variable>
+    </entry>
+  </hbox>
+ </frame>
+
+ <frame $(gettext 'Authentication (optional)')>
+  <hbox>
+    <text>
+      <label>$(gettext 'Username:')</label>
+    </text>
+    <entry>
+      <input>echo -n $GPRSUSER</input>
+      <variable>GPRSUSER</variable>
+    </entry>
+  </hbox>
+  
+  <hbox>
+    <text>
+      <label>$(gettext 'Password:')</label>
+    </text>
+    <entry>
+      <visible>password</visible>
+      <input>echo -n $GPRSPSWD</input>
+      <variable>GPRSPSWD</variable>
+    </entry>
+  </hbox>
+  
+   <checkbox tooltip-text=\"$(gettext 'If internet service provider requires PAP authenticatiion, check this box.')\">
+    <variable>GPRSPAPONLY</variable>
+    <input>echo -n $GPRSPAPONLY</input>
+    <label>$(gettext 'Use only PAP authorization')</label>
+   </checkbox>
+ </frame>
+  
+  <hbox>
+   <button ok></button>
+   <button cancel></button>
+   <button>
+   		<label>$(gettext 'RE-PROBE MODEMS')</label>
+   	</button>
+  </hbox>
+ </vbox>
+ </window>
+" #130812
+#I=$IFS; IFS=""
+#for STATEMENTS in  $(gtkdialog3 --program=MAIN_DIALOG); do
+#	eval $STATEMENTS
+#done
+gtkdialog3 --program=MAIN_DIALOG > /tmp/pgprs-setup_gtkdialog_out #140129
+[ -s /tmp/pgprs-setup_gtkdialog_out ] && . /tmp/pgprs-setup_gtkdialog_out #140129
+rm -f /tmp/pgprs-setup_gtkdialog_out #140129
+#IFS=$I
+
+[ "$EXIT" = "Cancel" -o "$EXIT" = "abort" ] && exit 1 #120812
+
+if [ "$EXIT" = "$(gettext 'RE-PROBE MODEMS')" ]; then
+	continue
+fi
+
+if [ "$EXIT" = "OK" ]; then
+	LACK=""
+	if [ "$GPRSDEV" = "" ]; then
+		LACK="$LACK
+		$(gettext 'Modem device file')" #130812
+	fi
+	if [ "${GPRSAPN}" = "" ]; then
+		LACK="$LACK
+		APN" #130812
+	fi
+	if [ "$GPRSNBR" = "" ]; then
+		LACK="$LACK
+		$(gettext 'Telephone')" #130812
+	fi
+	if [ "$GPRSUSER" = "" -a "$GPRSPSWD" ]; then #150214
+		LACK="$LACK
+		$(gettext 'Username')" #130812
+	fi
+	if [ "$GPRSPSWD" = "" -a "$GPRSUSER" ]; then #150214
+		LACK="$LACK
+		$(gettext 'Password')" #130812
+	fi
+	if [ "$LACK" != "" ]; then
+		xmessage -center -bg "#ff8080" -name "$(gettext 'pgprs-setup')" "$(gettext 'The following must not be left blank:') $LACK" #130812
+		continue
+	fi
+
+	echo -e "GPRSDEV=\"$GPRSDEV\"\nGPRSNBR=$GPRSNBR\nGPRSAPN=$GPRSAPN\nGPRSPIN=$GPRSPIN\nGPRSUSER=$GPRSUSER\nGPRSPAPONLY=$GPRSPAPONLY" > /tmp/gprs.conf #130812...
+	cmp -s /tmp/gprs.conf /etc/ppp/gprs.conf \
+	 && rm -f /tmp/gprs.conf \
+	 || mv -f /tmp/gprs.conf /etc/ppp/gprs.conf
+
+	if [ "$GPRSUSER" ] \
+	 && ! grep -q -s "^\"$GPRSUSER\".\*.\"$GPRSPSWD\"" /etc/ppp/pap-secrets; then
+		sed -i -e "/^\"$GPRSUSER\"\t/d" /etc/ppp/pap-secrets
+		echo "\"$GPRSUSER\"	*	\"$GPRSPSWD\"" >> /etc/ppp/pap-secrets
+		chmod 600 /etc/ppp/pap-secrets
+	fi #130812 end
+
+	xmessage -center -name "$(gettext 'pgprs-setup')" "$(gettext "Connect to the Internet using 'PGPRS Connect' in the 'Network' menu.")" #130812
+fi
+break
+done

@@ -1,0 +1,13 @@
+#!/bin/sh
+#BK dummy for now
+#v407 install firmware tarball if not installed.
+#100228 BK
+#101204 BK changes below, modified firmware tarball.
+#111112 Karl Godt: fix for firmware not tarball.
+#120202 rodin.s: i18n
+#120202 jwm -reload
+#130812 Modification as version 1.5 by Richard Erwin for Puppy integration,
+# to relocate pgprs components to operational locations and eliminate
+# the 'firmware tarball' and (inconsistent) menu items.
+
+exec pgprs-setup

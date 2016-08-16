@@ -1,0 +1,13 @@
+#!/bin/sh
+# For multiple sound cards.
+PARAMS="$@"
+if [ "$PARAMS" != "" ] ; then
+alsamixer.bin $PARAMS
+exit
+fi
+if [ -e /etc/asound.conf ] ; then
+CARD="$(cat /etc/asound.conf | grep card | sed -e 's/\(^.*\)\(.$\)/\2/')"
+alsamixer -c $CARD
+exit
+fi
+rxvt -e alsamixer.bin

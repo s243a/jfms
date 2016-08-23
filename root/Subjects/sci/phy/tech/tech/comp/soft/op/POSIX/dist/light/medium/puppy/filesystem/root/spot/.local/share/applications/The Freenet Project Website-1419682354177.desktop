@@ -1,0 +1,25 @@
+[Desktop Entry]
+Categories=
+Comment=This starts a browser pointing to http://freenetproject.org
+Comment[en]=This starts a browser pointing to http://freenetproject.org
+Encoding=UTF-8
+Exec= 
+GenericName=
+GenericName[en]=
+Icon=/root/spot/Freenet/freenet.ico
+MimeType=
+Name=The Freenet Project Website
+Name[en]=The Freenet Project Website
+Path=
+ServiceTypes=
+SwallowExec=
+SwallowTitle=
+Terminal=
+TerminalOptions=
+Type=Link
+URL=http://freenetproject.org
+X-KDE-SubstituteUID=false
+X-KDE-Username=root
+
+# created by com.izforge.izpack.util.os.Unix_Shortcut $Revision$
+# $Id$

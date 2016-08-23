@@ -1,0 +1,11 @@
+#LAP
+#Sat Dec 27 20:10:37 GMT+08:00 2014
+mainPublisher=Freenet Project Inc
+ssv.decision.all-perms.time=1420287037614
+launchCount=1
+askedInstall=true
+ssv.decision.app.hash=Main\:qGiyzNX3rAj6j0pjohG1UTQaPn31a9ldnuuJHWuH3KA\=JNLP\:KbFiBnh/OVcKF7GS7PlLDKvWhsvj2q7pGcENEaDXhw0\=
+ssv.decision.cert.hash=334BC8D8EE687A308AFB93A7E9B73F687BA54477FC0EE5B3A459FB09A3533B95
+lastAccessed=Dec 27, 2014 8\:10\:37 PM
+ssv.decision.base=https\://freenetproject.org/jnlp/freenet_installer.jar
+mainTitle=com.izforge.izpack.installer.Installer

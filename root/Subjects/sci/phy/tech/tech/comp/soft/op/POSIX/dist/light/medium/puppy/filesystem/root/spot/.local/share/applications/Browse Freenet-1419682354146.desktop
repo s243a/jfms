@@ -1,0 +1,25 @@
+[Desktop Entry]
+Categories=
+Comment=Open the Freenet web interface in a browser
+Comment[en]=Open the Freenet web interface in a browser
+Encoding=UTF-8
+Exec=/root/spot/Freenet/bin/browse.sh 
+GenericName=
+GenericName[en]=
+Icon=/root/spot/Freenet/freenet.ico
+MimeType=
+Name=Browse Freenet
+Name[en]=Browse Freenet
+Path=/root/spot/Freenet
+ServiceTypes=
+SwallowExec=
+SwallowTitle=
+Terminal=
+TerminalOptions=
+Type=Application
+URL=
+X-KDE-SubstituteUID=false
+X-KDE-Username=root
+
+# created by com.izforge.izpack.util.os.Unix_Shortcut $Revision$
+# $Id$

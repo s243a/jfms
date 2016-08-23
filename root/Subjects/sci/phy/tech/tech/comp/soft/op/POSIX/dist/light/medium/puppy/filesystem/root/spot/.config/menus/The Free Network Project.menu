@@ -1,0 +1,13 @@
+<Menu>
+<Name>Applications</Name>
+<Menu>
+<Directory>The-Free-Network-Project-izpack.directory</Directory>
+<Name>The Free Network Project</Name>
+<Include>
+<Filename>Browse Freenet-1419682354146.desktop</Filename>
+<Filename>The Freenet Project Website-1419682354177.desktop</Filename>
+<Filename>Restart Freenet-1419682354177.desktop</Filename>
+<Filename>Shutdown Freenet-1419682354178.desktop</Filename>
+</Include>
+</Menu>
+</Menu>

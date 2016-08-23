@@ -1,0 +1,118 @@
+﻿<?xml version="1.0" encoding="UTF-8"?><opml version="1.0">
+<head title="Puppy linux"/>
+<body>
+<outline text="Puppy linux">
+<outline text="Security"/>
+<outline text="how to"/>
+<outline text="Users">
+<outline text="root"/>
+<outline text="spot"/>
+</outline>
+<outline text="installation &amp; configuration">
+<outline text="rox terminal emulator"/>
+<outline text="configuration">
+<outline text="configuring hardware">
+<outline text="HDMI"/>
+<outline text="monitor brightness"/>
+<outline text="screen resolution"/>
+<outline text="printers &amp; scanners"/>
+</outline>
+<outline text="single vs double click"/>
+</outline>
+<outline text="packages">
+<outline text="utilities">
+<outline text="menu editing">
+<outline text="Trouble shooting"/>
+<outline text="discussions">
+<outline text="XDG - shared mime info"/>
+</outline>
+<outline text="gui">
+<outline text="PMENU"/>
+</outline>
+<outline text="manual config">
+<outline text="fix menus (script)">
+<outline text="related bash concepts">
+<outline text="test"/>
+<outline text="cut"/>
+<outline text="grep"/>
+<outline text="export"/>
+<outline text="related">
+<outline text="xdg-menu"/>
+<outline text="/etc/xdg/templates"/>
+</outline>
+</outline>
+</outline>
+</outline>
+<outline text="related">
+<outline text="iceWM-xdgmenu">
+<outline text="iceWM (Puppy Linux)">
+<outline text="iceWM">
+<outline text="X Window System">
+<outline text="Unix &amp; Linux"/>
+</outline>
+</outline>
+</outline>
+</outline>
+</outline>
+</outline>
+</outline>
+<outline text="Other packages">
+<outline text="Privacy Packages">
+<outline text="Tor"/>
+<outline text="Freenet"/>
+</outline>
+<outline text="Buisness &amp; Document">
+<outline text="Buisness"/>
+<outline text="Document">
+<outline text="Open &amp; Libre Office">
+<outline text="Libre office"/>
+<outline text="Open Office"/>
+</outline>
+</outline>
+</outline>
+<outline text="Text 2 Speech"/>
+<outline text="fun">
+<outline text="Steam"/>
+</outline>
+</outline>
+<outline text="Installing Packages">
+<outline text="Installing from source">
+<outline text="Tools for installing From Source">
+<outline text="Src2package"/>
+</outline>
+<outline text="Pet build system">
+<outline text="dir2pet"/>
+<outline text="new2dir"/>
+<outline text="Alien2puppy"/>
+</outline>
+</outline>
+<outline text="Remastering (Puppylinux)">
+<outline text="Woof"/>
+</outline>
+<outline text="Package Managers"/>
+<outline text="Pet Package"/>
+<outline text="Debianization">
+<outline text="My Approach"/>
+<outline text="Packages To Get">
+<outline text="libc6">
+<outline text="libc6-udeb_2.19-10_i386.udeb"/>
+</outline>
+</outline>
+</outline>
+<outline text="libgcc1"/>
+</outline>
+</outline>
+</outline>
+<outline text="wiki"/>
+<outline text="utilities"/>
+<outline text="Discussion Forums"/>
+<outline text="File Systems"/>
+<outline text="Versions"/>
+<outline text="Developer Tools">
+<outline text="Greeny IDE"/>
+<outline text="CURL (Ubuntu Version)"/>
+<outline text="Subversion (Puppy Linux)"/>
+</outline>
+</outline>
+</body>
+</opml>

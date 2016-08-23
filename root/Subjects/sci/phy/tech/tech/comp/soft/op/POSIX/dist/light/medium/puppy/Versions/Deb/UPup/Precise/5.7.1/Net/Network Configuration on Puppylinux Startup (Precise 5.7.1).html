@@ -1,0 +1,29 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8"><title>Network Configuration on Puppylinux Startup (Precise 5.7.1)</title></head><body><b>Network Configuration on Puppylinux Startup (Precise 5.7.1)</b><br>
+<br>
+My Preliminary Exploration of The Networking Start-up in puppylinux (Precise 5.7.1 Can be found here)<br>
+<span class="maintitle">
+<a class="maintitle" href="http://murga-linux.com/puppy/viewtopic.php?t=98884">Shell Functions that are Never Called?!?! Yet Run?</a>
+</span><span class="gensmall"><br>
+</span><br>
+Some Related Files are:<br>
+<span class="postbody">1. /usr/sbin/net-setup.sh
+(<a href="http://pastebin.com/LqYmwJig">pastebin</a>)</span>&nbsp; -- The Network setup script when the advanced network wizard is used<br>
+<span class="postbody"><span class="postbody">2. /etc/rc.d/rc.network_basic (<a href="http://pastebin.com/kAHnpCx2">pastebin</a>)&nbsp; -- Called in most cases except for some reason when #1 is used:<br>
+  </span>3. /etc/rc.d/rc.network
+</span>(<a href="http://pastebin.com/zZbuvnPP">pastebin</a>) -- Called in all cases on start-up to initialize the wizard.<br>
+<span class="postbody"> 4. /etc/rc.d/rc.systint (<a href="http://pastebin.com/65E7fnmp">pastebin</a>) -- The system intialization script (one of, if not the first script, that is called during system startup)<br>
+  <br>
+  <br>
+</span>In the above thread the following hint was given by <span class="name"><b>amigo</b>
+to look for where a given function is called.</span><br>
+<br>
+<span class="postbody">"Use grep -n or your text editors search function to find the occurrences of function calls and definitions in the script.</span>"<br>
+<br>
+I'm doing this because I want to control the dns name server settings 
+that are configured during startup. The primary tool that I wish to use 
+is called DNSCrypt (See <a href="http://murga-linux.com/puppy/viewtopic.php?t=98782">thread</a>).<br>
+<br>
+I'm quite new to linux so perhaps my question seem silly to the pros. <br>
+</body></html>

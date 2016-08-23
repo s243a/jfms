@@ -1,0 +1,8 @@
+PUPMODE=2
+#ATADRIVES is all internal ide/pata/sata drives, excluding optical, excluding usb...
+ATADRIVES='sda '
+#ATAOPTICALDRIVES is list of non-usb optical drives...
+ATAOPTICALDRIVES='sr0 '
+PUP_HOME='/'
+PDEV1='sda3'
+DEV1FS='ext3'

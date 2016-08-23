@@ -4,13 +4,13 @@ tmpfs /initrd/mnt/tmpfs tmpfs rw,relatime,size=170176k 0 0
 /dev/loop0 /initrd/pup_ro2 squashfs ro,noatime 0 0
 tmpfs /initrd/mnt/tmpfs4 tmpfs rw,relatime,size=30948k 0 0
 /dev/loop4 /initrd/pup_z squashfs ro,noatime 0 0
-unionfs / aufs rw,relatime,si=1a2e4648 0 0
+unionfs / aufs rw,relatime,si=8d23f53d 0 0
 tmpfs /tmp tmpfs rw,relatime,size=2097688k 0 0
 devtmpfs /dev devtmpfs rw,relatime,size=1028292k,nr_inodes=219611,mode=755 0 0
 none /proc proc rw,relatime 0 0
 none /dev/pts devpts rw,relatime,gid=2,mode=620,ptmxmode=000 0 0
 none /sys sysfs rw,relatime 0 0
-shmfs /dev/shm tmpfs rw,relatime,size=408412k 0 0
+shmfs /dev/shm tmpfs rw,relatime,size=408400k 0 0
 /dev/loop1 /initrd/pup_ro4 squashfs ro,noatime 0 0
 /dev/loop5 /initrd/pup_ro5 squashfs ro,noatime 0 0
 /dev/loop6 /initrd/pup_ro6 squashfs ro,noatime 0 0

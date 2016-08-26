@@ -6,3 +6,7 @@ https://github.com/s243a/test/tree/master/root/Subjects/sci/phy/tech/tech/comp/s
 and linux in general.
 
 This is not an official puppylinux project.
+
+
+The mindmaps are linked together but probably have to be put in the same file path. Example:
+Dropbox/root/Subjects/sci/phy/tech/tech/comp/soft/op/POSIX/

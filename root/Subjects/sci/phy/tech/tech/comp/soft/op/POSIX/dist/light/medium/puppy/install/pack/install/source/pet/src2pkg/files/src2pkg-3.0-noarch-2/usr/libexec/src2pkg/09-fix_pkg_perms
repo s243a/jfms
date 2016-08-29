@@ -1,0 +1,492 @@
+# This file is part of the src2pkg program:
+# Copyright 2005-2013 Gilbert Ashley <amigo@ibilio.org>
+# src2pkg is released under the GNU General Public License Version 2
+
+### fix_pkg_perms
+fix_pkg_perms() {
+if [[ $ALLOW_USER_EXTENSIONS = "YES" ]] ; then
+ # check if the user has any pre-execution extensions to this file and run them, if so.
+ [[ -f "$HOME"/.src2pkg/extensions/09.pre ]] && . "$HOME"/.src2pkg/extensions/09.pre
+fi
+if [[ "$FAILED" = "" ]] && [[ ! $USER_CANCELLED ]] ; then
+  if [[ ! $RESUME ]] || [[ $RESUME = $FUNCNAME ]] || [[ $HAVE_RESUMED ]] ; then
+	[[ $RESUME = $FUNCNAME ]] && HAVE_RESUMED=1 && echo $CYAN"Notice - "$BLUE"Resuming build at: "$NORMAL "$FUNCNAME"
+	if [[ $PAUSE = "BEFORE" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+		echo $MAGENTA"Notice - "$BLUE"Pausing before: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+		read
+	fi
+	
+	echo $BLUE"Processing package content:"$NORMAL
+	
+	# Remove any items in the package which are blacklisted with the variable PKG_EXCLUDES
+	# This needs to be done either very early (like here) or vary late during content handling -here seems to be the 'right' place.
+	remove_excludes
+	
+	[[ $DEBUG ]] && echo $CYAN"   Notice - "$NORMAL"Checking directory ownership and permissions"
+	# this is redundant, but won't hurt
+	if [[ "$EUID" = "0" ]] ; then
+		chown root:root "$PKG_DIR"
+	else
+		chown $OWNER:$GROUP "$PKG_DIR"
+	fi
+	( cd "$PKG_DIR" && chmod 755 . )
+	
+	cd "$PKG_DIR" ;
+	
+	# replace hardlinks with softlinks in BIN_DIRS
+	# and make sure perms/ownership are correct
+	for DIR in $BIN_DIRS ; do
+		if [[ -d $DIR ]] ; then
+			chown root:root $DIR
+			chmod 755 $DIR
+			replace_hardlinks $DIR
+		fi
+	done
+	
+	# make sure perms/ownership are correct for LIB_DIRS
+	for DIR in $LIB_DIRS ; do
+		if [[ -d $DIR ]] ; then
+			chown root:root $DIR
+			chmod 755 $DIR
+		fi
+	done
+	# [[ $DEBUG ]] && echo $GREEN"Done"$NORMAL
+	
+	# I'm tired of seeing perl files installed chmod 555
+	find -perm 555 -exec chmod 755 {} \;
+	
+	if [[ -d "$PKG_DIR"/lib$LIBDIRSUFFIX ]] \
+		&& [[ $(find "$PKG_DIR"/lib$LIBDIRSUFFIX -name "*.a" -o -name "*.la" -o -name pkgconfig -o -name aclocal) != "" ]] ; then
+		[[ $DEBUG ]] && echo -n $CYAN"   Notice - "$NORMAL"Moving static items in PKG_DIR/lib$LIBDIRSUFFIX "
+		if [[ $PRE_FIX != "" ]] && [[ $PRE_FIX != "/" ]] ; then
+			[[ $DEBUG ]] && echo "to PKG_DIR/$PRE_FIX/lib$LIBDIRSUFFIX"
+			mkdir -p "$PKG_DIR"/$PRE_FIX/lib$LIBDIRSUFFIX
+			(cd "$PKG_DIR"/lib$LIBDIRSUFFIX
+				mv *.a *.la pkgconfig aclocal "$PKG_DIR"/$PRE_FIX/lib$LIBDIRSUFFIX/ &> /dev/null
+			)
+		else
+			[[ $DEBUG ]] && echo "to PKG_DIR/usr/lib$LIBDIRSUFFIX"
+			mkdir -p "$PKG_DIR"/usr/lib$LIBDIRSUFFIX
+			(cd "$PKG_DIR"/lib$LIBDIRSUFFIX
+				mv *.a *.la pkgconfig aclocal "$PKG_DIR"/usr/lib$LIBDIRSUFFIX/ &> /dev/null
+			)
+		fi
+	fi
+	
+	if [[ -d "$PKG_DIR"/include ]] ; then
+		if [[ $PRE_FIX != "" ]] && [[ $PRE_FIX != "/" ]] ; then
+			[[ $DEBUG ]] && echo $CYAN"   Notice - "$NORMAL"Moving PKG_DIR/include to PKG_DIR/$PRE_FIX/include"
+			mkdir -p "$PKG_DIR"/$PRE_FIX
+			mv "$PKG_DIR"/include "$PKG_DIR"/$PRE_FIX
+		else
+			[[ $DEBUG ]] && echo $CYAN"   Notice - "$NORMAL"Moving PKG_DIR/include to PKG_DIR/usr/include"
+			mkdir -p "$PKG_DIR"/usr
+			mv "$PKG_DIR"/include "$PKG_DIR"/usr
+		fi
+	fi
+	
+	#segregate_package
+	# create lists of the ELF-bin, ELF-libs, libtool-files , headers and ar-archives
+	##[[ $DEBUG ]] && echo -n $BLUE"Building file lists: "$NORMAL
+	# intialize files for the lists
+	: > "$SRC_DIR"/$NAME-libtool-files
+	: > "$SRC_DIR"/$NAME-header-files
+	: > "$SRC_DIR"/$NAME-static-libs
+	: > "$SRC_DIR"/$NAME-ELF-libs
+	: > "$SRC_DIR"/$NAME-ELF-bins
+	: > "$SRC_DIR"/$NAME-ELF-compressed-bins
+	: > "$SRC_DIR"/$NAME-script-files
+	
+	[[ $DEBUG ]] && echo $CYAN"   Notice - "$NORMAL"Listing key file types"
+	# much faster than find with multiple tests and '-exec file |grep'
+	# this also lets us avoid using file so  much
+	find * -type f |while read FILE ; do
+	  case "$FILE" in
+		# */plugins/*|*/plugin/*) true ;; # no dependable way to check for any other plugins
+		*.la) echo "$FILE" >> $SRC_DIR/$NAME-libtool-files ;;
+		# *.h|*.hh|*.inc) echo "$FILE" >> "$SRC_DIR"/$NAME-header-files ;;
+		# some packages like 'kbd' include *.inc files which are not header files
+		${PRE_FIX}/include*|usr/include*) echo "$FILE" >> "$SRC_DIR"/$NAME-header-files ;;
+		${PRE_FIX}/lib${LIBDIRSUFFIX}/$NAME/include/*) echo "$FILE" >> "$SRC_DIR"/$NAME-header-files ;;
+		*.h|*.gch|*.hh) echo "$FILE" >> "$SRC_DIR"/$NAME-header-files ;;
+		*.txt|*.html|*.ps|*.pdf|*.avi|*.mpg3|*.mpg4|*.ogg) : ;; # textand audio documents we can ignore
+		*.xpm|*.jpeg|*.png|*.svg) : ;; # image files we can ignore
+		*.gz|*.tgz|*.tar.gz|*.bz2|*.tbz2|*.tar.bz2|*.xz|*.txz|*.tar.xz) : ;; # compression formats
+		*.o|*.o.gz|*.ko|*.ko.gz|*.ko.lz) 
+			# there is a 'ko' locale with *.ko language files, so make sure it's an ELF object
+			if is_elf_4 "$FILE" ; then
+				echo "$FILE" >> "$SRC_DIR"/$NAME-kernel-modules
+			fi	;;
+		*.a) 	if is_ar_archive_2 "$FILE" ; then
+					echo "$FILE" >> $SRC_DIR/$NAME-static-libs
+				fi ;;
+		*)	if is_elf_4 "$FILE" ; then
+				# using is_elf is way faster than 'file |grep'
+				# but the following tests are expensive still
+				if is_upxed "$FILE" ; then
+					echo "$FILE" >> "$SRC_DIR"/$NAME-ELF-compressed-bins
+				elif [[ $(file "$FILE" |grep executable) ]] ; then
+					echo "$FILE" >> "$SRC_DIR"/$NAME-ELF-bins
+				elif [[ $(file "$FILE" |egrep '(shared object|relocatable object)') ]] ; then
+				#elif [[ $(file "$(readlink -f $FILE)" |egrep '(shared object|relocatable object)') ]] ; then
+					echo "$FILE" >> "$SRC_DIR"/$NAME-ELF-libs
+				fi
+			elif is_script_2 "$FILE" ; then
+				case "$FILE" in
+					# ignore a few paths to avoid having these template-scripts showing up in our list -any others??
+					*/share/automake*/*|*/share/libtool/*|*/autogen.sh|*/autoclean.sh) : ;;
+					*)	
+						# Hmm, should we really avoid scripts which are not executable??
+						# and what about scripts which are not in any normal path?
+						if [[ -x "$FILE" ]] ; then
+							echo "$FILE" >> "$SRC_DIR"/$NAME-script-files
+						fi
+					;;
+				esac
+			#elif [[ -L "$FILE" ]] ; then
+			#else
+				#echo hello "$FILE"
+				#echo "$FILE" >> "$SRC_DIR"/$NAME-ELF-libs
+			fi ;;
+	  esac
+	done
+	#[[ $DEBUG ]] && echo $GREEN"Done"$NORMAL
+	
+	# get rid of these right away if empty
+	! [[ -s "$SRC_DIR"/$NAME-ELF-compressed-bins ]] && rm -f "$SRC_DIR"/$NAME-ELF-compressed-bins
+	! [[ -s "$SRC_DIR"/$NAME-script-files ]] && rm -f "$SRC_DIR"/$NAME-script-files
+	# create a complete list of ELF files
+	cat $SRC_DIR/$NAME-ELF-bins $SRC_DIR/$NAME-ELF-libs > $SRC_DIR/$NAME-ELF-all 2> /dev/null
+	
+	if [[ "$ENFORCE_DISABLE_STATIC" != "NO" ]] ; then
+		case "$EXTRA_CONFIGS" in
+			*disable-static*|*enable-static=no*)
+			if [[ -s $SRC_DIR/$NAME-static-libs ]] ; then
+				( cd $PKG_DIR
+					echo -n $BLUE"Removing static libraries - "$NORMAL
+					for FILE in $(cat $SRC_DIR/$NAME-static-libs) ; do
+						rm -f $FILE
+					done
+					echo $GREEN"Done"$NORMAL
+					[[ $DEBUG ]] && echo $CYAN"   Notice - "$NORMAL"Can be disabled with: ENFORCE_DISABLE_STATIC=NO"
+				)
+			fi
+			rm -f $SRC_DIR/$NAME-static-libs
+			;;
+		esac
+	fi
+	
+	# Remove libtool *.la files if enabled - moved here from 14A-last_minute_details
+	case "$REMOVE_LIBTOOL_FILES" in
+		"YES"|"1")
+			if [[ -s $SRC_DIR/$NAME-libtool-files ]] ; then
+				( cd $PKG_DIR
+					echo -n $BLUE"Removing libtool files - "$NORMAL
+					while read LINE ; do
+						rm -f "$LINE"
+					done < $SRC_DIR/$NAME-libtool-files
+					
+					echo $GREEN"Done"$NORMAL
+					[[ $DEBUG ]] && echo $CYAN"   Notice - "$NORMAL"Can be disabled with: REMOVE_LIBTOOL_FILES=NO"
+				)
+				rm -f $SRC_DIR/$NAME-libtool-files
+			fi
+		;;
+	esac
+	
+	# Correct libtool *.la files unless specifically disabled
+	case "$CORRECT_LIBTOOL_FILES" in
+		"YES"|"1")
+			if [[ -s $SRC_DIR/$NAME-libtool-files ]] ; then
+				( cd $PKG_DIR
+					echo -n $BLUE"Correcting libtool files - "$NORMAL
+					for FILE in $(cat $SRC_DIR/$NAME-libtool-files) ; do
+						sanitize_lib_paths $FILE
+					done
+					echo $GREEN"Done"$NORMAL
+					[[ $DEBUG ]] && echo $CYAN"   Notice - "$NORMAL"Can be disabled with: CORRECT_LIBTOOL_FILES=NO"
+				)
+			fi
+		;;
+	esac
+	
+	# make sure we always have a generic *.so link and that all links are present
+	if [[ -s "$SRC_DIR"/$NAME-ELF-libs ]] ; then
+		while read LIB ; do
+			DIR=${LIB%/*}
+			BASE=${LIB##*/}
+			( cd "$PKG_DIR"/$DIR && {
+				if [[ "$EUID" = "0" ]] ; then
+					# this might fail if we are not root
+					ldconfig -l $BASE
+				fi
+				# dont try to link a file to its' own name
+				if [[ "$BASE" != "${BASE%%.*}.so" ]] ; then
+					# dont create simple *.so link in lib${LIBDIRSUFFIX}/
+					case "$DIR/" in
+						lib${LIBDIRSUFFIX}/) : ;;
+						*)	ln -sf $BASE ${BASE%%.*}.so ;;
+					esac
+				# for debugging
+				# else
+					# echo skipping $BASE
+				fi
+				}
+			)
+		done < "$SRC_DIR"/$NAME-ELF-libs
+	fi
+	
+	if [[ "$CORRECT_PKG_PERMS" != "NO" ]] ; then
+		echo -n $BLUE"Correcting package permissions - "$NORMAL
+		## Fix exceptions which are set to 1777 : drwxrwxrwt
+		[[ -d "$PKG_DIR"/tmp ]] && chmod 1777 "$PKG_DIR"/tmp
+		[[ -d "$PKG_DIR"/var/tmp ]] && chmod 1777 "$PKG_DIR"/var/tmp
+		[[ -d "$PKG_DIR"/var/lock ]] && chmod 1777 "$PKG_DIR"/var/lock
+		## Fix exceptions which are set to 775 : drwxrwxr-x 
+		[[ -d "$PKG_DIR"/var/run ]] && chmod 775 "$PKG_DIR"/var/run
+		## make sure /var itself is chmod 755
+		[[ -d "$PKG_DIR"/var ]] && chmod 755 "$PKG_DIR"/var
+		# Fix common bin and sbin dirs
+		for dir in $BIN_DIRS ; do
+			if [[ -d "$PKG_DIR"/$dir ]] ; then
+				if [[ "$EUID" = "0" ]] ; then
+					chown -R root:root "$PKG_DIR"/$dir
+				else
+					chown -R $OWNER:$GROUP "$PKG_DIR"/$dir
+				fi
+				# chmod -R 755 "$PKG_DIR"/$dir
+				chmod 755 "$PKG_DIR"/$dir
+				# ignore errors as the dir may be empty
+				chmod +x "$PKG_DIR"/$dir/* 2> /dev/null
+			fi
+		done
+		for dir in $LIB_DIRS; do
+			if [[ -d "$PKG_DIR"/$dir ]] ; then
+				if [[ "$EUID" = "0" ]] ; then
+					chown -R root:root "$PKG_DIR"/$dir
+					chmod 755 $PKG_DIR/$dir
+					find "$PKG_DIR"/$dir -type d -exec chown root:root {} \;
+					# find "$PKG_DIR"/$dir -type d -exec chmod 755 {} \;
+					# the above is too rigorous
+					find "$PKG_DIR"/$dir -type d -exec chmod +x {} \;
+				else
+					chown -R $OWNER:$GROUP "$PKG_DIR"/$dir
+					chmod 755 $PKG_DIR/$dir
+					find "$PKG_DIR"/$dir -type d -exec chown $OWNER:$GROUP {} \;
+					#find "$PKG_DIR"/$dir -type d -exec chmod 755 {} \;
+					# the above is too rigorous
+					find "$PKG_DIR"/$dir -type d -exec chmod +x {} \;
+				fi
+				#chmod +x "$PKG_DIR"/$dir/*
+				#find "$PKG_DIR"/$dir -type f -exec chmod +x {} \;
+				for FILE in $(find "$PKG_DIR"/$dir -type f) ; do
+					if is_elf_4 $FILE || is_script_2 $FILE ; then
+						chmod +x $FILE
+					fi
+				done
+			fi
+		done
+		
+		# chmod all ELF files 755
+		for FILE in $NAME-ELF-libs $NAME-ELF-bins $NAME-ELF-compressed-bins ; do
+			if [[ -s "$SRC_DIR"/$FILE ]] ; then
+				while read line ; do
+					# chmod 755 "$PKG_DIR"/${line} 2> /dev/null
+					chmod +x "$PKG_DIR"/${line}
+				done < "$SRC_DIR"/$FILE
+			fi
+		done
+		# chmod all libtool files 644
+		if [[ -s "$SRC_DIR"/$NAME-libtool-files ]] ; then
+		    while read line ; do
+			chmod 644 "$PKG_DIR"/$line 2> /dev/null
+		    done < "$SRC_DIR"/$NAME-libtool-files
+		fi
+		# chmod all static libs 644
+		if [[ -s "$SRC_DIR"/$NAME-static-libs ]] ; then
+		    while read line ; do 
+			chmod 644 "$PKG_DIR"/$line 2> /dev/null
+		    done < "$SRC_DIR"/$NAME-static-libs
+		fi
+		#
+		if [[ -d "$PKG_DIR"/etc/X11/app-defaults ]] ; then
+			chmod 644 "$PKG_DIR"/etc/X11/app-defaults/*
+		fi
+		
+		echo $GREEN"Done"$NORMAL
+		
+	fi
+    if [[ $PAUSE = "AFTER" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+		echo $MAGENTA"Notice - "$BLUE"Pausing after: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+		read
+    fi
+  fi
+fi
+
+if [[ $ALLOW_USER_EXTENSIONS = "YES" ]] ; then
+ # check if the user has any post-execution extensions to this file and run them, if so.
+ [[ -f "$HOME"/.src2pkg/extensions/09.post ]] && . "$HOME"/.src2pkg/extensions/09.post
+fi
+
+}
+# end fix_source_perms
+
+
+# used by replace_hardlinks
+list_inodes() {
+for FILE in * ; do
+	#echo $(stat -c %i $FILE) $FILE
+	# ha!
+	echo $(ls -i $FILE 2> /dev/null)
+done
+}
+
+# replace hardlinks with symlinks
+replace_hardlinks() {
+HAVE_HARD_LINKS=
+THIS_DIR=$1
+( cd $THIS_DIR
+list_inodes |sort > inode.list
+LAST_INODE=
+THIS_INODE=
+LAST_FILE=
+THIS_FILE=
+if [[ -s inode.list ]] ; then
+  while read THIS_INODE THIS_FILE ; do
+	if [[ -n $THIS_INODE ]] && [[ $THIS_INODE = $LAST_INODE ]] ; then
+		[[ $DEBUG ]] && echo $CYAN"   Notice - "$NORMAL"Symlinking hardlink: $THIS_DIR/$THIS_FILE"
+		rm -f $THIS_FILE ; ln -sf $LAST_FILE $THIS_FILE
+		HAVE_HARD_LINKS=1
+	else
+		LAST_INODE=$THIS_INODE
+		LAST_FILE=$THIS_FILE
+	fi
+  done < inode.list
+fi
+rm -f inode.list
+if [[ $HAVE_HARD_LINKS ]] && [[ ! $DEBUG ]] ; then
+	echo $CYAN"   Notice - "$NORMAL"Replacing hardlinks in: $THIS_DIR"
+fi
+)
+}
+
+# Check for ELF file
+is_elf()
+{
+	[ "$(dd if=$1 bs=1 skip=1 count=3 2> /dev/null)" = "ELF" ]
+}
+# Check for ELF file compressed with UPX
+is_upxed(){
+	[ "$(dd if=$1 bs=1 skip=120 count=3 2> /dev/null)" = "UPX" ]
+	# default.sfx skip=121
+}
+# Check for ara archive
+is_ar_archive() {
+	[ "$(dd if=$1 bs=1 skip=1 count=6 2> /dev/null)" = '<arch>' ]
+	# count=6=<arch>
+}
+
+is_ar_archive_2() {
+	read -r -n 7 CHUNK < $1
+	case "$CHUNK" in
+		'!<arch>') return 0 ;;
+		#?ELF) : ;; # gives the same time as 'return' above
+		*) return 1 ;;
+	esac
+}
+
+# Check for ELF executable file
+# this is not dependable enough to use
+is_dyn_exe() {
+	if [ "$(dd if=$1 bs=1 skip=307 count=17 2> /dev/null)" = "/lib/ld-linux.so" ] ; then
+		return 0
+	elif [ "$(dd if=$1 bs=1 skip=276 count=17 2> /dev/null)" = "/lib/ld-linux.so" ] ; then
+		return 0
+	fi
+	# skip=276 (cat, link, ln, mkdir, readlink, rm, rmdir, touch
+	
+	# the one or two bytes after an offset of 16 bytes tell whether it is an exe or shared lib
+	# 0= unknown
+	# 1= ELF relocatable (*.o files created by compiler, kernel-modules)
+	# 2=ELF executable
+	# 3=ELF shared library
+	#hexdump -s 16 -n 2 $1
+	# 0000010 0002                                   
+	# 0000012
+	# od -j16 -N2 $1
+	# 0000020 000003
+	# 0000022
+
+}
+# faster is_elf
+is_elf_2() {
+	local IFS=
+	FILE=$1
+	while read -r -n 4 LINE ; do
+		case "$LINE" in
+			?ELF) return 0 ;;
+			*) return 1 ;;
+		esac
+	done < $FILE
+}
+
+# Aha!
+is_elf_4() {
+	read -r -n 4 CHUNK < "$1"
+	case "$CHUNK" in
+		?ELF) return 0 ;;
+		#?ELF) : ;; # gives the same time as 'return' above
+		*) return 1 ;;
+	esac
+}
+
+is_script() {
+	[ "$(dd if=$1 bs=1 count=2 2> /dev/null)" = "#!" ]
+}
+
+is_script_2() {
+	read -r -n 2 CHUNK < "$1"
+	case "$CHUNK" in
+		'#!') return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+remove_excludes() {
+	# remove items from comma-separated list in PKG_EXCLUDES variable
+	if [[ -z $PKG_EXCLUDES ]] ; then
+		return
+	fi
+	if [[ -z $PKG_DIR ]] ; then
+		echo $YELLOW"   Warning - "$NORMAL"PKG_DIR is unset! Skipping PKG_EXCLUDES handling."
+		return
+	fi
+	# change any double commas to single
+	PKG_EXCLUDES=${PKG_EXCLUDES//,,/,}
+	# remove any leading comma
+	case $PKG_EXCLUDES in
+		','*) PKG_EXCLUDES=${PKG_EXCLUDES:1}
+	esac
+	# add an ending comma
+	case $PKG_EXCLUDES in
+		*',') : ;;
+		*) PKG_EXCLUDES="$PKG_EXCLUDES,"
+	esac
+	echo $BLUE"Checking for items blacklisted in PKG_EXCLUDES:"$NORMAL"${PKG_EXCLUDES%*,}"
+	( 	local IFS=','
+		cd $PKG_DIR && {
+			for ITEM in $PKG_EXCLUDES ; do
+				# replace any double slashes with single ones
+				ITEM="$(echo ${ITEM//\/\//\/})"
+				case "$ITEM" in
+					'/'*) ITEM=${ITEM:1}
+				esac
+				#if [[ -e "$ITEM" ]] && [[ "$ITEM" != "$PKG_DIR/" ]] ; then
+				if [[ -e "$ITEM" ]] ; then
+					echo $CYAN"   Notice - "$NORMAL"Removing: PKG_DIR/$ITEM"
+					rm -rf "$ITEM"
+				fi
+			done
+		}
+	)
+}

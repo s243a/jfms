@@ -1,0 +1,13 @@
+#!/bin/bash
+APPDIR="$0"
+APPDIR="${APPDIR%\/*}"
+
+if [ -f /root/.shareInternet/share.conf ]; then
+	. /root/.shareInternet/share.conf
+	if [ ! -f /root/.shareInternet/flagFiles/sharingup.txt ]; then
+		if [ ! -f /root/.shareInternet/flagFiles/batch_start_running.txt ]; then
+			touch /root/.shareInternet/flagFiles/batch_start_running.txt
+			"$APPDIR/shareInternet" start &
+		fi
+	fi
+fi

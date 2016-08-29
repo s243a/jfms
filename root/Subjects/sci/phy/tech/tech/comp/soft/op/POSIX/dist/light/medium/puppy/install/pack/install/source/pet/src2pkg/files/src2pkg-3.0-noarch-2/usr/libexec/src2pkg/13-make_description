@@ -1,0 +1,813 @@
+# This file is part of the src2pkg program:
+# Copyright 2005-2013 Gilbert Ashley <amigo@ibilio.org>
+# src2pkg is released under the GNU General Public License Version 2
+
+# a routine has been added at the end of make_description which handles
+# a couple of last minute items before the actual package is created.
+
+make_description() {
+if [[ $ALLOW_USER_EXTENSIONS = "YES" ]] ; then
+ # check if the user has any pre-execution extensions to this file and run them, if so.
+ [[ -f "$HOME"/.src2pkg/extensions/13.pre ]] && . "$HOME"/.src2pkg/extensions/13.pre
+fi
+if [[ "$FAILED" = "" ]] && [[ ! $USER_CANCELLED ]] ; then
+  if [[ ! $RESUME ]] || [[ $RESUME = $FUNCNAME ]] || [[ $HAVE_RESUMED ]] ; then
+	[[ $RESUME = $FUNCNAME ]] && HAVE_RESUMED=1 && echo $CYAN"Notice - "$BLUE"Resuming build at: "$NORMAL "$FUNCNAME"
+	if [[ $PAUSE = "BEFORE" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+		echo $MAGENTA"Notice - "$BLUE"Pausing before: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+		read
+	fi
+	# before we add an install directory, get the INSTALLED_SIZE of the package
+	INSTALLED_SIZE="$(du $PKG_DIR -ch |grep total |cut -f1)"" bytes"
+	cd "$CWD" ;
+	#mkdir -p "$PKG_DIR"/install
+	#chmod 755 "$PKG_DIR"/install
+	
+	# look for any of the FILENAMEs in SEARCH_PATHs
+	for FILENAME in $PKG_DESC.$NAME $PKG_DESC-$NAME $NAME-$PKG_DESC $NAME.$PKG_DESC $NAME.desc $NAME.dsc $PKG_DESC $NAME-$VERSION-$ARCH.txt $NAME*.txt ; do
+		for SEARCH_PATH in "$CWD" "$PATCHES_DIR"/$NAME-patches "$CWD"/patches "$CWD"/Resources ; do
+			if [[ -f "$SEARCH_PATH"/$FILENAME ]] ; then
+				DESC_FILEPATH="$SEARCH_PATH"/$FILENAME
+				HAVE_DESC_FILEPATH=1
+				break ;
+			fi
+		done
+		[[ $HAVE_DESC_FILEPATH ]] && break ;
+	done
+	
+	if [[ $HAVE_DESC_FILEPATH ]] ; then
+		if [[ "$PKG_FORMAT" = "deb" ]] ; then
+			echo $BLUE"Created package description from: "$NORMAL"$FILENAME"
+			cat "$DESC_FILEPATH" > "$PKG_DIR"/$NAME.dsc
+		else
+			mkdir -p "$PKG_DIR"/install
+			chmod 755 "$PKG_DIR"/install
+			nol=$( cat "$DESC_FILEPATH" | grep $NAME: | wc -l )
+			if [[ $nol -lt 9 ]] || [[ $nol -gt 13 ]] ; then
+			#if [[ $nol -lt 9 ]] || [[ $nol -gt $DESC_MAX_LINES ]] ; then
+				[[ $FILENAME != $NAME*.txt ]] && reject_desc
+				make_default_desc 
+			else
+				cat "$DESC_FILEPATH" > "$PKG_DIR"/install/$PKG_DESC
+				chmod 644 "$PKG_DIR"/install/$PKG_DESC
+				if [[ $FILENAME = $NAME.txt ]] ; then
+					echo $BLUE"Created $PKG_DESC from $NAME.txt - "$NORMAL"Inserting in package as PKG_DIR/install/$PKG_DESC "
+				else
+					echo $BLUE"Verified $FILENAME found - "$NORMAL"Inserting in package as PKG_DIR/install/$PKG_DESC"
+				fi
+			fi
+		fi
+	else
+		if [[ "$PKG_FORMAT" = "deb" ]] ; then
+			echo "No description given for this package" > "$PKG_DIR"/$NAME.dsc
+		else
+			mkdir -p "$PKG_DIR"/install
+			chmod 755 "$PKG_DIR"/install
+			make_default_desc
+		fi
+	fi
+	
+	# substitute the configured PACKAGER if set
+	if [[ -f "${PKG_DIR}"/install/$PKG_DESC ]] ; then
+		# clean up installed doinst.sh if it comes from PhantomX
+		if [[ $(grep -q '_PACKAGER' "${PKG_DIR}"/install/$PKG_DESC ) ]] ; then
+			sed -i "s|Packager: _PACKAGER|Packaged by $PACKAGER|g; s|on _BUILD_DATE||g" "${PKG_DIR}"/install/$PKG_DESC
+		elif [[ "$PACKAGER" != "src2pkg" ]] ; then
+			# otherwise, if PACKAGER is not 'src2pkg', then replace the generic string with the real $PACKAGER
+			sed -i "s|Packaged by src2pkg|Packaged by $PACKAGER|g" "${PKG_DIR}"/install/$PKG_DESC
+		fi
+	fi
+
+	# handle any pkg-conflicts here
+	for FILENAME in $PKG_CONFLICTS $PKG_CONFLICTS-$NAME $NAME-$PKG_CONFLICTS $NAME.$PKG_CONFLICTS ; do
+		for SEARCH_PATH in "$CWD" "$PATCHES_DIR"/$NAME-patches "$CWD"/patches "$CWD"/Resources ; do
+			if [[ -f "$SEARCH_PATH"/$FILENAME ]] ; then
+				echo $BLUE"Found $FILENAME - "$NORMAL"Copying to PKG_DIR/install/$PKG_CONFLICTS"
+				cat "$SEARCH_PATH"/$FILENAME > "$PKG_DIR"/install/$PKG_CONFLICTS
+			fi
+		done
+	done
+	
+	# create a desktop file if needed and none is present
+	if [[ "$AUTO_DESKTOP" = "YES" ]] ; then
+		if [[ ! -d $PKG_DIR/usr/share/applications ]] && [[ ! -d $PKG_DIR/usr/share/xsessions ]] ; then
+			create_desktop_file
+		else
+			validate_desktop_files
+		fi
+	fi
+	if [[ $PAUSE = "AFTER" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+		echo $MAGENTA"Notice - "$BLUE"Pausing after: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+		read
+	fi
+  fi
+fi
+
+# check if the user has any post-execution extensions to this file and run them, if so.
+[[ -f "$HOME"/.src2pkg/extensions/13.post ]] && . "$HOME"/.src2pkg/extensions/13.post
+
+}
+# end make_description
+
+# Internal function called by make_description
+make_default_desc() {
+if [[ "$FAILED" = "" ]] ; then
+   echo -n $BLUE"Creating $PKG_DESC - "$NORMAL
+   mkdir -p "$PKG_DIR"/install
+   cat /dev/null > "$PKG_DIR"/install/$PKG_DESC
+
+   # Align the text formatting guide starting at ':' (plus one space)
+   namelen=${#NAME}
+   offset=$(( $namelen + 1 ))
+   spaces=0
+   echo -n '#' >> "$PKG_DIR"/install/$PKG_DESC
+   while [[ $spaces -lt $offset ]] ; do
+	echo -n ' ' >> "$PKG_DIR"/install/$PKG_DESC
+		(( spaces++ ))
+   done
+   #echo "|-------------Use this guide to format your text with--------------|" >> "$PKG_DIR"/install/$PKG_DESC
+   # Ha, watch this! We'll replace that simple line with a fancy bloated routine which lets you define
+   # both the text to use and the line length to wrap to... I know, awk could probably do this with a one-liner :-)
+   header_len=${#HANDY_RULER_TEXT}
+   padding_len=$(( $DESC_WRAP_LENGTH -  $header_len ))
+   leading_pad=$(( $padding_len / 2 ))
+   trailing_pad=$(( $padding_len - $leading_pad ))
+   echo -n '|' >> "$PKG_DIR"/install/$PKG_DESC
+   chars=1
+   while [[ $chars -lt $leading_pad ]] ; do
+ 	echo -n '-' >> "$PKG_DIR"/install/$PKG_DESC
+	chars=$(( $chars + 1 ))
+   done
+   echo -n $HANDY_RULER_TEXT >> "$PKG_DIR"/install/$PKG_DESC
+   chars=1
+   while [[ $chars -lt $trailing_pad ]] ; do
+	echo -n '-' >> "$PKG_DIR"/install/$PKG_DESC
+	chars=$(( $chars + 1 ))
+   done
+   echo '|' >> "$PKG_DIR"/install/$PKG_DESC
+   
+   if [[ $AUTO_SCRIPT ]] ; then
+	LICENSE=$(find_license_type)
+	if [[ -n $LICENSE ]] ; then
+		BLURB_9="License: $LICENSE"
+	fi
+	SPECFILE=""
+	for FILENAME in $NAME.spec $ORIG_NAME.spec $NAME-$VERSION.spec $ORIG_NAME-$VERSION.spec \
+		$(basename $SOURCE_NAME .$EXT).spec $NAME.spec.in $ORIG_NAME.spec.in $NAME-$VERSION.spec.in \
+		$ORIG_NAME-$VERSION.spec.in $(basename $SOURCE_NAME .$EXT).spec.in debian/control \
+		description-pak PKG-INFO PKGINFO $NAME.lsm $ORIG_NAME.lsm $NAME-$VERSION.lsm \
+		$ORIG_NAME-$VERSION.lsm $(basename $SOURCE_NAME .$EXT).lsm ; do
+		for SEARCH_PATH in "$PATCHES_DIR"/$NAME-patches "$CWD"/patches \
+			"$CWD"/Resources "$SRC_DIR" "$SRC_DIR/doc" "$CWD" "$PATCHES_DIR" ; do
+			if [[ -f $SEARCH_PATH/$FILENAME ]] ; then
+				SPECFILE="$SEARCH_PATH"/$FILENAME
+				case $SEARCH_PATH in
+					"$PATCHES_DIR/$NAME-patches") SPEC_PATH=PATCHES_DIR/$NAME-patches ;;
+					"$CWD/patches") SPEC_PATH=CWD/patches ;;
+					"$CWD/Resources") SPEC_PATH=CWD/Resources ;;
+					"$SRC_DIR") SPEC_PATH=SRC_DIR ;;
+					"$CWD") SPEC_PATH=CWD ;;
+					"$PATCHES_DIR") SPEC_PATH=PATCHES_DIR ;;
+				esac
+				break ;
+			fi
+		done
+		[[ $SPECFILE != "" ]] && break ;
+	done
+	case $SPECFILE in
+		*.spec|*.spec.in) echo "From text in $SPEC_PATH/$FILENAME"
+			BLURB_1="$(grep -m1 'Summary:' "$SPECFILE" |cut -f2- -d: |white_out)"
+			HOMEPAGE="$(grep -m1 'URL:' "$SPECFILE" |cut -f2- -d: |white_out)"
+			if [[ "x$HOMEPAGE" = "x" ]] ; then
+				HOMEPAGE="$(grep -m1 'Url:' $SPECFILE |cut -f2- -d: |white_out)"
+			fi
+			echo "$NAME: $NAME  $BLURB_1" >> "$PKG_DIR"/install/$PKG_DESC
+			echo "$NAME: $BLURB_2" >> "$PKG_DIR"/install/$PKG_DESC
+			cat "$SPECFILE" 2> /dev/null | read_rpm_desc | text_wrapper
+			;;
+		*.lsm) echo "From text in $SPEC_PATH/$FILENAME"
+			BLURB_1="$(grep -m1 'Title:' "$SPECFILE" |cut -f2- -d: |white_out)"
+			HOMEPAGE="$(grep -m 1 'Primary-site:' $SPECFILE |cut -f2- -d: |white_out)"
+			if [[ "x$HOMEPAGE" = "x" ]] ; then
+				HOMEPAGE="$(grep -m 1 'Alternate-site:' $SPECFILE |cut -f2- -d: |white_out)"
+			fi
+			if [[ "x$HOMEPAGE" = "x" ]] ; then
+				HOMEPAGE="$(grep -m 1 'Original-site:' $SPECFILE |cut -f2- -d: |white_out)"
+			fi
+			echo "$NAME: $BLURB_1" >> "$PKG_DIR"/install/$PKG_DESC
+			echo "$NAME: $BLURB_2" >> "$PKG_DIR"/install/$PKG_DESC
+			cat "$SPECFILE" 2> /dev/null | read_pkg-info_desc | text_wrapper
+			;;
+		*description-pak) echo "From text in $SPEC_PATH/$FILENAME"
+			# this doesn't work for one-line description-pak files
+			BLURB_1="$(head -n 1 "$SPECFILE")"
+			cat "$CWD"/description-pak |tail -n +3 > "$CWD"/$PKG_DESC.tmp
+			#cat "$SPECFILE" |tail -n +3 > "$CWD"/$PKG_DESC.tmp
+			echo "$NAME: $BLURB_1" >> "$PKG_DIR"/install/$PKG_DESC
+			echo "$NAME: $BLURB_2" >> "$PKG_DIR"/install/$PKG_DESC
+			read_description-pak
+			;;
+		*PKGINFO|*PKG-INFO) echo "From text in $SPEC_PATH/$FILENAME"
+			HOMEPAGE="$(grep -m 1 'Home-page:' $SPECFILE |cut -f2- -d: |white_out)"
+			BLURB_1="$(grep -m 1 'Summary:' "$SPECFILE" |cut -f2- -d: |white_out)"
+			echo "$NAME: $NAME  $BLURB_1" >> "$PKG_DIR"/install/$PKG_DESC
+			echo "$NAME: $BLURB_2" >> "$PKG_DIR"/install/$PKG_DESC
+			cat "$SPECFILE" 2> /dev/null | read_pkg-info_desc | text_wrapper
+			;;
+		*debian/control)
+			if [[ $(grep '^Homepage' $SPECFILE 2> /dev/null) ]] ; then
+				echo "From text in $SPEC_PATH/$FILENAME"
+				HOMEPAGE="$(grep -m 1 '^Homepage:' $SPECFILE |cut -f2- -d:)"
+			elif [[ $(grep 'http://' $(dirname $SPECFILE)/copyright 2> /dev/null) ]] ; then
+				echo "From text in $SPEC_PATH/copyright"
+				URL_ADDRESS="$(grep -m 1 'http://' $(dirname $SPECFILE)/copyright |cut -f2 -d:)"
+				HOMEPAGE="http:$URL_ADDRESS"
+			elif [[ $(grep 'ftp://' $(dirname $SPECFILE)/copyright 2> /dev/null) ]] ; then
+				echo "From text in $SPEC_PATH/copyright"
+				URL_ADDRESS="$(grep -m 1 'ftp://' $(dirname $SPECFILE)/copyright |cut -f2 -d:)"
+				HOMEPAGE="ftp:$URL_ADDRESS"
+			fi
+			BLURB_1="$(echo $(grep -m1 'Description:' $SPECFILE|cut -f2 -d':'))"
+			echo "$NAME: $NAME $BLURB_1" >> "$PKG_DIR"/install/$PKG_DESC
+			echo "$NAME: $BLURB_2" >> "$PKG_DIR"/install/$PKG_DESC
+			cat "$SPECFILE" 2> /dev/null | read_deb_desc | text_wrapper
+			;;
+	esac
+   fi
+   
+   if [[ $(wc -l "$PKG_DIR"/install/$PKG_DESC |cut -f1 -d' ') = 1 ]] ; then
+	if [[ "$QUERY_FOR_PKG_DESC" = "YES" ]] ; then
+		echo "From interactive text input:"
+		echo $BLUE"Interactive mode: "$NORMAL
+		echo "  Here you can give a description of this package for the $PKG_DESC file."
+		echo "  Type in the text as one long line and press ENTER when finished."
+		echo "  The text will automatically be formatted for you. Or just press ENTER "
+		echo "  to accept the default text: $BLURB_3"
+		echo ""
+		echo -n "> "
+		read BLURB_3
+		echo "$NAME: $BLURB_1" >> "$PKG_DIR"/install/$PKG_DESC
+		echo "$NAME: $BLURB_2" >> "$PKG_DIR"/install/$PKG_DESC
+		if [[ "$BLURB_3" = "" ]] ; then 
+			BLURB_3="No description was given for this package."
+			echo "$NAME: $BLURB_3" >> "$PKG_DIR"/install/$PKG_DESC
+			cat /dev/null | text_wrapper
+		else
+			echo $BLURB_3 | text_wrapper
+		fi
+	else
+		echo "From default text"
+	cat >> "$PKG_DIR"/install/$PKG_DESC << END 
+$NAME: $BLURB_1
+$NAME: $BLURB_2
+$NAME: $BLURB_3
+$NAME: $BLURB_4
+$NAME: $BLURB_5
+$NAME: $BLURB_6
+$NAME: $BLURB_7
+$NAME: $BLURB_8
+$NAME: $BLURB_9
+$NAME: $BLURB_10
+END
+
+	fi
+   fi
+	
+   echo "$NAME: $BLURB_11" >> "$PKG_DIR"/install/$PKG_DESC
+   if [[ $BLURB_12 ]] ; then
+	echo $NAME: ${BLURB_12} >> "$PKG_DIR"/install/$PKG_DESC
+   fi
+   if [[ $BLURB_13 ]] ; then
+	echo $NAME: ${BLURB_13} >> "$PKG_DIR"/install/$PKG_DESC
+   fi
+
+   if [[ $AUTO_SCRIPT ]] ; then
+	echo $BLUE"Copying $PKG_DESC to:"$NORMAL" CWD/new.$PKG_DESC"
+	#cat "$PKG_DIR"/install/$PKG_DESC > "$CWD"/new.$PKG_DESC
+	# no, use sed and set $PACKAGER back to 'src2pkg'
+	sed -e "s%$PACKAGER%src2pkg%" "$PKG_DIR"/install/$PKG_DESC > "$CWD"/new.$PKG_DESC
+	echo "   The file new.$PKG_DESC is a copy of the $PKG_DESC file"
+	echo "   inserted in the package. If you want to change the content,"
+	echo "   edit and save the file as $PKG_DESC and rebuild"
+	echo "   Otherwise, it will be re-created when you repeat the build."
+   fi
+fi
+}
+
+reject_desc() {
+echo $YELLOW"WARNING! "$NORMAL"The supplied $FILENAME is not valid."
+echo "You need 9-13 lines that begin with '$NAME:' for this package."
+if ! [[ -e "$SEARCH_PATH"/rej.$PKG_DESC ]] ; then
+	echo "It will be renamed to rej.$PKG_DESC and a new one created."
+	mv "$SEARCH_PATH"/$FILENAME "$SEARCH_PATH"/rej.$PKG_DESC
+else
+	rm -f "$SEARCH_PATH"/$FILENAME
+fi
+}
+
+# this function wraps text used in the PKG_DESC file and pads it
+# with extra lines when needed.
+text_wrapper() {
+# The first two lines of the PKG_DESC and the last one are reserved
+DESC_HEADER_SIZE=2
+DESC_FOOTER_SIZE=1
+# DESC_WRAP_LENGTH & DESC_MAX_LINES are configurable. Defaults:
+# DESC_WRAP_LENGTH=80
+# DESC_MAX_LINES=11
+# If we have a LICENSE and/or HOMEPAGE, increment the FOOTER size for each
+if [[ -n $LICENSE ]] ; then
+	(( DESC_FOOTER_SIZE++ ))
+fi
+if [[ -n $HOMEPAGE ]] ; then
+	(( DESC_FOOTER_SIZE++ ))
+fi
+# we have already echoed in the two header lines, so start with that count
+OUTPUT_LINE_COUNT=$DESC_HEADER_SIZE
+OUTPUT=""
+# collect all the input text into one long line
+while read LINE ; do
+	STRING="$LINE"
+	# replace newlines with a space
+	STRING=${STRING//'\n'/ }
+	# add the new text to the OUTPUT with a space between
+	# if there are double spaces they get removed below.
+	OUTPUT="$OUTPUT $STRING"
+	shift
+done
+PARSESTRING="$OUTPUT"
+while [[ $PARSESTRING != "" ]] ; do
+	(( OUTPUT_LINE_COUNT++ ))
+	# read the number of chars matching the wrap length
+	CHUNK=${PARSESTRING:0:${DESC_WRAP_LENGTH}}
+	# skip over everything but the last character of the CHUNK
+	OFFSET_LENGTH=$(( $DESC_WRAP_LENGTH - 1 ))
+	# if the last character is a space or not null shorten the input line to the previous word
+	if [[ "${CHUNK:$OFFSET_LENGTH:1}" = " " ]] || [[ "${CHUNK:$OFFSET_LENGTH:1}" != "" ]] ; then
+		# keep everything before the last space
+		CHUNK=${CHUNK%$" "*}
+	fi
+	# get the length of the finished chunk
+	CHUNK_LENGTH=${#CHUNK}
+	# advance the pointer the length of the chunk that we saved
+	PARSESTRING=${PARSESTRING:$CHUNK_LENGTH}
+	if [[ $OUTPUT_LINE_COUNT -le $(( $DESC_MAX_LINES - $DESC_HEADER_SIZE )) ]] ; then
+		echo $NAME:"$CHUNK" >> "$PKG_DIR"/install/$PKG_DESC
+	fi
+	# exit if we have reached the maximum number of lines
+	if [[ $OUTPUT_LINE_COUNT -eq $(( $DESC_MAX_LINES - $DESC_HEADER_SIZE )) ]] ; then
+		break
+	else
+		CHUNK=""
+	fi
+done
+
+# pad the PKG_DESC file to  ($DESC_MAX_LINES - $DESC_FOOTER_SIZE) lines if the above didn't reach that number
+while [[ $OUTPUT_LINE_COUNT -lt $(( $DESC_MAX_LINES - $DESC_FOOTER_SIZE )) ]] ; do
+	echo "$NAME:" >> "$PKG_DIR"/install/$PKG_DESC
+	(( OUTPUT_LINE_COUNT++ ))
+done
+
+if [[ -n $LICENSE ]] ; then
+	echo "$NAME: License: $(echo $LICENSE) " >> "$PKG_DIR"/install/$PKG_DESC
+	(( OUTPUT_LINE_COUNT++ ))
+fi
+
+if [[ -n $HOMEPAGE ]] ; then
+	echo "$NAME: URL: $(echo $HOMEPAGE) " >> "$PKG_DIR"/install/$PKG_DESC
+	(( OUTPUT_LINE_COUNT++ ))
+fi
+
+}
+
+read_rpm_desc() {
+LINE_COUNT=0
+FIRST_LINE=0
+LAST_LINE=0
+while read LINE ; do
+	(( LINE_COUNT++ )) 
+	CHUNK=${LINE/\*/-}	
+	if [[ $FIRST_LINE -ne 0 ]] && [[ $LINE_COUNT -eq $FIRST_LINE ]] ; then
+		echo $CHUNK
+	elif [[ ${CHUNK:0:12} = "%description" ]] && [[ $FIRST_LINE -eq 0 ]] ; then
+		FIRST_LINE=$(( $LINE_COUNT + 1 ))
+	elif [[ ${CHUNK:0:1} = "%" ]] || [[ ${CHUNK:0:15} = "%description -l" ]] && [[ $FIRST_LINE -ne 0 ]] ; then
+		LAST_LINE=$(( $LINE_COUNT -1 ))
+		break
+	elif [[ $FIRST_LINE -ne 0 ]] && [[ $LAST_LINE -eq 0 ]] ; then
+		if [[ "$CHUNK" != "" ]] ; then
+			echo $CHUNK
+		fi
+	fi
+done
+}
+
+read_deb_desc() {
+LINE_COUNT=0
+FIRST_LINE=0
+LAST_LINE=0
+while read LINE ; do
+	(( LINE_COUNT++ )) 
+	CHUNK=${LINE/\*/-}	
+	if [[ $FIRST_LINE -ne 0 ]] && [[ $LINE_COUNT -eq $FIRST_LINE ]] ; then
+		echo $CHUNK
+	elif [[ ${CHUNK:0:12} = "Description:" ]] && [[ $FIRST_LINE -eq 0 ]] ; then
+		FIRST_LINE=$(( $LINE_COUNT + 1 ))
+	elif [[ $CHUNK = "" ]] && [[ $FIRST_LINE -ne 0 ]] ; then
+		LAST_LINE=$(( $LINE_COUNT -1 ))
+		break
+	elif [[ $FIRST_LINE -ne 0 ]] && [[ $LAST_LINE -eq 0 ]] ; then
+		if [[ "$CHUNK" != "" ]] && [[ "$CHUNK" != "." ]] ; then
+			echo $CHUNK
+		fi
+	fi
+done
+}
+
+read_pkg-info_desc() {
+LINE_COUNT=0
+FIRST_LINE=0
+LAST_LINE=0
+while read LINE ; do
+	(( LINE_COUNT++ )) 
+	CHUNK=${LINE/\*/-}	
+	if [[ ${CHUNK:0:12} = "Description:" ]] && [[ $FIRST_LINE -eq 0 ]] ; then
+		echo ${CHUNK:12}
+		FIRST_LINE=$(( $LINE_COUNT + 1 ))
+	elif [[ $CHUNK = "" ]] || [[ "$(echo $CHUNK |grep ':')" != "" ]] && [[ $FIRST_LINE -ne 0 ]] ; then
+		LAST_LINE=$(( $LINE_COUNT -1 ))
+		break
+	elif [[ $FIRST_LINE -ne 0 ]] && [[ $LAST_LINE -eq 0 ]] ; then
+		if [[ "$CHUNK" != "" ]] ; then
+			echo $CHUNK
+		fi
+	fi
+done
+}
+
+read_description-pak() {
+LINE_COUNT=1
+	while read LINE ; do
+		  if [[ $LINE_COUNT -gt 10 ]] ; then
+		   break
+		  elif [[ $LINE != "" ]] && [[ $HAVE_BREAK != 1 ]] ; then
+			echo $NAME: $LINE >> "$PKG_DIR"/install/$PKG_DESC
+			(( LINE_COUNT++ ))
+		  elif [[ $LINE = "" ]] && [[ $HAVE_BREAK != 1 ]] ; then
+			HAVE_BREAK=1
+			(( LINE_COUNT++ ))
+		  else
+			echo $NAME: $LINE >> "$PKG_DIR"/install/$PKG_DESC
+			(( LINE_COUNT++ ))
+		  fi
+	done <"$CWD"/$PKG_DESC.tmp
+	rm -f "$CWD"/$PKG_DESC.tmp
+	while [[ $LINE_COUNT -lt 10 ]] ; do
+		echo "$NAME: " >> "$PKG_DIR"/install/$PKG_DESC
+		(( LINE_COUNT++ ))
+	done
+}
+
+find_license_type() {
+	# If license-linking was asked for, we may already know the type
+	if [[ -f $PKG_DIR/$GOOD_DOC_PATH/common-licenses/GPL-2 ]] ; then
+		LICENSE=GPL-2
+	elif [[ -f $PKG_DIR/$GOOD_DOC_PATH/common-licenses/GPL-3 ]] ; then
+		LICENSE=GPL-3
+	elif [[ -f $PKG_DIR/$GOOD_DOC_PATH/common-licenses/GPL-1 ]] ; then
+		LICENSE=GPL-1
+	elif [[ -f $PKG_DIR/$GOOD_DOC_PATH/common-licenses/LGPL-2 ]] ; then
+		LICENSE=LGPL-2
+	elif [[ -f $PKG_DIR/$GOOD_DOC_PATH/common-licenses/2.1 ]] ; then
+		LICENSE=LGPL-2.1
+	elif [[ -f $PKG_DIR/$GOOD_DOC_PATH/common-licenses/LGPL-3 ]] ; then
+		LICENSE=LGPL-3
+	elif [[ -f $PKG_DIR/$GOOD_DOC_PATH/common-licenses/Artistic ]] ; then
+		LICENSE=Artistic
+	fi
+	# Otherwise, check the documents directory for commonly-named licenses
+	if [[ -z $LICENSE ]] ; then
+	   for FILE in $(find "$DOC_DIR" -name "COPYING*" -o -name "LICENSE*" -o -name "GPL*" -o -name "gpl*" -o -name "LGPL*" -o -name "Artistic*") ; do
+		if [[ $(grep 'GNU GENERAL PUBLIC LICENSE' $FILE 2> /dev/null) ]] ; then
+			if [[ $(grep 'Version 2, June 1991' $FILE) ]] ; then
+				LICENSE=GPL-2
+			elif [[ $(grep 'Version 3, 29 June 2007' $FILE) ]] ; then
+				LICENSE=GPL-3
+			elif [[ $(grep 'Version 1, February 1989' $FILE) ]] ; then
+				LICENSE=GPL-1
+			fi
+		elif [[ $(grep 'GNU LIBRARY GENERAL PUBLIC LICENSE' $FILE 2> /dev/null) ]] ; then
+			if [[ $(grep 'Version 2, June 1991' $FILE) ]] ; then
+				LICENSE=LGPL-2
+			fi
+		elif [[ $(grep 'GNU LESSER GENERAL PUBLIC LICENSE' $FILE 2> /dev/null) ]] ; then
+			if [[ $(grep 'Version 2.1, February 1999' $FILE) ]] ; then
+				LICENSE=LGPL-2.1
+			elif [[ $(grep 'Version 3, 29 June 2007' $FILE) ]] ; then
+				LICENSE=LGPL-3
+			fi
+		elif [[ $(grep 'The "Artistic License"' $FILE 2> /dev/null) ]] ; then
+			LICENSE=Artistic
+		elif [[ $(grep 'MIT/X Consortium License' $FILE 2> /dev/null) ]] ; then
+			LICENSE='MIT/X Consortium License'
+		fi
+		if [[ -n $LICENSE ]] ; then
+			break ;
+		fi
+	   done
+	fi
+	# If we still don't know the type, try to find it from spec or other files
+	if [[ -z $LICENSE ]] ; then
+	   for FILENAME in $NAME.spec $ORIG_NAME.spec $NAME-$VERSION.spec $ORIG_NAME-$VERSION.spec $(basename $SOURCE_NAME .$EXT).spec \
+		$NAME.spec.in $ORIG_NAME.spec.in $NAME-$VERSION.spec.in $ORIG_NAME-$VERSION.spec.in $(basename $SOURCE_NAME .$EXT).spec.in \
+		$NAME.lsm $ORIG_NAME.lsm $NAME-$VERSION.lsm $ORIG_NAME-$VERSION.lsm $(basename $SOURCE_NAME .$EXT).lsm \
+		description-pak debian/copyright PKG-INFO ; do
+		for SEARCH_PATH in "$PATCHES_DIR"/$NAME-patches "$CWD"/patches \
+			"$CWD"/Resources "$SRC_DIR" "$CWD" "$PATCHES_DIR" ; do
+			if [[ -f $SEARCH_PATH/$FILENAME ]] ; then
+				SPECFILE="$SEARCH_PATH"/$FILENAME
+			#####
+			case $SPECFILE in
+			*.spec|*.spec.in)
+				if [[ $(grep 'License:' $SPECFILE) ]] ; then
+					LICENSE=$(grep -m1 'License:' $SPECFILE |cut -f2- -d: |white_out)
+				elif [[ $(grep 'Copyright:' $SPECFILE) ]] ; then
+					LICENSE=$(grep -m1 'Copyright:' $SPECFILE |cut -f2- -d: |white_out)
+				fi
+				;;
+			*description-pak)
+				true
+				;;
+			*.lsm)
+				if [[ $(grep 'Copying-policy:' $SPECFILE) ]] ; then
+					LICENSE=$(grep -m1 'Copying-policy:' $SPECFILE |cut -f2- -d: |white_out)
+				fi
+				;;
+			*PKG-INFO)
+				true
+				;;
+			*debian/copyright)
+				if [[ $(grep 'usr/share/common-licenses' $SPECFILE) ]] ; then
+					LICENSE=$(grep -m1 'usr/share/common-licenses/' $SPECFILE |rev |cut -f1 -d '/' |rev |cut -f1 -d '.' |cut -f1 -d ' ' |cut -f1 -d \' )
+				fi
+				;;
+			esac
+			fi
+		done
+		if [[ -n $LICENSE ]] ; then
+			break ;
+		fi
+	   done
+	fi
+	if [[ -n $LICENSE ]] ; then
+		echo $LICENSE
+	fi
+}
+
+create_desktop_file() {
+	# sub-function that does the real writing
+	write_desktop_file() {
+		echo $BLUE"Creating $NAME.desktop file - "$NORMAL"Copying to CWD as: new.$NAME.desktop"
+		if [[ -f $PKG_DIR/etc/X11/xinit/xinitrc.* ]] ; then
+		  DESKTOP_LOCATION=/usr/share/xsessions
+		  IS_WM=1
+		else
+		  DESKTOP_LOCATION=/usr/share/applications
+		fi
+		
+		mkdir -p $PKG_DIR/$DESKTOP_LOCATION
+		#cat /dev/null > $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		echo "[Desktop Entry]" > $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		#echo "Encoding=UTF-8" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		echo "Name=$ORIG_NAME" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		if [[ -f $PKG_DIR/install/$PKG_DESC ]] ; then
+		    Comment=$(grep $NAME: $PKG_DIR/install/$PKG_DESC |head -n 1 |cut -f2 -d ':' |white_out)
+		    echo "Comment=${Comment#*$NAME}" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		fi
+		# figure out if it is Xsession
+		if [[ $IS_WM = 1 ]] ; then 
+		   XINITRC=$(ls $PKG_DIR/etc/X11/xinit/)
+		   echo "Type=Xsession" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		   echo "Exec=/etc/X11/xinit/$XINITRC" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		   echo "TryExec=$NAME" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		else
+		   echo "Type=Application" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		   echo "Exec=$NAME" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		   echo "TryExec=$ORIG_NAME" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		fi
+		#echo "Icon=$iconsdir/hicolor/48x48/apps/$NAME" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		echo "Icon=$NAME" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		if [[ $USE_TERM = 1 ]] ; then
+		   echo "Terminal=true" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		else
+		   echo "Terminal=false" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		fi
+		echo "StartupNotify=false" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		echo "#MimeType=" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		# echo "#Categories=" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		echo "# Every program should be assigned to at least one Category." >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		echo "# These are the main categories approved by freedesktop.org:" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		echo "# AudioVideo, Development, Education, Game, Graphics" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		echo "# Network, Office, Settings, System, Utility" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		echo "# Other useful categories: GTK, QT, KDE, GNOME, ConsoleOnly" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		echo "# Each 'Categories' item should be followed with a ';'" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		echo "# Inserting a default guessed Category:" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		if [[ $USE_TERM = 1 ]] ; then
+		   echo "Categories=ConsoleOnly;" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		elif [[ $USE_GNOME = 1 ]] ; then
+		   echo "Categories=GNOME;" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		elif [[ $USE_GTK = 1 ]] ; then
+		   echo "Categories=GTK;" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		elif [[ $USE_KDE = 1 ]] ; then
+		   echo "Categories=KDE;" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		elif [[ $USE_QT = 1 ]] ; then
+		   echo "Categories=QT;" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		else
+		   echo "Categories=Utility;" >> $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop
+		fi
+		if [[ $(grep '^#Categories' $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop) ]] ; then
+		   echo $CYAN"   Notice - "$NORMAL"Edit new.$NAME.desktop and add an entry to 'Categories'."
+		   echo "   Rename it to $NAME.desktop and rebuild the package to include the changes."
+		else
+		   echo $CYAN"   Notice - "$NORMAL"Edit new.$NAME.desktop and add 'Categories' entries if needed."
+		   echo "   Rename it to $NAME.desktop and rebuild the package to include the changes."
+		fi
+		cp $PKG_DIR/$DESKTOP_LOCATION/$NAME.desktop $CWD/new.$NAME.desktop
+	}
+
+# if no desktop file is already installed
+if [[ ! -d $PKG_DIR/usr/share/applications ]] ; then
+   # we can only do this if we have an icon
+   if [[ -f $ICONS_DIR/hicolor/48x48/apps/$NAME.png ]] \
+	|| [[ -f $ICONS_DIR/hicolor/scalable/apps/$NAME.svg ]] \
+	|| [[ -f $PIXMAPS_DIR/$NAME.xpm ]] ; then
+	ICON=$NAME
+	HAVE_ICON=1
+   elif [[ -f $ICONS_DIR/hicolor/48x48/apps/$ORIG_NAME.png ]] \
+	|| [[ -f $ICONS_DIR/hicolor/scalable/apps/$ORIG_NAME.svg ]] \
+	|| [[ -f $PIXMAPS_DIR/$ORIG_NAME.xpm ]] ; then
+	ICON=$ORIG_NAME
+	HAVE_ICON=1
+   fi
+   if [[ $HAVE_ICON = 1 ]] ; then
+	# Only programs which require libX11 should need a desktop file
+	# if there is a slack-required file, use that to figure out if we need a desktop file
+	# otherwise run a very expensive 'find ... _ldd' series to find the depends
+	# Check for gnome before gtk, kde before qt and all before x
+	if [[ -f $PKG_DIR/install/$PKG_REQUIRED ]] ; then
+		if [[ $(grep ncurses $PKG_DIR/install/$PKG_REQUIRED ) ]] ; then
+			USE_TERM=1 write_desktop_file
+		elif [[ $(grep gnome $PKG_DIR/install/$PKG_REQUIRED ) ]] ; then
+			USE_GNOME=1 write_desktop_file
+		elif [[ $(grep gtk $PKG_DIR/install/$PKG_REQUIRED ) ]] ; then
+			USE_GTK=1 write_desktop_file
+		elif [[ $(grep kde $PKG_DIR/install/$PKG_REQUIRED ) ]] ; then
+			USE_KDE=1 write_desktop_file
+		elif [[ $(grep qt $PKG_DIR/install/$PKG_REQUIRED ) ]] ; then
+			USE_QT=1 write_desktop_file
+		elif [[ $(grep libX11 $PKG_DIR/install/$PKG_REQUIRED ) ]] ; then
+			write_desktop_file
+		elif [[ $(grep svgalib $PKG_DIR/install/$PKG_REQUIRED ) ]] ; then
+			write_desktop_file
+		fi
+	elif [[ -f $CWD/$PKG_REQUIRED ]] ; then
+		if [[ $(grep ncurses $CWD/$PKG_REQUIRED ) ]] ; then
+			USE_TERM=1 write_desktop_file
+		elif [[ $(grep gnome $CWD/$PKG_REQUIRED ) ]] ; then
+			USE_GNOME=1 write_desktop_file
+		elif [[ $(grep gtk $CWD/$PKG_REQUIRED ) ]] ; then
+			USE_GTK=1 write_desktop_file
+		elif [[ $(grep kde $CWD/$PKG_REQUIRED ) ]] ; then
+			USE_KDE=1 write_desktop_file
+		elif [[ $(grep qt $CWD/$PKG_REQUIRED ) ]] ; then
+			USE_QT=1 write_desktop_file
+		elif [[ $(grep libX11 $CWD/$PKG_REQUIRED ) ]] ; then
+			write_desktop_file
+		elif [[ $(grep svgalib $CWD/$PKG_REQUIRED ) ]] ; then
+			write_desktop_file
+		fi
+	elif [[ $(find $PKG_DIR -type f |xargs -r file |grep ELF |cut -f1 -d: |xargs -r _ldd |grep ncurses) ]] ; then
+		USE_TERM=1 write_desktop_file
+	elif [[ $(find $PKG_DIR -type f |xargs -r file |grep ELF |cut -f1 -d: |xargs -r _ldd |grep gnome) ]] ; then
+		USE_GNOME=1 write_desktop_file
+	elif [[ $(find $PKG_DIR -type f |xargs -r file |grep ELF |cut -f1 -d: |xargs -r _ldd |grep gtk) ]] ; then
+		USE_GTK=1 write_desktop_file
+	elif [[ $(find $PKG_DIR -type f |xargs -r file |grep ELF |cut -f1 -d: |xargs -r _ldd |grep kde) ]] ; then
+		USE_KDE=1 write_desktop_file
+	elif [[ $(find $PKG_DIR -type f |xargs -r file |grep ELF |cut -f1 -d: |xargs -r _ldd |grep qt) ]] ; then
+		USE_QT=1 write_desktop_file
+	elif [[ $(find $PKG_DIR -type f |xargs -r file |grep ELF |cut -f1 -d: |xargs -r _ldd |grep libX11) ]] ; then
+		write_desktop_file
+	elif [[ $(find $PKG_DIR -type f |xargs -r file |grep ELF |cut -f1 -d: |xargs -r _ldd |grep svgalib) ]] ; then
+		write_desktop_file
+	fi
+   fi
+fi
+}
+
+validate_desktop_files() {
+if [[ -d usr/share/applications ]] || [[ -d usr/share/xsessions ]] ; then
+	if [[ $DEBUG ]] ; then
+		echo $BLUE"Validating desktop files:"$NORMAL
+	else
+		echo -n $BLUE"Validating desktop files - "$NORMAL
+	fi
+fi
+for DESKTOP_DIR in usr/share/applications usr/share/xsessions ; do
+  if [[ -d $PKG_DIR/$DESKTOP_DIR ]] ; then
+	( cd $PKG_DIR/$DESKTOP_DIR ;
+	for FILE in $(ls -1 *.desktop) ; do
+	     [[ $DEBUG ]] && echo -n $CYAN"   Checking - "$NORMAL"$FILE - "
+	    # filter out double semi-colons on the fly
+	    sed -e 's/;;/;/g' \
+		-e 's/Terminal=0/Terminal=false/g' \
+		-e 's/Terminal=1/Terminal=true/g' \
+		$FILE | while read LINE ; do
+		case $LINE in
+			"") true ;; # ignore blank lines
+			\#*) echo ${LINE} >> $FILE.tmp ;;
+			Protocols*|Extensions*|BinaryPattern*|MapNotify*) true ;;
+			Patterns*|DefaultApp*|MiniIcon*|TerminalOptions*|Version*) true ;;
+			Encoding*|SwallowTitle*|SwallowExec*|SortOrder*|FilePattern*) true ;;
+			Icon=*)	case $LINE in	*.png|*.xpm|*.svg) 
+					strlen=${#LINE} ; offset=$(( ${#LINE} - 4 ))
+					echo ${LINE:0:$offset} >> $FILE.tmp ;;
+					*) echo $LINE >> $FILE.tmp ;;
+				esac
+			;;
+			Exec=*|TryExec=*) case $LINE in
+					*%m*) LINE=${LINE//\%m/} ; echo $LINE >> $FILE.tmp ;;
+					*) echo $LINE >> $FILE.tmp ;;
+				esac 
+			;;
+			*) echo ${LINE} >> $FILE.tmp ;;
+		esac
+	    done
+	    
+	    if [[ "$(md5sum $FILE |cut -f1 -d' ')" = "$(md5sum $FILE.tmp |cut -f1 -d' ')" ]] ; then
+			rm -f $FILE.tmp
+			[[ $DEBUG ]] && echo $GREEN"Okay"$NORMAL
+	    else
+			mv -f $FILE.tmp $FILE
+			[[ $DEBUG ]] && echo $YELLOW"Corrected "$NORMAL
+	    fi
+	    
+	    if [[ $(which desktop-file-validate 2> /dev/null) ]] ; then
+			[[ $DEBUG ]] && echo -n $CYAN"   Rechecking"$NORMAL $FILE" with desktop-file-validate - "
+			if [[ $( desktop-file-validate $FILE ) = "" ]] ; then
+				[[ $DEBUG ]] && echo $GREEN"Okay"$NORMAL
+			else
+				# this is not perfect, but removes a couple of commonly-seen deprecated keys
+				if [[ $QUIET = "YES" ]] ; then
+					desktop-file-install --dir $(pwd) --delete-original $FILE &> /dev/null
+				else
+					desktop-file-install --dir $(pwd) --delete-original $FILE
+				fi
+				if [[ -f $FILE  ]] ; then
+					[[ $DEBUG ]] && echo $GREEN"Okay"$NORMAL
+					#skipme() {
+					if [[ $AUTO_SCRIPT ]] ; then
+						if [[ -f $CWD/$FILE ]] ; then
+							mv $CWD/$FILE $CWD/rej.$FILE
+							echo $BLUE"Copying corrected desktop file - "$NORMAL"Copying to CWD/new.$FILE"
+							echo "Old file has been re-named to rej.$FILE"
+							cp $FILE $CWD/new.$FILE
+						else
+							echo $BLUE"Copying corrected desktop file - "$NORMAL"Copying to CWD/new.$FILE"
+							cp $FILE $CWD/new.$FILE
+						fi
+					fi
+					#}
+				else
+					[[ $DEBUG ]] && echo $RED"Failed! "$NORMAL
+					[[ $DEBUG ]] && echo "Validation of $FILE has failed - file removed from package"
+					rm -f $FILE
+				fi
+			fi
+	    else
+			echo "'desktop-file-validate' is not installed"$NORMAL
+	    fi
+	done
+	)
+	rmdir $PKG_DIR/$DESKTOP_DIR 2> /dev/null && echo $BLUE"Removing empty directory - "$NORMAL"PKG_DIR/$DESKTOP_DIR"
+	rmdir $PKG_DIR/usr/share 2> /dev/null && echo $BLUE"Removing empty directory - "$NORMAL"usr/share"
+  fi
+done
+if [[ -d usr/share/applications ]] || [[ -d usr/share/xsessions ]] ; then
+	! [[ $DEBUG ]] && echo $GREEN"Done"$NORMAL
+fi
+}
+
+# function for converting PKG_DESC back to plain text
+# used by mini_create_taz and mini_create_deb
+pkg_desc_to_text() {
+FILE="$1"
+while read LINE ; do
+	offset=$(( ${#NAME} + 1 ))
+	if [[ ${LINE:0:$offset} = "$NAME:" ]] ; then
+		LINE=$(echo ${LINE#*:})
+		if [[ "$LINE" != "" ]] && [[ "$LINE" != " " ]] ; then
+			echo $LINE
+		fi
+	fi
+done < "$FILE"
+}

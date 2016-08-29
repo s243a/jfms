@@ -1,0 +1,15 @@
+#!/bin/sh
+# wrapper script for alternate compiler
+# to compile software with this compiler just issue the command:
+# 'GCC346 make'
+PATH=/usr/gcc-3.4.6/bin:$PATH
+export PATH=/usr/gcc-3.4.6/lib/gcc-lib/i486-slackware-linux/3.4.6:$PATH
+
+# this doesn't seem to be necessary
+# export LD_LIBRARY_PATH=/usr/gcc-3.4.6/lib
+
+# if you want to see that a different path is being used, uncomment this:
+# echo "using alternate path: $PATH
+
+# execute whatever command was given -like 'make' or 'make install'
+exec "$@"

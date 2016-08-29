@@ -1,0 +1,151 @@
+
+			Gilbert Ashley <amigo@ibiblio.org>
+Thanks and formal credits are due to many people for their contibutions
+to src2pkg, since its' inception (as pkgBuild) in late 2004:
+
+* Tim Goya <tuxdev103@gmail.com>
+Many thanks to Tim Goya for his active interest in src2pkg, contribution
+of ideas, bits of code and suggestions. In 2009, Tim released the first
+public beta-version of a tool called src2pkg-ng which is based on some
+of the ideas and concepts used by src2pkg. I have returned the favor to
+Tim by making some suggestions which have, hopefully, helped him avoid
+some of the short-comings and difficult transitions which src2pkg has
+undergone over the years.
+
+* Pieter Sartain <pesartain@googlemail.com
+Thanks to Pieter for setting up and hosting the src2pkg wiki at: src2pkg.net
+Piete has also provided valuable ideas, feedback and encouragement.
+
+* Drew Ames <jxa127@verizon.net>
+Drew has long been an avid tester and promoter of src2pkg, having authored
+a review of src2pkg for linux.com. Drew is also responsible for much of the
+work of creating and maintaining the src2pkg wiki at src2pkg.net
+
+* Many people have provided valuable suggestions, testing and feedback - most
+of them via the Slackware forum on linuxquestions.org. But src2pkg is also
+used by folks running distros such as Vector Linux, Zenwalk and others, who
+have sent emails or responed to posting on the distro's forums.
+Most of these occasions of bug-spotting or nice suggestions are credited
+in the src2pkg ChangeLog as they are too numerous to mention here.
+
+* Formal Credits *
+Over the years, src2pkg has borrowed a few lines of code or ideas from
+various sources. Usually, but not always, the code has been substantially
+re-written to better fit with the rest of the src2pkg code.
+
+Probably the first such code was parts of the links-creation code borrowed
+from the official Slackware 'makepkg' tool which is:
+
+# Copyright 1994, 1998  Patrick Volkerding, Moorhead, Minnesota USA 
+# Copyright 2003  Slackware Linux, Inc.  Concord, CA USA
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+Some ideas have also come from:
+
+***** Eric Hameleers' SlackBuild scripts:
+# Copyright (c) Eric Hameleers <alien@slackware.com>
+# All rights reserved.
+#
+#   Permission to use, copy, modify, and distribute this software for
+#   any purpose with or without fee is hereby granted, provided that
+#   the above copyright notice and this permission notice appear in all
+#   copies.
+#
+#   THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESSED OR IMPLIED
+#   WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#   MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+#   IN NO EVENT SHALL THE AUTHORS AND COPYRIGHT HOLDERS AND THEIR
+#   CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+#   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
+#   USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+#   ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+#   OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+#   OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+#   SUCH DAMAGE.
+
+
+***** PhantomX SlackBuilds:
+# Copyright Phantom X, Goiania, Brazil
+# Copyright Martijn Dekker, Groningen, Netherlands
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR `AS IS'' AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+***** requiredbuilder:
+Stefano Stabellini <stefano@stabellini.net>	http://www.stabellini.net
+Released under the GPL-3 License
+
+***** checkinstall:
+Felipe Sanchez <izto at asic-linux.com.mx> and others
+Released under the GPL-2 License
+src2pkg uses 'libsentry' a forked version of the installwatch library called
+which is part of the checkinstall distribution. See further details
+about the fork in the src2pkg documentation.
+At one time, src2pkg included code taken from checkinstall which had
+its' origins in the rpm package manager tool. However, the code was completely
+removed long ago.
+
+***** slacktrack:
+Stuart Winter <mozes@slackware.com> http://www.slackware.com/~mozes
+# Copyright Stuart Winter, Surrey, England, United Kingdom.
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+***** slkbuild: by George Vlahavas <vlahavas~at~gmail~dot~com>
+
+* I have also reviewed other packaging software at times and may have picked
+up other ideas or concepts from studying their code, the origin of which I no
+longer remember. Some projects have served more as an example of how *not*
+to do things, so they are better left un-mentioned here.
+
+* If you see code in src2pkg which you think should rightly be credited to you
+and it has not been credited here or in the ChangeLog, please contact me and 
+let me know so that I can include your name (and Copyright info, if any) in 
+this CREDITS file.

@@ -1,0 +1,182 @@
+# pet-specific packaging functions
+
+make_pet_pkg() {
+	cd "$PKG_BUILDS_DIR"
+	# if autoscripting is on we may have a new.doinst.sh. Get rid of it, if so
+	rm -f $CWD/new.doinst.sh
+	
+	if [[ -d "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME ]] ; then
+		rm -f "$DEVEL_PACKAGE"
+		( cd "$PKG_BUILDS_DIR" ; mini_create_pet $DEVEL_PKG_NAME $DEVEL_TAG )
+	fi
+	if [[ -d "$PKG_BUILDS_DIR"/$I18N_PKG_NAME ]] ; then
+		rm -f "$I18N_PACKAGE"
+		( cd "$PKG_BUILDS_DIR" ; mini_create_pet $I18N_PKG_NAME $I18N_TAG )
+	fi
+	if [[ -d "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME ]] ; then
+		rm -f "$SOLIBS_PACKAGE"
+		( cd "$PKG_BUILDS_DIR" ; mini_create_pet $SOLIBS_PKG_NAME $SOLIBS_TAG )
+	fi
+	if [[ -d "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME ]] ; then
+		rm -f "$DOCS_PACKAGE"
+		( cd "$PKG_BUILDS_DIR" ; mini_create_pet $DOCS_PKG_NAME $DOCS_TAG )
+	fi
+	
+	# now build the main package
+	# take care of doinst.sh and pet.specs files
+	if [[ -f "$CWD"/pinstall.sh ]] ; then
+		cp "$CWD"/pinstall.sh $PKG_DIR
+		chmod 755 "$PKG_DIR"/pinstall.sh
+	elif [[ -f "$PKG_DIR"/install/doinst.sh ]] ; then
+		if [[ "$DOCLIST" != "MINIMAL" ]] ; then
+			mkdir -p "$DOC_DIR"
+			cp "$PKG_DIR"/install/doinst.sh "$DOC_DIR"/pinstall.sh
+			chmod 644 "$DOC_DIR"/pinstall.sh
+		fi
+		cp "$PKG_DIR"/install/doinst.sh "$PKG_DIR"/pinstall.sh
+		chmod 755 "$PKG_DIR"/pinstall.sh
+		#if [[ $AUTO_SCRIPT ]] && [[ ! -f "$CWD"/new.doinst.sh ]] ; then
+		if [[ $AUTO_SCRIPT ]] && [[ -f "$PKG_DIR"/install/doinst.sh ]] ; then
+			cp "$PKG_DIR"/install/doinst.sh "$CWD"/pinstall.sh
+			chmod 644 "$CWD"/pinstall.sh
+		fi
+	fi
+	
+	if [[ -f "$CWD"/puninstall.sh ]] ; then
+		cp "$CWD"/puninstall.sh $PKG_DIR
+		chmod 755 "$PKG_DIR"/puninstall.sh
+	elif [[ -f "$PKG_DIR"/install/$PKG_POSTRM ]] ; then
+		if [[ "$DOCLIST" != "MINIMAL" ]] ; then
+			mkdir -p "$DOC_DIR"
+			cp "$PKG_DIR"/install/$PKG_POSTRM  "$DOC_DIR"/puninstall.sh
+			chmod 644 "$DOC_DIR"/puninstall.sh
+		fi
+		cp "$PKG_DIR"/install/$PKG_POSTRM "$PKG_DIR"/puninstall.sh
+		chmod 755 "$PKG_DIR"/puninstall.sh
+		#if [[ $AUTO_SCRIPT ]] && [[ ! -f "$CWD"/new.doinst.sh ]] ; then
+		if [[ $AUTO_SCRIPT ]] && [[ -f "$PKG_DIR"/install/$PKG_POSTRM ]] ; then
+			cp "$PKG_DIR"/install/$PKG_POSTRM "$CWD"/puninstall.sh
+			chmod 644 "$CWD"/puninstall.sh
+		fi
+	fi
+	
+	if [[ -f "$PKG_DIR"/install/$PKG_DESC ]] && [[ "$DOCLIST" != "MINIMAL" ]] ; then
+		mkdir -p "$DOC_DIR"
+		#cp "$PKG_DIR"/install/$PKG_DESC "$DOC_DIR"/$NAME.desc
+		pkg_desc_to_text "$PKG_DIR"/install/$PKG_DESC >> "$DOC_DIR"/$NAME.desc
+		chmod 644 "$DOC_DIR"/$NAME.desc
+	fi
+	if [[ -f "$PKG_DIR"/install/$PKG_DESC ]] ; then
+		SUMMARY="$(grep -m 1 $NAME: $PKG_DIR/install/$PKG_DESC |cut -f 3- -d ' ')"
+	fi
+	rm -rf "$PKG_DIR"/install
+	( cd "$PKG_BUILDS_DIR" ; mini_create_pet $PKG_DIR_NAME )
+	
+	if [[ -f "$PKG_BUILDS_DIR"/$PKG_DIR_NAME.pet ]] ; then
+		echo $BLUE"Package Creation - "$GREEN"Successful!"$NORMAL" Package location:"
+		echo "$PKG_BUILDS_DIR"/$PKG_DIR_NAME.pet
+	else
+		FAILED="PACKAGE CREATION in: $FUNCNAME"
+	fi
+}
+
+mini_create_pet() {
+	THIS_PET="$1"
+	TAG=$2
+	cd "$PKG_BUILDS_DIR"
+	rm -f $THIS_PET.pet
+	
+	# tag the NAME unless we are the main package
+	case $TAG in
+		$DEVEL_TAG) TAG="_$DEVEL_TAG" SUMMARY="Development files for $NAME" ;;
+		$I18N_TAG) TAG="_$I18N_TAG" SUMMARY="Language files for $NAME" ;;
+		$SOLIBS_TAG) TAG="_$SOLIBS_TAG" SUMMARY="Runtime shared libraries for $NAME" ;;
+		$DOCS_TAG) TAG="_$DOCS_TAG" SUMMARY="Documents for $NAME" ;;
+		*) TAG="" ; [[ -z $SUMMARY ]] && SUMMARY="No summary text for $NAME" ;;
+	esac
+	#echo TAG=$TAG
+	#read
+	echo -n $BLUE"Creating package: "$NORMAL"'${THIS_PET}.pet' - "
+	
+	if [[ "$PET2" = "1" ]] ; then
+		# The output from 'du' is wierd to deal with so get just one line
+		DISK_USAGE_OUTPUT=$(du -sk --apparent-size $THIS_PET)
+		# and read it char-by-char until we reach a non-digit character
+		offset=0 INSTALLED_SIZE=
+		while [[ ${DISK_USAGE_OUTPUT:$offset:1} = [0-9] ]] ; do
+			CHAR=${DISK_USAGE_OUTPUT:$offset:1}
+			INSTALLED_SIZE=${INSTALLED_SIZE}${CHAR}
+			(( offset++ ))
+		done
+		
+		if [[ $THIS_PET = $PKG_DIR_NAME ]] && [[ -f "$CWD"/pet.specs ]] ; then
+			cp "$CWD"/pet.specs $THIS_PET/pet.specs
+		else
+			[[ -f /etc/DISTRO_SPECS ]] && . /etc/DISTRO_SPECS
+			[[ -f /root/.packages/DISTRO_PKGS_SPECS ]] && . /root/.packages/DISTRO_PKGS_SPECS
+			[[ -f /root/.packages/DISTRO_PET_REPOS ]] && . /root/.packages/DISTRO_PET_REPOS
+			[[ "${DISTRO_COMPAT_VERSION}" != "" ]] && DB_PATH="pet_packages-${DISTRO_COMPAT_VERSION}"
+			DATABASE_ENTRY="${NAME}${TAG}-${VERSION}|${NAME}${TAG}|${VERSION}|${BUILD}|BuildingBlock|${INSTALLED_SIZE}K|${DB_PATH}|${NAME}${TAG}-${VERSION}-${BUILD}.pet|unknown|${SUMMARY}|${DISTRO_BINARY_COMPAT}|${DISTRO_COMPAT_VERSION}||"
+			echo "$DATABASE_ENTRY" > $THIS_PET/pet.specs
+			if [[ $AUTO_SCRIPT ]] && [[ $THIS_PET = $SHORT_NAME ]] && [[ ! -f "$CWD"/pet.specs ]] ; then
+				echo "$DATABASE_ENTRY" > "$CWD"/pet.specs
+			fi
+		fi
+	else
+		if [[ -f "$CWD"/${NAME}${TAG}.pet.specs ]] ; then
+			cp "$CWD"/${NAME}${TAG}.pet.specs $THIS_PET/${NAME}${TAG}.pet.specs
+		else
+			[[ ! $PETREGISTER ]] && PETREGISTER="yes"
+			# unless we are the main package, leave PETMENUDSCR and PETOFFICIALDEPS blank
+			case $THIS_PET in
+				$DEVEL_PKG_NAME|$I18N_PKG_NAME|$SOLIBS_PKG_NAME|$DOCS_PKG_NAME) PETMENUDESCR="" PETOFFICIALDEPS="" ;;
+			esac
+			echo "PETMENUDESCR='$PETMENUDESCR'"  > $THIS_PET/${NAME}${TAG}.pet.specs
+			echo "PETOFFICIALDEPS='$PETOFFICIALDEPS'" >> $THIS_PET/${NAME}${TAG}.pet.specs
+			echo "PETREGISTER='$PETREGISTER'" >> $THIS_PET/${NAME}${TAG}.pet.specs
+			if [[ $AUTO_SCRIPT ]] && [[ ! -f "$CWD"/${NAME}${TAG}.pet.specs ]] ; then
+				cp $THIS_PET/${NAME}${TAG}.pet.specs "$CWD"/${NAME}${TAG}.pet.specs
+			fi
+		fi
+	fi
+	# duplicate any links if this is the solibs package
+	if [[ $THIS_PET = $SOLIBS_PKG_NAME ]] && [[ -f "$PKG_DIR"/install/doinst.sh ]] ; then
+		(cd $THIS_PET
+			duplicate_pkg_dir_links
+			( make_doinst_links "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME ) 1> /dev/null
+			if [[ -e doinst.links ]] ; then
+				cat doinst.links >> pinstall.sh
+				rm -f doinst.links
+				find * -type l -exec rm -f {} \;
+			fi
+		)
+	fi
+	rm -f $CWD/doinst.links
+	#rm -f $CWD/new.doinst.sh
+	( cd $THIS_PET && rm -rf install )
+	# create the package
+	if [[ $QUIET = "YES" ]] ; then
+		if [[ $EUID -ne 0 ]] ; then
+			tar --owner=root --group=root -cf "$THIS_PET".tar "$THIS_PET" &> /dev/null
+		else
+			tar -cf "$THIS_PET".tar "$THIS_PET" &> /dev/null
+		fi
+	else
+		if [[ $EUID -ne 0 ]] ; then
+			tar --owner=root --group=root -cf "$THIS_PET".tar "$THIS_PET"
+		else
+			tar -cf "$THIS_PET".tar "$THIS_PET"
+		fi
+	fi
+	gzip "$THIS_PET".tar &> /dev/null
+	if [[ $? -eq 0 ]] ; then
+		# add the md5sum
+		MD5SUM="$(md5sum $THIS_PET.tar.gz | cut -f 1 -d ' ')"
+		echo -n "$MD5SUM" >> "$THIS_PET".tar.gz
+		mv "$THIS_PET".tar.gz "$THIS_PET".pet
+		echo $GREEN"Done"$NORMAL
+		! [[ $DEBUG ]] && [[ $THIS_PET != $PKG_DIR_NAME ]] && (cd "$PKG_BUILDS_DIR" && rm -rf $THIS_PET )
+	else
+		echo $RED"FAILED! "$NORMAL
+	fi
+}

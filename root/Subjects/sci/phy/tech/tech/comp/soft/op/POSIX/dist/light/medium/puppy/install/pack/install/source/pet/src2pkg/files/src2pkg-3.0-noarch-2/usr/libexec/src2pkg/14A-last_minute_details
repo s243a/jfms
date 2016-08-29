@@ -1,0 +1,1147 @@
+# This file is part of the src2pkg program:
+# Copyright 2005-2013 Gilbert Ashley <amigo@ibilio.org>
+# src2pkg is released under the GNU General Public License Version 2
+
+do_last_minute_details () {
+# Last minute inclusions before creating the package. These are put here instead of at the top
+# of make_package so that changes can still be made manually in a src2pkg script between
+# make_doinst and make_package
+
+cd "$CWD"
+
+# this has been  moved here from /usr/bin/src2pkg so that scripts can be included in the package
+# but if we are running $NAME.src2pkg using -A, a new script is not written
+# The function write_src2pkg_script is located in the FUNCTIONS file
+if [[ $AUTO_SCRIPT ]] && [[ "$DONT_CLOBBER_SCRIPT" != "1" ]] ; then
+	write_src2pkg_script
+	# now set DONT_CLOBBER_SCRIPT to preserve the new script -even if using -W (--cleanup)
+	# this takes care of when an existing script gets updated in 06-configure_source
+	DONT_CLOBBER_SCRIPT=1
+	SCRIPT=$NAME.src2pkg.auto
+fi
+
+# now see if the user wants the src2pkg script included in the package
+# if the script was just created above, we get the name $SCRIPT from there
+# if the script was run using 'src2pkg -X', the name $SCRIPT was set in /usr/bin/src2pkg
+# if the script was executed with something like: 'sh  $NAME.src2pkg' then SCRIPT=$EXEC_NAME
+if [[ $ADD_SRC2PKG_SCRIPT = "YES" ]] && [[ "$EXEC_NAME" != "trackinstall" ]] && [[ "$DOCLIST" != "MINIMAL" ]] ; then
+	# strip leading slash from SRC2PKG_SCRIPT_DIR if necessary
+	if [[ ${SRC2PKG_SCRIPT_DIR:0:1} = "/" ]] ; then
+		SRC2PKG_SCRIPT_DIR=${SRC2PKG_SCRIPT_DIR:1}
+	fi
+	
+	# if SCRIPT is still NULL, that means that the script was run directly
+	# and corresponds to $EXEC_NAME, except
+	if [[ $SCRIPT = "" ]] && [[ "$EXEC_NAME" != "src2pkg" ]] ; then
+	 SCRIPT="$EXEC_NAME"
+	fi
+	# if SCRIPT is still null, that means src2pkg was run directly on the target without any script at all
+	if [[ "$SCRIPT" != "" ]] ; then
+	   if [[ $SRC2PKG_SCRIPT_DIR = "DOC_DIR" ]] ; then
+		echo $BLUE"Adding src2pkg script to package in: "$NORMAL"${DOC_DIR#"$PKG_DIR"/*}"
+		mkdir -p "$DOC_DIR"
+		cp "$SCRIPT" "$DOC_DIR"
+	   else
+		if [[ $USE_VERSION_NUMBERS = "YES" ]] ; then
+		 SCRIPT_DIR=$SRC2PKG_SCRIPT_DIR/$NAME-$VERSION
+		else
+		 SCRIPT_DIR=$SRC2PKG_SCRIPT_DIR/$NAME
+		fi
+		echo $BLUE"Adding src2pkg script to package in: "$NORMAL"PKG_DIR/$SCRIPT_DIR"
+		mkdir -p "$PKG_DIR"/$SCRIPT_DIR
+		cp $SCRIPT "$PKG_DIR"/$SCRIPT_DIR
+		if [[ $LINK_SCRIPT_TO_DOC_DIR = "YES" ]] ; then
+			( cd "$DOC_DIR" ; ln -sf /$SCRIPT_DIR/$SCRIPT $SCRIPT )
+		fi
+	   fi
+	fi
+fi
+
+# moved here from 10-strip_bins -Compression of binaries must be done after
+# generating dependency information
+if [[ $COMPRESS_BINS = "YES" ]] || [[ $SAVE_SPACE -gt 1 ]] ; then 
+	compress_bins
+fi
+
+# check for the directory using the long form of the name for more safety
+# use the regular version of tar for this --not tar-1.13
+if [[ $COMPRESS_DOCS = "YES" ]] && [[ -d "$PKG_DIR"/$GOOD_DOC_PATH/$NAME-$VERSION ]] ; then
+   echo $BLUE"Archiving documents - "$NORMAL"Creating tar/$DOC_COMPRESSOR archive of documents"
+(
+  cd "$PKG_DIR"/$GOOD_DOC_PATH/$NAME-$VERSION
+  find -type f -exec chmod 644 {} \;
+  case $DOC_COMPRESSOR in
+	# gzip) tar -czf $NAME-$VERSION-docs.tgz $(find -type f -o -type d) ;;
+	gzip) tar -c --owner=root --group=root --use-compress-program=gzip -f $NAME-$VERSION-docs.tgz . ;;
+	bzip2) tar -c --owner=root --group=root --use-compress-program=bzip2 -f $NAME-$VERSION-docs.tbz . ;;
+	lzma) tar -c --owner=root --group=root --use-compress-program=lzma -f $NAME-$VERSION-docs.tlz . ;;
+	xz) tar -c --owner=root --group=root --use-compress-program=xz -f $NAME-$VERSION-docs.txz . ;;
+  esac
+  # only compress files and directories, leaving the link to the license if there is one
+  find -type f ! -name "$NAME-$VERSION-docs.*" -exec rm -f {} \;
+  find -type d -exec rm -rf {} &> /dev/null \;
+)
+fi
+
+echo $BLUE"Rechecking package correctness:"$NORMAL
+# take care of empty files
+handle_empty_files
+
+check_dir_locations
+if [[ $FAILED != "" ]] ; then
+	post_process
+	exit 1
+fi
+check_for_hidden_files
+
+# this has been moved here from fix_pkg_perms as this should
+# be done at the very last moment to catch any last-minute errors
+echo -n $BLUE"Rechecking package permissions - "$NORMAL
+# BIN_DIRS and LIB_DIRS are done in 09-fix_pkg_perms
+# fix other common dirs here
+# all files in these dirs are also chmod'ed 644
+for dir in $INC_DIRS $LOCALE_DIRS $MAN_DIRS $DOC_DIRS ; do
+	if [[ -d "$PKG_DIR"/$dir ]] ; then
+		if [[ "$EUID" = "0" ]] ; then
+			chown -R root:root "$PKG_DIR"/$dir
+		else
+			chown -R $OWNER:$GROUP "$PKG_DIR"/$dir
+		fi
+		chmod 755 "$PKG_DIR"/$dir
+		find "$PKG_DIR"/$dir -type d -exec chmod 755 {} \;
+		find "$PKG_DIR"/$dir -type f -exec chmod 644 {} \;
+	fi
+done
+
+# seems the best we can do here, we have no way of reliably knowing whether a conf file
+# should be executable or not. xnitrc.* and some rc.* and even others may rightly
+# be executable. But any file in the toplevel of /etc should not be -not that I've seen, anyway.
+# And we can't use chmod 644, because the thing might really supposed to be 600
+# so use chmod ogu-x to just make sure the executable bit is not set.
+if [[ -d "$PKG_DIR"/etc ]] ; then
+	( cd "$PKG_DIR"/etc
+	#find -type f ! -name "rc.*" -a ! -name "xinitrc.*" -exec chmod 644 {} \;
+	find -maxdepth 1 -type f -exec chmod ogu-x {} \;
+	)
+fi
+
+if [[ -d "$PKG_DIR"/"$INIT_DIR" ]] ; then
+	chown root:root "$PKG_DIR"/"$INIT_DIR"/*
+fi
+
+if [[ -d "$PKG_DIR"/etc/X11/xinit ]] ; then
+	chown root:root "$PKG_DIR"/etc/X11/xinit/*
+	chmod 755 "$PKG_DIR"/etc/X11/xinit/*
+fi
+
+# remove PKG_DIR/usr/tmp if it's a link
+# Hmmm, this clashes with aaa-base
+# maybe we shoudn't even worry about it?...
+if [[ -L "$PKG_DIR"/usr/tmp ]] ; then
+	case $NAME in
+		aaa-base|aaa_base) : ;;
+		*) rm -f "$PKG_DIR"/usr/tmp ;;
+	esac
+fi
+
+cd $PKG_DIR
+check_pkg_perms
+if [[ ! $UNUSUAL_DIRS ]] && [[ ! $UNUSUAL_FILES ]] ; then
+	echo $GREEN"Done"$NORMAL
+else
+	#echo "Check files and/or dirs manually."
+	echo $CYAN"   Notice - "$NORMAL"These files and/or directories are listed for information only."
+	echo "     Corrections may not be needed, but you should check them to be sure."
+fi
+
+# correct perl .packlist files
+correct_perl_packlists
+
+echo -n $BLUE"Checking for dead links in PKG_DIR - "
+# create a list of all links in the package
+( cd $PKG_DIR && find * -type l > $SRC_DIR/links.list )
+# keep a copy of the original
+cp $SRC_DIR/links.list $SRC_DIR/links.list.orig
+# exclude any bad links
+HAVE_BAD_LINKS=0
+while read LINE ; do
+	DIR=$(dirname $LINE)
+	BASE=$(basename $LINE)
+	if ! cd $PKG_DIR/$DIR && readlink -e $BASE &> /dev/null ; then
+		TARGET=$( cd $PKG_DIR/$DIR && readlink $BASE )
+		case $TARGET in
+			dev/*|/dev/*) : ;;
+			*)	if  [[ $ALLOW_BAD_LINKS != 'YES' ]] ; then
+					HAVE_BAD_LINKS=1
+					BAD_LINKS="$BAD_LINKS $DIR/$BASE"
+				fi
+			;;
+		esac
+	fi
+done < $SRC_DIR/links.list
+if [[ $HAVE_BAD_LINKS = '1' ]] ; then
+	echo
+	echo $YELLOW"   Warning! "$NORMAL"Omitted dead link(s) from package:"
+	for BAD_LINKS in $BAD_LINKS ; do
+		echo "   $BAD_LINK"
+		rm -f $PKG_DIR/$BAD_LINK
+		grep -v $BAD_LINK $SRC_DIR/links.list > $SRC_DIR/links.list.tmp
+		mv $SRC_DIR/links.list.tmp $SRC_DIR/links.list
+	done
+	echo
+else
+	echo $GREEN"Done"$NORMAL
+fi
+
+# re-write the links.list to format DIR TARGET BASE
+while read LINE ; do
+	DIR=$(dirname $LINE)
+	BASE=$(basename $LINE)
+	TARGET=$( cd $PKG_DIR/$DIR && readlink $BASE )
+	echo $DIR $TARGET $BASE >> $SRC_DIR/links.list.tmp
+done < $SRC_DIR/links.list
+mv $SRC_DIR/links.list.tmp $SRC_DIR/links.list 2> /dev/null
+
+if [[ $PKG_FORMAT != 'txz' ]] ; then
+	# split the package if necessary
+	segregate_package
+fi
+
+# Remove libtool *.la files from main package, if requested 
+# This has to be done after segregate_package so that *.la files 
+# are included at least in any 'devel' package
+# -moved to 14A-last_minute_details
+
+# write package meta-data
+case "$EXTENDED_DATABASE" in
+	"YES"|"1") 
+		case $PKG_FORMAT in
+			'tpm') (cd $PKG_DIR && write_pkg_spec $PKG_DIR) ;;
+			*) (cd $PKG_DIR && write_meta_data $PKG_DIR) ;;
+		esac
+	;;
+esac
+
+}
+# end do_last_minute_details
+
+check_pkg_perms() {
+OLD_FIS=$IFS
+IFS='
+'
+if [[ $(find * -type d -a ! -user $USER -o -type d -a ! -group $GROUP -o -type d -a ! -perm 755 |egrep -v '(root|tmp|var/run|var/tmp|var/lock|var/spool/mail)') != "" ]] ; then
+	echo "" #"Hmmm..."
+	echo $CYAN"   Notice - "$NORMAL"Found directories with unusual owner, group or permissions:"
+	UNUSUAL_DIRS=1
+	for DIR in $(find * -type d -a ! -user $USER -o \
+	-type d -a ! -group $GROUP -o \
+	-type d -a ! -perm 755) ; do
+	
+		case "$DIR" in
+			""|root|tmp|var/tmp|var/lock|var/run|var/spool/mail) true ;;
+			#"") : ;;
+			*)	perms=$(stat -c %a $DIR)
+				owner=$(stat -c %U $DIR)
+				group=$(stat -c %G $DIR)
+				echo "     $perms $owner:$group $DIR"
+			;;
+		esac
+	done
+	
+fi
+# exclude some well-known 'offenders' this list will surely grow... until we need 
+# a more sophisticated routine to separate known exceptions.
+# *.pod files are usually 666, *.pm files are usually 444, *.wav files are usually 444
+PERM_EXCLUDES='(.pod$|.pm$|.wav$|.a$|.pl$)'
+if [[ $(find * -type f -a ! -user $USER -o -type f -a ! -group $GROUP -o -type f -a ! -perm 755 -a ! -perm 644 -a ! -perm 444 |egrep -v $PERM_EXCLUDES) != "" ]] ; then
+	echo "" #"Hmmm..."
+	echo $CYAN"   Notice - "$NORMAL"Found files with unusual owner, group or permissions:"
+	UNUSUAL_FILES=1
+	for FILE in $(find * -type f -a ! -user $USER -o \
+			-type f -a ! -group $GROUP -o \
+			-type f -a ! -perm 755 -a ! -perm 644 -a ! -perm 444 |egrep -v $PERM_EXCLUDES) ; do
+	
+		perms=$(stat -c %a $FILE)
+		owner=$(stat -c %U $FILE)
+		group=$(stat -c %G $FILE)
+		echo "     $perms $owner:$group $FILE"
+	done
+	
+fi
+IFS=$OLD_IFS
+}
+
+# compress binaries with upx-ucl, upx or exepak if requested and available
+compress_bins() {
+if [[ "$FAILED" = "" ]] ; then
+    if [[ $BIN_COMPRESSOR ]] ; then
+		if [[ $(which $BIN_COMPRESSOR 2> /dev/null) ]] ; then
+			BINCOMPRESSOR=$(which $BIN_COMPRESSOR)
+		else
+			echo "Binary compressor \"$BIN_COMPRESSOR\" not found"
+		fi
+    elif [[ $(which upx-ucl 2> /dev/null) ]] ; then
+		BINCOMPRESSOR=$(which upx-ucl)
+    elif [[ $(which upx 2> /dev/null) ]] ; then
+		BINCOMPRESSOR=$(which upx)
+    elif [[ $(which exepak 2> /dev/null) ]] ; then
+		BINCOMPRESSOR=$(which upx)
+	else
+		echo $CYAN"Notice! "$NORMAL"Compression of binaries was requested, but no compressor found."
+		BINCOMPRESSOR=""
+    fi
+	
+    cd "$PKG_DIR" ;
+    if [[ $BINCOMPRESSOR != "" ]] ; then
+	  echo $BLUE"Searching for binaries >$COMPRESSION_SIZE_LIMIT KB to compress: "$NORMAL
+	  # use find instead of hard-coded directory list:
+	  #for f in $(find * -type f |xargs -r file |grep ELF |grep 'executable' |cut -f1 -d :) ; do
+	  if [[ -f "$SRC_DIR"/$NAME-ELF-bins ]] ; then
+		cat /dev/null > "$SRC_DIR"/$NAME-compressed-bins
+		for f in $(cat "$SRC_DIR"/$NAME-ELF-bins) ; do
+			FILE_SIZE=$(du $f |cut -f1 -d'	')
+			if [[ $FILE_SIZE -gt $COMPRESSION_SIZE_LIMIT ]] ; then
+				echo -n $BLUE"   Compressing: "$NORMAL"$(basename $f) "
+				if [[ $QUIET != "YES" ]] ; then 
+					$BINCOMPRESSOR $BIN_COMPRESOR_OPTIONS $f
+					if [[ $? = 0 ]] ; then
+						NEW_FILE_SIZE=$(du $f |cut -f1 -d'	')
+						echo $GREEN"Done!"$NORMAL" Saved: $(( $FILE_SIZE - $NEW_FILE_SIZE ))KB ($FILE_SIZE/$NEW_FILE_SIZE)"
+						COMPRESSION_OKAY=1
+						if [[ "$DOCLIST" != "MINIMAL" ]] ; then
+							mkdir -p "$DOC_DIR"
+							echo "/$f" >> "$SRC_DIR"/$NAME-compressed-bins
+						fi
+					else
+						echo $YELLOW"Failed! "$NORMAL
+						COMPRESSION_FAILED=1
+					fi
+				else
+					$BINCOMPRESSOR $BIN_COMPRESOR_OPTIONS $f &> /dev/null
+					if [[ $? = 0 ]] ; then
+						NEW_FILE_SIZE=$(du $f |cut -f1 -d'	')
+						echo $GREEN"Done!"$NORMAL" Saved: $(( $FILE_SIZE - $NEW_FILE_SIZE ))KB ($FILE_SIZE/$NEW_FILE_SIZE)"
+						COMPRESSION_OKAY=1
+						if [[ "$DOCLIST" != "MINIMAL" ]] ; then
+							mkdir -p "$DOC_DIR"
+							echo "/$f">> "$SRC_DIR"/$NAME-compressed-bins
+						fi
+					else
+						echo $YELLOW"Failed! "$NORMAL
+						COMPRESSION_FAILED=1
+					fi
+				fi
+			else
+				continue
+			fi
+		done
+	    [[ $COMPRESSION_FAILED = 1 ]] && echo $CYAN"   Notice - "$NORMAL"Failures may mean COMPRESSION_SIZE_LIMIT is too low."
+	    if [[ $COMPRESSION_OKAY != 1 ]] ; then
+			echo $BLUE"Skipping - "$NORMAL"No binaries were compressed."
+	    elif [[ "$DOCLIST" != "MINIMAL" ]] ; then
+			echo "Some files in this package were compressed using '$BIN_COMPRESSOR'." > "$DOC_DIR"/$NAME-$BIN_COMPRESSOR.txt
+			echo "If you have trouble running any of the programs listed here, try" >> "$DOC_DIR"/$NAME-$BIN_COMPRESSOR.txt
+			echo "uncompressing the binary using the command '$BIN_COMPRESSOR -d prog-name'." >> "$DOC_DIR"/$NAME-$BIN_COMPRESSOR.txt
+			echo "If the program then runs normally, report the problem to the" >> "$DOC_DIR"/$NAME-$BIN_COMPRESSOR.txt
+			echo "person who created the program package." >> "$DOC_DIR"/$NAME-$BIN_COMPRESSOR.txt
+			echo "Programs compressed:" >> "$DOC_DIR"/$NAME-$BIN_COMPRESSOR.txt
+			#echo "NAME"$'\t'"Orig Size"$'\t'"Compressed size" >> "$DOC_DIR"/$NAME-$BIN_COMPRESSOR.txt
+			cat "$SRC_DIR"/$NAME-compressed-bins >> "$DOC_DIR"/$NAME-$BIN_COMPRESSOR.txt
+	    fi
+	  fi
+    fi
+	# if no compression succeeded, then remove the file
+	if ! [[ -s "$SRC_DIR"/$NAME-compressed-bins ]] ; then
+		rm -f "$SRC_DIR"/$NAME-compressed-bins
+	fi
+fi
+}
+
+handle_empty_files() {
+# first get rid of any zero-length files 
+if [[ $FORCE_ZERO_LENGTH != "YES" ]] ; then
+    cd "$PKG_DIR" ;
+    if [[ $(find $PKG_DIR -name "perllocal.pod" -o -name "*.bs") != "" ]] ; then
+		echo $CYAN"   Notice - "$NORMAL"Removing unneeded perl files: perllocal.pod or *.bs "
+		( cd $PKG_DIR ; find \( -name "*perllocal.pod" -o -name "*.bs" \) -exec rm -f {} \; )
+	fi
+	# ignore empty files under /etc, /usr/etc, var or /usr/var and also python '__init__.py' files
+	if [[ $(find * -type f -size 0 |egrep -v '^(etc|var|usr/etc|usr/var)|__init__.py$') != "" ]] ; then
+		echo $CYAN"NOTICE! "$NORMAL" Empty files were found in the package tree. These may"
+		echo "or may not be needed by the program. By default, src2pkg allows"
+		echo "empty files under /etc or /var but removes any others. Use the"
+		echo "option ALLOW_EMPTY_FILES=YES to allow all zero-length files."
+		echo $BLUE"List of removed files:"$NORMAL
+		for file in $(find * -type f -size 0 -print |egrep -v '^(etc|var|usr/etc|usr/var)') ; do
+			echo $file
+			rm -f $file
+		done
+    fi
+    find . -type f -name '*.gz' -size 20c | while read file ; do
+	echo "WARNING: Possible empty gzipped file $file"
+    done
+	
+	# Remove empty directories ? Nein, Danke
+	# find . -type d -depth -exec rmdir {} \; 2>/dev/null
+fi
+}
+
+check_dir_locations() {
+if [[ $FAIL_ON_BAD_DIRS != "NO" ]] ; then 
+   echo -n $BLUE"Checking for misplaced dirs - "$NORMAL
+   BAD_DIRS=0
+   # good policy dictates using --sysconfdir=/etc -not /usr/etc
+   if [[ "$FHS_POLICY" = "SLACK" ]] || [[ "$FHS_POLICY" = "LSB" ]] ; then
+	if [[ -d "$PKG_DIR"/usr/etc ]] ; then
+		echo
+		echo $CYAN"   Notice - "$NORMAL"Package contains /usr/etc directory. Normal $FHS_POLICY"
+		echo "     filesystem policy places config files under /etc. You should add"
+		echo '     --sysconfdir=/etc to the EXTRA_CONFIGS option (-e="???")!'
+		BAD_DIRS=1
+	fi
+	if [[ -d "$PKG_DIR"/usr/var ]] ; then
+		echo
+		echo $CYAN"   Notice - "$NORMAL"Package contains /usr/var directory. Normal $FHS_POLICY"
+		echo "     filesystem policy places log files under /var. You should add"
+		echo '     --localstatedir=/var to the EXTRA_CONFIGS option (-e="???")!'
+		BAD_DIRS=1
+	fi
+   fi
+   # if prefix is not /usr/local, then the package shouldn't contain usr/local
+   if [[ -d "$PKG_DIR"/usr/local ]] && [[ "${PRE_FIX:0:9}" != "usr/local" ]] ; then
+	echo
+	echo $CYAN"   Notice - "$NORMAL"Package contains /usr/local directory, but PRE_FIX is: /$PRE_FIX"
+	echo "   You may need to patch the Makefile(s) to correct the installation prefix."
+	BAD_DIRS=1
+   fi
+   # some evil installations create dirs or files in your $HOME dir -bad, bad, bad
+   if [[ -d $PKG_DIR$HOME ]] ; then
+	echo
+	echo $CYAN"   Notice - "$NORMAL"Package contains $HOME directory -your HOME directory."
+	echo "   You may need to patch the Makefile(s) to correct this."
+	BAD_DIRS=1
+   fi
+   # some faulty Makefiles create redundant links, dirs or files
+   if [[ -d $PKG_DIR$PKG_DIR ]] ; then
+	echo
+	echo $CYAN"   Notice - "$NORMAL"Package contains PKG_DIR directory."
+	echo "   This usually happens because of badly written Makefiles."
+	echo "   You may need to patch the Makefile(s) to correct this."
+	echo "   Or try using a different INSTALL_TYPE to fix this problem."
+	BAD_DIRS=1
+   fi
+   # some faulty Makefiles create redundant links, dirs or files
+   if [[ -d $PKG_DIR$SRC_DIR ]] ; then
+	echo
+	echo $CYAN"   Notice - "$NORMAL"Package contains SRC_DIR directory."
+	echo "   This usually happens because of badly written Makefiles."
+	echo "   You may need to patch the Makefile(s) to correct this."
+	echo "   Or try using a different INSTALL_TYPE to fix this problem."
+	BAD_DIRS=1
+   fi
+   if [[ -d "$PKG_DIR"/usr/usr ]] || [[ -d "$PKG_DIR"/$PRE_FIX/$PRE_FIX ]] ; then
+	  if [[ "$PRE_FIX" != "" ]] && [[ "$PRE_FIX" != "/" ]] ; then
+		echo
+		echo $CYAN"   Notice - "$NORMAL"Package contains redundant $PRE_FIX directories."
+		echo "   This is usually because of bad usage of DESTDIR in Makefiles."
+		echo "   Try using a different INSTALL_TYPE to fix this problem."
+		echo "   Otherwise, patch the Makefile(s) to correct this problem."
+		BAD_DIRS=1
+	  fi
+   fi
+   # if share contains anything used by the program(besides language files), then
+   # moving them may make them not found
+   if [[ -d "$PKG_DIR"/share ]] ; then
+	echo
+	echo $CYAN"   Notice - "$NORMAL"Package contains PKG_DIR/share."
+	echo "   This may happen because of using a null prefix or --prefix=/ "
+	echo "   $FHS_POLICY filesystem policy places shared data files under usr/share."
+	echo "   Add: '--datadir=/usr/share' to the EXTRA_CONFIGS option (-e="???")!"
+	BAD_DIRS=1
+   fi
+   # if the package contains TRANSL directory then installation went badly wrong
+   if [[ -d "$PKG_DIR"/TRANSL ]] ; then
+	echo
+	echo $CYAN"   Notice - "$NORMAL"Package contains PKG_DIR/TRANSL."
+	echo "   This indicates a serious failure using the 'JAIL' INSTALL_TYPE."
+	echo "   Try using the DESTDIR or other option for content creation."
+	BAD_DIRS=1
+   fi
+   for LOCATION in bin sbin ; do
+		if [[ -f "$PKG_DIR"/$LOCATION ]] ; then
+			echo
+			BAD_FILES=1
+			echo $CYAN"   Notice - "$NORMAL"Package contains a file PKG_DIR/$LOCATION"
+			echo "   This location is supposed to be a directory!"
+		elif [[ -f "$PKG_DIR"/$PRE_FIX/$LOCATION ]] ; then
+			echo
+			BAD_FILES=1
+			echo $CYAN"   Notice - "$NORMAL"Package contains a file PKG_DIR/$PRE_FIX/$LOCATION"
+			echo "   This location is supposed to be a directory!"
+		fi
+   done
+   if [[ $BAD_FILES = 1 ]] ; then
+		echo "   Installing such a package could cause harm your system."
+		echo "   This is usually caused by badly-written Makefiles."
+		echo "   Patch the Makefile(s) or otherwise correct this problem."
+   fi
+   if [[ $BAD_DIRS != 1 ]] && [[ $BAD_FILES != 1 ]] ; then
+    echo $GREEN"Done"$NORMAL
+   elif [[ $FAIL_ON_BAD_DIRS = "YES" ]] ; then
+    echo $RED"   FATAL! "$NORMAL"This build installs faulty directories or files."
+	echo "   You must fix the build as suggested above, or override this action with:"
+	echo "   FAIL_ON_BAD_DIRS=NO from the command-line or in your src2pkg.conf file."
+	FAILED='BAD_DIRS'
+   fi
+fi
+}
+
+check_for_hidden_files() {
+   cd $PKG_DIR ;
+   if [[ "$(find * -name ".*" ! -name ".packlist")" != "" ]] ; then
+	echo $CYAN"   Notice - "$NORMAL"Package contains hidden items:"
+	find * -name ".*" ! -name ".packlist" |while read LINE ; do
+		echo "     $LINE"
+	done
+	echo "    Check and correct if necessary."
+   fi
+}
+
+# used by segregate_package
+# duplicate any links from the main package in child package
+duplicate_pkg_dir_links() {
+	if  grep -q 'ln -sf' "$PKG_DIR"/install/$PKG_POSTINST ; then
+		grep 'ln -sf' "$PKG_DIR"/install/$PKG_POSTINST >> $PKG_POSTINST
+		# create referenced directories in the child package if needed
+		if [[ -s $PKG_POSTINST ]] ; then
+			# [[ $DEBUG ]] && echo $CYAN$'\n'"   Notice - "$NORMAL"Duplicating links from main package"
+			while read LINE ; do
+				# lines look like this: ( cd dir ; ln -sf ...
+				DIR=${LINE%% ;*}
+				DIR=${DIR#*( cd }
+				# strip any leading slashes
+				case $DIR in /*) DIR=${DIR#*/} ;; esac
+				! [[ -d $DIR ]] && mkdir -p $DIR
+			done < $PKG_POSTINST
+			# execute the script in the child package and then remove it
+			sh $PKG_POSTINST
+		fi
+		rm -f $PKG_POSTINST
+	fi
+}
+
+segregate_package() {
+if [[ "$SPLIT_PACKAGE" != "" ]] ; then
+	OLD_IFS=$IFS
+	IFS=','
+	for SPLITPKG in $SPLIT_PACKAGE ; do
+		case $SPLITPKG in
+			dev|devel)
+				IFS=$OLD_IFS
+				if [[ -f $CWD/$NAME-devel.files ]] ; then
+					DEVEL_LIST=$CWD/$NAME-devel.files
+					HAVE_DEVEL_LIST=1
+					sed -e "s/%VERSION%/$VERSION/g" \
+						-e "s/%SOVERS%/$SOVERS/g" $CWD/$NAME-devel.files > $SRC_DIR/$NAME-devel.files 
+				elif [[ -f $PATCHES_DIR/$NAME-patches/$NAME-devel.files ]] ; then
+					DEVEL_LIST=$PATCHES_DIR/$NAME-patches/$NAME-devel.files
+					HAVE_DEVEL_LIST=1
+					sed -e "s/%VERSION%/$VERSION/g" \
+						-e "s/%SOVERS%/$SOVERS/g"$PATCHES_DIR/$NAME-patches/$NAME-devel.files > $SRC_DIR/$NAME-devel.files
+				fi
+				# if we have a file list, use that
+				if [[ $HAVE_DEVEL_LIST = 1 ]] ; then
+					echo $BLUE"Separating content for: "$NORMAL"${NAME}-${DEVEL_TAG} (from $NAME-devel.files)"
+					while read LINE ; do
+						case $LINE in
+							''|'#'*) true ;;
+							*)
+								set $(echo $LINE)
+								Fsource=$(echo "$(eval echo $1)")
+								if [[ $2 ]] ; then
+									Fdest=$(echo "$(eval echo $2)")
+								else
+									Fdest=$(echo "$(eval echo $1)")
+								fi
+								mkdir -p "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/$(dirname $Fdest)
+								case $Fsource in
+									# if the file is not inside the package, then copy it instead of moving it
+									/*)  cp -a $Fsource "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/$Fdest ;;
+									*)  mv $PKG_DIR/$Fsource "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/$Fdest 
+										rmdir $(dirname $PKG_DIR/$Fsource) 2> /dev/null
+									;;
+								esac
+						esac
+					done < $SRC_DIR/$NAME-devel.files 
+					# remove any empty 'include' dirs from the PKG_DIR
+					for INCDIR in $(find "$PKG_DIR" -type d -name "include" ) ; do
+						if [[ $(find "$INCDIR" -type f) = "" ]] ; then
+							rmdir $INCDIR/* 2> /dev/null
+							rmdir $INCDIR 2> /dev/null
+						fi
+					done
+					# make the devel package depend on the main package
+					mkdir -p "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/install
+					echo "# $DEVEL_PKG_NAME" >> "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/install/$PKG_REQUIRED
+					echo "# Requires:" >> "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/install/$PKG_REQUIRED
+					echo "$SHORT_NAME" >> "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/install/$PKG_REQUIRED
+					if [[ -n $ADD_REQS_DEVEL ]] ; then
+						echo "# Automatically added from ADD_REQS_DEVEL: " >> "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/install/$PKG_REQUIRED
+						(IFS=, ; for REQ in $ADD_REQS_DEVEL ; do
+							case $REQ in
+								*_*) echo $REQ >> "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/install/$PKG_REQUIRED ;;
+								*)
+									IV=$(get_installed_version $REQ)
+									case $IV in
+										'') echo $REQ >> "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/install/$PKG_REQUIRED ;;
+										*) echo $IV >> "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/install/$PKG_REQUIRED ;;
+									esac
+								;;
+							esac
+						  done
+						)
+					fi
+					
+					if [[ -d $DOC_DIR ]] ; then
+						mkdir -p "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/$docdir/$NAME-$VERSION
+						cp -a $DOC_DIR/* "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/$docdir/$NAME-$VERSION
+					fi
+					
+					if [[ $EXTENDED_DATABASE = "YES" ]] ; then
+						if [[ $PKG_FORMAT != 'tpm' ]] ; then
+							# write the package meta-data
+							write_meta_data "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME
+						fi
+					fi
+					
+					segregate_sub_pkg_links move "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME
+					
+				# if there are headers or static libs listed for the main package, move them here
+				# also copy libtool *.la files here, but don't trigger on their presence as some
+				# packages with plugins which contain *.la files should not trigger the creation of a 'devel' package
+				elif [[ -s "$SRC_DIR"/$NAME-static-libs ]] \
+					|| [[ -s "$SRC_DIR"/$NAME-header-files ]] ; then
+					echo $BLUE"Separating content for: "$NORMAL"${NAME}-${DEVEL_TAG}"
+					rm -rf "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME
+					mkdir -p "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME
+					
+					if [[ -s "$SRC_DIR"/$NAME-header-files ]] ; then
+						while read header ; do
+							THIS_DIR="$(dirname $header)"
+							mkdir -p "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/$THIS_DIR
+							# ignore it if already moved above
+							cp -a "$PKG_DIR"/$header "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/$THIS_DIR
+							rm -f $"$PKG_DIR"/$header
+							if [[ $(find "$PKG_DIR"/$THIS_DIR -type f) = "" ]] ; then
+								rm -rf "$PKG_DIR"/$THIS_DIR
+							fi
+							if grep ${header##*/} "$PKG_DIR"/install/$PKG_POSTINST &> /dev/null; then
+								mkdir -p "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/install 2> /dev/null
+								grep ${header##*/} "$PKG_DIR"/install/$PKG_POSTINST >> "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/install/$PKG_POSTINST.tmp
+								grep -v ${header##*/} "$PKG_DIR"/install/$PKG_POSTINST >> "$PKG_DIR"/install/$PKG_POSTINST.tmp
+								mv "$PKG_DIR"/install/$PKG_POSTINST.tmp "$PKG_DIR"/install/$PKG_POSTINST
+							fi
+						done < "$SRC_DIR"/$NAME-header-files
+						
+						for INCDIR in $(find "$PKG_DIR" -type d -name "include" ) ; do
+							if [[ $(find "$INCDIR" -type f) = "" ]] ; then
+								rmdir $INCDIR/* 2> /dev/null
+								rmdir $INCDIR 2> /dev/null
+							fi
+						done
+					fi
+					if [[ -s "$SRC_DIR"/$NAME-libtool-files ]] ; then
+						while read FILE ; do
+							THIS_DIR="$(dirname $FILE)"
+							mkdir -p "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/$THIS_DIR
+							# copy, not move the *.la files, as they may be needed in the main package
+							if [[ $MOVE_LIBTOOL_FILES = "YES" ]] ; then
+								mv "$PKG_DIR"/$FILE "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/$THIS_DIR
+							else
+								cp -a "$PKG_DIR"/$FILE "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/$THIS_DIR
+							fi
+						done < "$SRC_DIR"/$NAME-libtool-files
+					fi
+					if [[ -s "$SRC_DIR"/$NAME-static-libs ]] ; then
+						while read FILE ; do
+							THIS_DIR="$(dirname $FILE)"
+							mkdir -p "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/$THIS_DIR
+							# move the file to the devel package
+							mv "$PKG_DIR"/$FILE "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/$THIS_DIR
+							# remove any empty dirs
+							if [[ $(find "$PKG_DIR"/$THIS_DIR -type f) = "" ]] ; then
+								#rm -rf "$PKG_DIR"/$THIS_DIR
+								rmdir "$PKG_DIR"/$THIS_DIR 2> /dev/null
+							fi
+						done < "$SRC_DIR"/$NAME-static-libs
+					fi
+					# also move pkgconfig and/or aclocal files
+					( cd "$PKG_DIR"
+						for DIR in $(find * -type d -a \( -name pkgconfig -o -name "aclocal*" \)) ; do
+							DIRNAME=$(dirname $DIR)
+							mkdir -p "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/$DIRNAME
+							mv "$DIR" "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/$DIRNAME
+						done
+						# put man2 and man3 files into the devel package
+						for DIR in $(find * -type d -a \( -name man2 -o -name man3 \)) ; do
+							DIRNAME=$(dirname $DIR)
+							mkdir -p "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/$DIRNAME
+							mv "$DIR" "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/$DIRNAME
+						done
+					)
+					# make the devel package depend on the main package
+					mkdir -p "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/install
+					echo "# $DEVEL_PKG_NAME" >> "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/install/$PKG_REQUIRED
+					echo "# Requires:" >> "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/install/$PKG_REQUIRED
+					echo "$SHORT_NAME" >> "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/install/$PKG_REQUIRED
+					
+					if [[ -n $ADD_REQS_DEVEL ]] ; then
+						echo "# Automatically added from ADD_REQS_DEVEL: " >> "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/install/$PKG_REQUIRED
+						(IFS=, ; for REQ in $ADD_REQS_DEVEL ; do
+							case $REQ in
+								*_*) echo $REQ >> "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/install/$PKG_REQUIRED ;;
+								*)
+									IV=$(get_installed_version $REQ)
+									case $IV in
+										'') echo $REQ >> "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/install/$PKG_REQUIRED ;;
+										*) echo $IV >> "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/install/$PKG_REQUIRED ;;
+									esac
+								;;
+							esac
+						  done
+						)
+					fi
+					
+					# since separation here occurs *before* separating docs content, devel packages get the full docs content.
+					if [[ -d $DOC_DIR ]] ; then
+						mkdir -p "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/$docdir/$NAME-$VERSION
+						cp -a $DOC_DIR/* "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME/$docdir/$NAME-$VERSION
+					fi
+					#if [[ $ADD_REQUIRED_FILE = "YES" ]] ; then
+						# ( cd "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME && gen_required_file )
+						#gen_required_file "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME 
+					#fi
+					if [[ $EXTENDED_DATABASE = "YES" ]] ; then
+						if [[ $PKG_FORMAT != 'tpm' ]] ; then
+						# write the package meta-data
+							write_meta_data "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME
+						fi
+					fi
+					
+					segregate_sub_pkg_links move "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME
+					
+				fi
+			;;
+			nls|i18n)
+				IFS=$OLD_IFS
+				rm -rf "$PKG_BUILDS_DIR"/$I18N_PKG_NAME
+				# put any international man-pages in the i18n package
+				if [[ -d $MAN_DIR ]] ; then
+					( cd $MAN_DIR && find * -maxdepth 0 -type d ! -name 'man?' 2> /dev/null > $SRC_DIR/man-pages-found )
+				fi
+				if [[ $(find "$PKG_DIR" -type d -a \( -name locale -o -name i18n -o -name nls \)) != "" ]] || \
+					[[ -s $SRC_DIR/man-pages-found ]] ; then
+					echo $BLUE"Separating content for: "$NORMAL"${NAME}-${I18N_TAG}"
+				fi
+				if [[ $(find "$PKG_DIR" -type d -a \( -name locale -o -name i18n -o -name nls \)) != "" ]] ; then
+					HAVE_I18N=YES
+					mkdir -p "$PKG_BUILDS_DIR"/$I18N_PKG_NAME
+					( cd "$PKG_DIR"
+						for DIR in $(find * -type d -a \( -name locale -o -name i18n -o -name nls \)) ; do
+							DIRNAME=$(dirname $DIR)
+							mkdir -p "$PKG_BUILDS_DIR"/$I18N_PKG_NAME/$DIRNAME
+							mv "$DIR" "$PKG_BUILDS_DIR"/$I18N_PKG_NAME/$DIRNAME
+						done
+					)
+				fi
+				if [[ -s $SRC_DIR/man-pages-found ]] ; then
+					HAVE_I18N=YES
+					mkdir -p "$PKG_BUILDS_DIR"/$I18N_PKG_NAME/$GOOD_MAN_PATH/
+					while read DIR ; do
+						mv $MAN_DIR/$DIR "$PKG_BUILDS_DIR"/$I18N_PKG_NAME/$GOOD_MAN_PATH/
+					done < $SRC_DIR/man-pages-found
+					
+					# The MAN_DIR (in main package) is not likely to be empty, but remove it if it is
+					rmdir "$MAN_DIR"/* 2> /dev/null
+					rmdir "$MAN_DIR" 2> /dev/null
+				fi
+				#rm -f $SRC_DIR/man-pages-found
+				if [[ $EXTENDED_DATABASE = "YES" ]] && [[ $HAVE_I18N = "YES" ]] ; then
+					if [[ $PKG_FORMAT != 'tpm' ]] ; then
+						# write the package meta-data
+						write_pkg_info "$PKG_BUILDS_DIR"/$I18N_PKG_NAME
+					fi
+				fi
+				if  [[ $HAVE_I18N = "YES" ]] ; then
+					segregate_sub_pkg_links move "$PKG_BUILDS_DIR"/$I18N_PKG_NAME
+				fi
+			;;
+			docs|doc)
+				IFS=$OLD_IFS
+				rm -rf "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME
+				# get the size of the docs -quieten error messages in case a dir doesn't exist
+				du -bs $DOC_DIR $MAN_DIR $INFO_DIR "$PKG_DIR"/$PRE_FIX/share/gtk-doc 2> /dev/null  > $SRC_DIR/DOCSIZE
+				if [[ -s $SRC_DIR/DOCSIZE ]] ; then
+					# we can't add zeros using bash math, so fool it
+					DOCSIZE=1
+					while read size dir ; do
+						if [[ $DOCSIZE != '' ]] ; then
+							DOCSIZE=$(( $DOCSIZE + $size))
+						fi
+					done < $SRC_DIR/DOCSIZE
+				fi
+				rm -f $SRC_DIR/DOCSIZE
+				# only create a docs package if the doc contents are above the DOC_SPLIT_SIZE limit
+				DOC_SPLIT_SIZE=$(( $DOC_SPLIT_SIZE * 1024 ))
+				if [ $DOCSIZE -gt $DOC_SPLIT_SIZE ] ; then
+					echo $BLUE"Separating content for: "$NORMAL"${NAME}-${DOCS_TAG}"
+					
+					if [[ -d "$DOC_DIR" ]] ; then
+						mkdir -p "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME/$GOOD_DOC_PATH/$NAME-$VERSION
+						( cd "$DOC_DIR" && mv * "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME/$GOOD_DOC_PATH/$NAME-$VERSION )
+						( cd "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME/$GOOD_DOC_PATH/$NAME-$VERSION && {
+								cp -a *README* *Readme* *ReadMe* *readme* *LICENSE* \
+								*license* *License* *COPYING* *COPYRIGHT* control copyright "$DOC_DIR" 2> /dev/null
+						  }
+						)
+					fi
+					if [[ -d "$PKG_DIR"/$PRE_FIX/share/gtk-doc ]] ; then
+						mkdir -p "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME/usr/share
+						( cd "$PKG_DIR"/$PRE_FIX/share && mv gtk-doc "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME/usr/share )
+						( cd "$PKG_DIR"/$PRE_FIX && rmdir share 2> /dev/null )
+					fi
+					if [[ $(find "$MAN_DIR" -type f 2> /dev/null) != "" ]] ; then
+						mkdir -p "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME/$GOOD_MAN_PATH
+						( cd "$MAN_DIR" && mv * "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME/$GOOD_MAN_PATH )
+						( cd  "$PKG_DIR" && rm -rf "$GOOD_MAN_PATH" )
+					fi
+					if [[ $(find "$INFO_DIR" -type f 2> /dev/null) != "" ]] ; then 
+						# write the postinst/postrm scripts first
+						write_install_info_postinst "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME
+						if [[ $EXTENDED_DATABASE = "YES" ]] ; then
+							write_install_info_postrm "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME
+						fi
+						# then move the files
+						mkdir -p "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME/$GOOD_INFO_PATH
+						( cd "$INFO_DIR" && mv * "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME/$GOOD_INFO_PATH )
+						( cd  "$PKG_DIR" && rm -rf "$GOOD_INFO_PATH" )
+					fi
+					
+					if [[ -d "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME ]] ; then
+						if [[ $EXTENDED_DATABASE = "YES" ]] ; then
+							if [[ $PKG_FORMAT != 'tpm' ]] ; then
+								# write the package meta-data
+								write_pkg_info "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME
+							fi
+						fi
+						# copy/move -hmmm, maybe leave links in the main package?
+						segregate_sub_pkg_links copy "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME
+					fi
+				else
+					echo $CYAN"   Notice - "$NORMAL"Skipping creation of docs package (below $(( $DOC_SPLIT_SIZE / 1024 ))K size limit)"
+				fi
+			;;
+			solibs|libs)
+				IFS=$OLD_IFS
+				HAVE_SOLIBS_LIST=0
+				if [ -f $CWD/$NAME-solibs.files ] ; then
+					HAVE_SOLIBS_LIST=1
+					sed -e "s/%VERSION%/$VERSION/g" \
+						-e "s/%SOVERS%/$SOVERS/g" $CWD/$NAME-solibs.files > $SRC_DIR/$NAME-solibs.files
+				elif [ -f $PATCHES_DIR/$NAME-patches/$NAME-solibs.files ] ; then
+					HAVE_SOLIBS_LIST=1
+					sed -e "s/%VERSION%/$VERSION/g" \
+						-e "s/%SOVERS%/$SOVERS/g" $PATCHES_DIR/$NAME-patches/$NAME-solibs.files > $SRC_DIR/$NAME-solibs.files
+				fi
+				
+				# if we have a file list, use that
+				if [[ $HAVE_SOLIBS_LIST = 1 ]] ; then
+					echo $BLUE"Copying content for: "$NORMAL"${NAME}-${SOLIBS_TAG} (from $NAME-solibs.files)"
+					while read LINE ; do
+						case $LINE in
+							''|'#'*) : ;;
+							*) set $(echo $LINE)
+								Fsource=$(echo "$(eval echo $1)")
+								if [[ $2 ]] ; then
+									Fdest=$(echo "$(eval echo $2)")
+								else
+									Fdest=$(echo "$(eval echo $1)")
+								fi
+								mkdir -p "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME/$(dirname $Fdest)
+								case $Fsource in
+									/*)  cp -a $Fsource "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME/$Fdest ;;
+									*)  cp -a $PKG_DIR/$Fsource "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME/$Fdest ;;
+								esac
+							;;
+						esac
+					done < $SRC_DIR/$NAME-solibs.files
+					
+					# if there are any config files for the main package, the solibs may need them also
+					# if so, make sure they are listed above
+					
+					skipit() {
+					# since separation here occurs *after* separating docs content, solibs packages only get the minimal docs left over.
+					if [[ -d $DOC_DIR ]] ; then
+						mkdir -p "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME/$docdir/$NAME-$VERSION
+						cp $DOC_DIR/* "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME/$docdir/$NAME-$VERSION
+					fi
+					
+					mkdir -p "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME/install
+					if [[ $ADD_REQUIRED_FILE = "YES" ]] ; then
+						if [[ $PKG_FORMAT != 'tpm' ]] ; then
+							# ( cd "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME && gen_required_file )
+							gen_required_file "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME
+						fi
+					fi
+					###
+					if [[ $EXTENDED_DATABASE = "YES" ]] ; then
+						if [[ $PKG_FORMAT != 'tpm' ]] ; then
+							# write the package meta-data
+							write_meta_data "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME
+						fi
+					fi
+					
+					segregate_sub_pkg_links copy "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME
+					# we allow creation of the manifest to be individually blocked even when using EXTENDED_DATABASE=YES.
+					# This is done mostly because of the kernel source package which contains over 40,000 files and directories
+					# Generating the manifest for it takes a *very* long time and the need to have a manifest for it is doubtful.
+					# We also added the '--no-manifest' option to tpkg-make to do the same thing when making custom packages
+					if [[ $ADD_MANIFEST_FILE != "NO"  ]] ; then
+						gen_pkg_manifest "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME
+					fi
+					}
+				elif [[ -s "$SRC_DIR"/$NAME-ELF-libs ]] ; then
+					echo $BLUE"Copying content for: "$NORMAL"${NAME}-${SOLIBS_TAG}"
+					rm -rf "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME
+					mkdir -p "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME
+					( cd $"$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME && {
+						while read LIB ; do
+							DIRNAME=$(dirname $LIB)
+							mkdir -p $DIRNAME
+							cp -a "$PKG_DIR"/$LIB $DIRNAME
+							BASE=$(basename $LIB) 
+							# let ldconfig create main links
+							( cd $DIRNAME &&  ldconfig -l $BASE )
+							# dont try to link a file to its' own name
+							if [[ "$BASE" != "${BASE%%.*}.so" ]] ; then
+								# dont create simple *.so link in lib/
+								case "$DIRNAME/" in
+									lib/) : ;;
+									*)	( cd $DIRNAME &&  ln -sf $BASE ${BASE%%.*}.so ) ;;
+								esac
+							fi
+							#cp -a --parents "$PKG_DIR"/$DIRNAME $DIRNAME
+						done < "$SRC_DIR"/$NAME-ELF-libs
+					  }
+					)
+						
+						# if there are any config files for the main package, the solibs may need them also
+						# but this is probably not the case. If someone needs etc, let them use $NAME-solibs.files
+						#if [[ -d "$PKG_DIR"/etc ]] ; then
+						#	cp -a "$PKG_DIR"/etc "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME/etc
+						#fi
+						if [[ -s $SRC_DIR/$NAME-libtool-files ]] ; then
+							while read FILE ; do
+								DIR=${FILE%/*}
+								mkdir -p "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME/$DIR
+								cp $PKG_DIR/$FILE "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME/$DIR
+							done < $SRC_DIR/$NAME-libtool-files 
+						fi
+						
+						if [[ -n $ADD_REQS_SOLIBS ]] ; then
+							mkdir -p "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME/install
+							echo "# $SOLIBS_PKG_NAME" >> "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME/install/$PKG_REQUIRED
+							echo "# Requires:" >> "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME/install/$PKG_REQUIRED
+							echo "# Automatically added from ADD_REQS_SOLIBS: " >> "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME/install/$PKG_REQUIRED
+							(IFS=, ; for REQ in $ADD_REQS_DEVEL ; do
+								case $REQ in
+									*_*) echo $REQ >> "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME/install/$PKG_REQUIRED ;;
+									*)
+										IV=$(get_installed_version $REQ)
+										case $IV in
+											'') echo $REQ >> "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME/install/$PKG_REQUIRED ;;
+											*) echo $IV >> "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME/install/$PKG_REQUIRED ;;
+										esac
+									;;
+								esac
+							done
+							)
+						elif [[ -f $PKG_DIR/install/$PKG_REQUIRED ]] ; then
+							# duplicate the PKG_REQUIRED file from the main package, except for the name
+							# this is weak as the solibs packge may contain less libs than the main package
+							mkdir -p install
+							cp "$PKG_DIR"/install/$PKG_REQUIRED "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME/install
+							# correct the package name for kiss or slackware style packages -but only first line
+							sed -i -e "s%${NAME}_${VERSION}%${NAME}-solibs_${VERSION}%" "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME/install/$PKG_REQUIRED
+							sed -i -e "s%${NAME}-${VERSION}%${NAME}-solibs-${VERSION}%" "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME/install/$PKG_REQUIRED
+						fi
+						
+						skipme() {
+						if [[ -d $DOC_DIR ]] ; then
+							mkdir -p "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME/$docdir/$NAME-$VERSION
+							cp $DOC_DIR/* "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME/$docdir/$NAME-$VERSION
+						fi
+						
+						if [[ $EXTENDED_DATABASE = "YES" ]] ; then
+							if [[ $PKG_FORMAT != 'tpm' ]] ; then
+								# write the package meta-data
+								write_meta_data "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME
+							fi
+						fi
+						# copy any links which point to files in this sub-package
+						segregate_sub_pkg_links copy "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME
+						}
+				fi
+				
+				# since separation here occurs *after* separating docs content, solibs packages only get the minimal docs left over.
+				if [[ -d $DOC_DIR ]] ; then
+					mkdir -p "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME/$docdir/$NAME-$VERSION
+					cp $DOC_DIR/* "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME/$docdir/$NAME-$VERSION
+				fi
+				
+				
+				segregate_sub_pkg_links copy "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME
+				mkdir -p "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME/install
+				if [[ $ADD_REQUIRED_FILE = "YES" ]] ; then
+					if [[ $PKG_FORMAT != 'tpm' ]] ; then
+						# ( cd "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME && gen_required_file )
+						gen_required_file "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME
+					fi
+				fi
+				###
+				if [[ $EXTENDED_DATABASE = "YES" ]] ; then
+					if [[ $PKG_FORMAT != 'tpm' ]] ; then
+						# write the package meta-data
+						write_meta_data "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME
+					fi
+				fi
+				
+				# segregate_sub_pkg_links copy "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME
+				
+				# we allow creation of the manifest to be individually blocked even when using EXTENDED_DATABASE=YES.
+				# This is done mostly because of the kernel source package which contains over 40,000 files and directories
+				# Generating the manifest for it takes a *very* long time and the need to have a manifest for it is doubtful.
+				# We also added the '--no-manifest' option to tpkg-make to do the same thing when making custom packages
+				if [[ $ADD_MANIFEST_FILE != "NO"  ]] ; then
+					if [[ $PKG_FORMAT != 'tpm' ]] ; then
+						gen_pkg_manifest "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME
+					fi
+				fi
+			;;
+		esac
+	IFS=','
+	done
+	IFS=$OLD_IFS
+fi
+}
+
+#
+correct_perl_packlists() { 
+	cd $PKG_DIR
+	if [[ $(find -name .packlist) != '' ]] ; then
+		[[ $DEBUG ]] && echo $CYAN"   Notice - "$NORMAL"Correcting perl packlist files"
+	fi
+	for PACKLIST in $(find -name .packlist) ; do
+		sed -e "s%$PKG_DIR%%g" \
+			-e "s%\.1$%\.1\.$MAN_COMPRESS_EXT%g" \
+			-e "s%\.2$%\.2\.$MAN_COMPRESS_EXT%g" \
+			-e "s%\.3$%\.3\.$MAN_COMPRESS_EXT%g" \
+			-e "s%\.3pm$%\.3pm\.$MAN_COMPRESS_EXT%g" \
+			-e "s%\.4$%\.4\.$MAN_COMPRESS_EXT%g" \
+			-e "s%\.5$%\.5\.$MAN_COMPRESS_EXT%g" \
+			-e "s%\.6$%\.6\.$MAN_COMPRESS_EXT%g" \
+			-e "s%\.7$%\.7\.$MAN_COMPRESS_EXT%g" \
+			-e "s%\.8$%\.8\.$MAN_COMPRESS_EXT%g" \
+			${PACKLIST} > ${PACKLIST}.new
+			mv -f ${PACKLIST}.new ${PACKLIST}
+	done
+}
+
+# handle sub_pkg_links
+segregate_sub_pkg_links() {
+	MODE=$1
+	THIS_DIR=$2
+	# only do this if there are links in the list
+	if [[ -s $SRC_DIR/links.list ]] ; then
+		cd $THIS_DIR
+		#[[ $DEBUG ]] && echo "   Checking for links to files in: ${THIS_DIR##*/}"
+		
+		while read DIR TARGET BASE ; do
+			case $TARGET in
+				'/'*) # Convert absolute links to relative ones
+					TARGET=${TARGET:1}
+					STUB=$DIR
+					TARGET="../$TARGET"
+					while : ; do
+						STUB=$(dirname $STUB)
+						case $STUB in
+							'.'|'') break ;;
+						esac
+						TARGET="../$TARGET"
+					done
+				;;
+			esac
+			if [[ -d $DIR ]] ; then
+				# if the target of this link is in this sub-package
+				if ( cd $DIR && stat  -L $TARGET &> /dev/null ) ; then
+					if [[ $MODE = 'move' ]] ; then
+						# only remove the original link if the TARGET is no longer in main package
+						if ( cd "$PKG_DIR"/$DIR 2> /dev/null && stat  -L $TARGET &> /dev/null ) ; then
+							# is this non-reachable??
+							[[ $DEBUG ]] && echo "      Copying link from PKG_DIR: $DIR/$BASE"
+						else
+							[[ $DEBUG ]] && echo "      Moving link from PKG_DIR: $DIR/$BASE"
+							rm -f $PKG_DIR/${DIR}/${BASE}
+							# quietly remove DIR and any empty parents
+							( cd $PKG_DIR && while [[ $DIR != '.' ]] ; do
+								rmdir $DIR 2> /dev/null
+								DIR=$(dirname $DIR)
+							done
+							)
+						fi
+					else
+						[[ $DEBUG ]] && echo "      Copying link from PKG_DIR: $DIR/$BASE"
+					fi
+					echo "( cd $DIR ; rm -rf $BASE )" >> doinst.links
+					echo "( cd $DIR ; ln -sf $TARGET $BASE )" >> doinst.links
+					echo "$DIR/$BASE $TARGET" >> links.list
+				fi
+			else
+				mkdir -p $DIR
+				if ( cd $DIR && stat  -L $TARGET &> /dev/null ) ; then
+					# the target exists in this sub-package
+					if [[ $MODE = 'move' ]] ; then
+						# only remove the original link if the TARGET is no longer in main package
+						if ( cd $DIR && stat  -L $TARGET &> /dev/null ) ; then
+							# is this non-reachable??
+							[[ $DEBUG ]] && echo "      Copying link from PKG_DIR: $DIR/$BASE"
+						else
+							[[ $DEBUG ]] && echo "      Moving link from PKG_DIR"
+							rm -f $PKG_DIR/${DIR}/${BASE}
+							# quietly remove DIR and any empty parents
+							( cd $PKG_DIR && while [[ $DIR != '.' ]] ; do
+								rmdir $DIR 2> /dev/null
+								DIR=$(dirname $DIR)
+							done
+							)
+						fi
+					else
+						[[ $DEBUG ]] && echo "      Copying link from PKG_DIR: $DIR/$BASE"
+					fi
+					echo "( cd $DIR ; rm -rf $BASE )" >> doinst.links
+					echo "( cd $DIR ; ln -sf $TARGET $BASE )" >> doinst.links
+					echo "$DIR/$BASE $TARGET" >> links.list
+				else
+					# remove DIR and any empty parents
+					while [[ $DIR != '.' ]] ; do
+						rmdir $DIR 2> /dev/null
+						DIR=$(dirname $DIR)
+					done
+				fi
+			fi
+		done < $SRC_DIR/links.list
+	else
+		[[ $PEDANTIC ]] && echo "   Main package contains no links"
+	fi
+	
+}

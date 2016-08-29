@@ -1,0 +1,52 @@
+#!/bin/bash
+THISDIR=$(pwd)
+EXEC_NAME="${0##*/}"
+
+# This is used to build repo-style -comment out to use default dirs
+# sources are in a directory relative to this one
+#export SOURCES_DIR=`pwd`/../../Sources/g
+# place packages in a common directory relative to this one
+#export PKG_DEST_DIR=`pwd`/../../Packages
+
+# -I is used for chain builds where packages need to be installed
+# -W will cleanup -only use this when you are sure everything builds cleanly
+# -X use -X if you are running a list of src2pkg scripts in directories
+TRANSIENT_OPTIONS="-I -W"
+
+# BUILD_LIST can be a list of directories in the THISDIR
+#BUILD_LIST="$(ls $THISDIR)"
+# or use a fixed list if you need to specify the list or order
+BUILD_LIST="libibcommon libibumad libibmad opensm infiniband-diags ibsim"
+
+echo "Running $EXEC_NAME in $THISDIR"
+echo ""
+for dir in $BUILD_LIST ; do
+	# pushd and popd aren't really needed but it doesn't hurt
+	#pushd $THISDIR
+	cd $THISDIR
+	if [[ -d $dir ]] ; then
+	 # ignore non-directories in THISDIR
+	 cd $dir
+	 
+	 # Assuming that each directory contains a .src2pkg build script
+	 #echo "Running src2pkg $TRANSIENT_OPTIONS in $dir"
+	 #src2pkg $TRANSIENT_OPTIONS
+	 
+	 # Or, if the BUILD_LIST is directories with a tarball in them
+	 # This is a very crude way to look for archives
+	 TARBALL=$(ls *.tar.bz2 2> /dev/null)
+	 [[ "$TARBALL" = "" ]] && TARBALL=$(ls *.tar.gz 2> /dev/null)
+	 [[ "$TARBALL" = "" ]] && TARBALL=$(ls *.rpm 2> /dev/null)
+	 if [[ "$TARBALL" != "" ]] ; then
+		echo "Running src2pkg $TRANSIENT_OPTIONS for $TARBALL"
+		src2pkg $TRANSIENT_OPTIONS $TARBALL
+		echo ""
+	 else
+		echo "No tarball found in $dir !!"
+	 fi
+	fi
+	#popd $THISDIR
+
+done
+
+

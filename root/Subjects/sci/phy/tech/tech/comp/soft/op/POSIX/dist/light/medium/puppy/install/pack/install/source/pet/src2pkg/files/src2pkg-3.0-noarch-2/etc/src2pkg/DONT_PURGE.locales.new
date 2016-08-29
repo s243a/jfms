@@ -1,0 +1,16 @@
+####################################################
+# This is the configuration file for the localepurge
+# function used in Amigo src2pkg scripts and by the
+# programs 'src2pkg' & 'trackinstall'.
+#
+# When purging is activated, locale files listed here
+# will NOT be removed.
+# See the file /etc/src2pkg/all-locales.txt for the
+# full listing of LOCALE and language types.
+
+#####################################################
+# These locales won't be deleted from the package:
+C
+en
+en_US
+en_US.UTF-8

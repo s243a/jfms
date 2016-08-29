@@ -1,0 +1,601 @@
+#!/bin/bash
+# sb2sp Copyright 2009-2013 Gilbert Ashley
+# sb2sp converts some SlackBuild scripts to src2pkg format
+SB2SP_VERSION=0.8
+
+CWD=$(pwd) ; export CWD
+
+# ANSI COLORS
+CRE="[K"
+NORMAL="[0;39m"
+# RED: Failure or error message
+RED="[1;31m"
+# GREEN: Success message
+GREEN="[1;32m"
+# YELLOW: Warnings
+YELLOW="[1;33m"
+# BLUE: Summary messages
+BLUE="[1;34m"
+# CYAN: Current Process
+CYAN="[1;36m"
+
+show_usage() {
+echo " sb2sp - Convert a SlackBuild script into a src2pkg script."
+echo " sb2sp [--simple,--debug] name-of-slackbuild"
+echo ""
+echo "   --simple   Try to write a simple src2pkg script using"
+echo "              using the configure script options from the"
+echo "              original, if used. If the original script"
+echo "              doesn't have the ./configure command, then"
+echo "              a longer src2pkg script is written using"
+echo "              a 'build' function with the extracted code."
+echo ""
+echo "   --debug    Preserve the temporary files created by sb2sp."
+echo ""
+exit
+}
+
+# if run without arguments, show the help
+if ! [[ $1 ]] ; then
+	show_usage
+fi
+# parse the command-line arguments
+for OPT in $@ ; do
+	case $OPT in
+		--debug) DEBUG=1 ; shift ;;
+		--simple) SIMPLE=1 ; shift ;;
+		*.SlackBuild) SCRIPT=$OPT ; NAME="$(echo $OPT |cut -f1 -d'.')" ; shift ;;
+		--help) show_usage ;;
+		*) echo "Unrecognized option: $OPT" ; exit 1 ;;
+	esac
+done
+
+# don't even try to convert armedslack scripts :-(
+if [[ $(grep 'armedslack' $SCRIPT) ]] ; then
+	echo $RED"Failed! "$NORMAL"Unable to convert this type of SlackBuild."
+	exit 1
+fi
+# remove stale files from previous runs
+for TMP_FILE in  $NAME.tmp1 $NAME.tmp2 $NAME.src2pkg.auto ; do
+	rm -f $TMP_FILE
+done
+
+touch $NAME.tmp1 $NAME.tmp2
+
+# use 'cat' so that escaped newlines get removed
+cat $NAME.SlackBuild |while read LINE ; do
+	# Using a case test for each of these speeds things up a lot
+	# cut re-direction commands off
+	# this causes problems with lines like: if $(which sometool > /dev/null 2>&1); then
+	#if [[ $(echo $LINE |grep 'tee') ]] ; then
+	#	LINE="$(echo "${LINE%%'2>'*}")"
+	#fi
+	case $LINE in *tee*) LINE="$(echo "${LINE%%'2>'*}")" ;; esac
+	# this might also be done, but better not
+	#LINE=$(echo "${LINE%%'|| exit 1'*}")
+	case $LINE in *'make -j${NJOBS}'*) LINE="${LINE//make -j\$\{NJOBS\}/make -j1}" ;; esac
+	case $LINE in *'make -j'*) LINE="$(echo ${LINE} |sed "s,make -j..,make -j\$\{NUMJOBS\} ,")" ;; esac
+	# changing log-file names not needed since we already stripped off redirection above
+	#LINE="${LINE//configure-\$\{PRGNAM\}/\$NAME-configure}"
+	#LINE="${LINE//make-\$\{PRGNAM\}/\$NAME-make}"
+	#LINE="${LINE//install-\$\{PRGNAM\}/\$NAME-make-install}"
+	case $LINE in *'$PRGNAM'*) LINE="${LINE//\$PRGNAM/\$NAME}" ;; esac
+	case $LINE in *'${PRGNAM}'*) LINE="${LINE//\$\{PRGNAM\}/\$NAME}" ;; esac
+	case $LINE in *'$SRCDIR'*) LINE="${LINE//\$SRCDIR/\"\$SRC_DIR\"}" ;; esac
+	case $LINE in *'${PKG}'*) LINE="${LINE//\$\{PKG\}/\"\$PKG_DIR\"}" ;; esac
+	case $LINE in *'$PKG/'*) LINE="${LINE//\$PKG\//\"\$PKG_DIR\"\/}" ;; esac
+	# case $LINE in *'DESTDIR=$PKG'*) LINE="${LINE//DESTDIR\=\$PKG/DESTDIR\=\$PKG_DIR}" ;; esac
+	# this handles INSTALL_ROOT and other cases besides DESTDIR
+	case $LINE in *'=$PKG'*) LINE="${LINE//\=\$PKG/\=\"\$PKG_DIR\"}" ;; esac
+	case $LINE in *SLKLDFLAGS*) LINE="${LINE//SLKLDFLAGS/LDFLAGS}" ;; esac
+	case $LINE in *SLKCFLAGS*) LINE="${LINE//SLKCFLAGS/CFLAGS}" ;; esac
+	case $LINE in *SLKCXXFLAGS*) LINE="${LINE//SLKCXXFLAGS/CXXFLAGS}" ;; esac
+	#LINE="${LINE//SLKLDFLAGS/LDFLAGS}"
+	#LINE="${LINE//SLKCFLAGS/CFLAGS}"
+	#LINE="${LINE//SLKCXXFLAGS/CFLAGS}"
+	# Aha! capture the output with tracklist instead of installwatch -src2pkg can then check DESTDIR for errors.
+	case $LINE in
+		*'if $( which installwatch'*) LINE="${LINE//if \$\( which installwatch/if \$\( which tracklist}" ;;
+		*'if $(which installwatch'*) LINE="${LINE//if \$\(which installwatch/if \$\(which tracklist}" ;;
+	esac
+	case $LINE in *'installwatch -o'*'${PRGNAM}'*) 
+		#LINE="${LINE//installwatch -o \$OUTPUT\/install-\$\{PRGNAM\}.log/tracklist -q -b -o \"\$SRC_DIR\"\/tracklist-files}" ;;
+		LINE="${LINE//installwatch -o \$OUTPUT\/install-\$\{PRGNAM\}.log/\$\{VERIFY\}}" ;;
+	esac
+	case $LINE in *'installwatch -o'*'$NAME'*) 
+		#LINE="${LINE//installwatch -o \$OUTPUT\/install-\$\{PRGNAM\}.log/tracklist -q -b -o \"\$SRC_DIR\"\/tracklist-files}" ;;
+		LINE="${LINE//installwatch -o \$OUTPUT\/install-\$NAME.log/\$\{VERIFY\}}" ;;
+	esac
+	case $LINE in make*' install'*) 
+		LINE="\$\{VERIFY\} $LINE" ;;
+	esac
+	# [[ -n "$LINE" ]] && echo "$LINE" >> $NAME.tmp1
+	echo "$LINE" >> $NAME.tmp1
+done
+
+# filter each line to remove selected options which src2pkg handles automatically
+cat $NAME.tmp1 |while read LINE ; do
+	for CHUNK in $LINE ; do
+		case "${CHUNK}" in
+			# Compiler flags
+			# LDFLAGS*|CFLAGS*|CXXFLAGS*) true ;;
+			# cross-compile options
+			*build*|*target*|*host*) true ;;
+			# standard document dirs that src2pkg handles
+			*mandir*|*infodir*|*docdir*) true ;;
+			# take even these out -many SlackBuild writers add
+			# these by default -even when they are not needed
+			*program-prefix*|*program-suffix*) true ;;
+			# We don't want these if they are not needed:
+			# *sysconfdir*|*localstatedir*) true ;;
+			*) REBUILT_LINE="$REBUILT_LINE $CHUNK" ;;
+		esac
+	done
+	while [[ "${REBUILT_LINE:0:1}" = " " ]] ; do
+		REBUILT_LINE="${REBUILT_LINE:1}"
+	done
+	echo "$REBUILT_LINE" >> $NAME.tmp2
+	REBUILT_LINE=
+done
+
+# find a START point for copying lines from the SlackBuild
+if [[ $(grep '() {' $NAME.tmp2 |grep -v 'config() {') != "" ]] ; then 
+	# included functions
+	START=$(grep -n '() {' $NAME.tmp2 |grep -v 'config() {' |cut -f1 -d:)
+elif [[ $(grep 'echo Building ...' $NAME.tmp2) ]] ; then
+	# Eric hameleers scripts
+	START=$(grep -n 'echo Building ...' $NAME.tmp2 |cut -f1 -d:)
+	START=$(( $START + 1 ))
+elif [[ $(grep './configure' $NAME.tmp2) ]] ; then 
+	# ordinary simple script with (probably) autoconf
+	START=$(grep -n './configure' $NAME.tmp2 |head -n 1 |cut -f1 -d:)
+elif [[ $(grep 'cmake' $NAME.tmp2) ]] ; then 
+	# cmake
+	START=$(grep -n 'cmake' $NAME.tmp2 |cut -f1 -d:)
+elif [[ $(grep 'xmkmf' $NAME.tmp2) ]] ; then 
+	# imake
+	START=$(grep -n 'xmkmf' $NAME.tmp2 |cut -f1 -d:)
+elif [[ $(grep '^find' $NAME.tmp2 |grep 'perm' |grep -m 1 'chmod') ]] ; then
+	# find the line where source perms get set
+	START=$(grep -n '^find' $NAME.tmp2 |grep 'perm' |grep -m 1 'chmod' |cut -f1 -d:)
+	START=$(( $START + 1 ))
+elif [[ $(grep 'chmod -R a-s,u+rw,go-w+r .' $NAME.tmp2) ]] ; then
+	# SlackBuilds.org - find the line where source perms get set
+	START=$(grep -n 'chmod -R a-s,u+rw,go-w+r .' $NAME.tmp2 |cut -f1 -d:)
+	START=$(( $START + 1 ))
+elif [[ $(grep 'chmod -R u+w,go+r-w,a-s .' $NAME.tmp2) ]] ; then
+	# PhantomX - find the line where source perms get set
+	START=$(grep -n 'chmod -R u+w,go+r-w,a-s .' $NAME.tmp2 |cut -f1 -d:)
+	START=$(( $START + 1 ))
+fi
+
+# find an END point for copying lines from the SlackBuild
+if [[ $(grep '# Add documentation:' $NAME.tmp2) ]] ; then
+	# Hameleers
+	END=$(eval echo $(grep -n '# Add documentation:' $NAME.tmp2 |cut -f1 -d:))
+	#END=$(( $END - 1 ))
+elif [[ $(grep '# Add some documentation to the package:' $NAME.tmp2) ]] ; then
+	# PhantomX
+	END=$(eval echo $(grep -n '# Add some documentation to the package:' $NAME.tmp2 |cut -f1 -d:))
+	#END=$(( $END - 1 ))
+## strip??
+elif [[ $(grep '# Add a documentation directory:' $NAME.tmp2) ]] ; then
+	# PhantomX
+	END=$(eval echo $(grep -n '# Add a documentation directory:' $NAME.tmp2 |cut -f1 -d:))
+	END=$(( $END - 1 ))
+elif [[ $(grep '^mkdir -p ${DOCDIR}' $NAME.tmp2) ]] ; then
+	# last ditch (some noarch builds which have no 'strip' commands
+	END=$(grep -n 'mkdir -p ${DOCDIR}' $NAME.tmp2 |cut -f1 -d:)
+	#END=$(( $END - 1 ))
+elif [[ $(grep '^mkdir -p $PKG/usr/doc' $NAME.tmp2) ]] ; then
+	# last ditch (some noarch builds which have no 'strip' commands
+	END=$(grep -n 'mkdir -p $PKG/usr/doc' $NAME.tmp2 |cut -f1 -d:)
+elif [[ $(grep '^# Strip binaries:' $NAME.tmp2 ) ]] ; then
+	# some generic or official SlackBuilds
+	END=$(eval echo $(grep -n '^# Strip binaries:' $NAME.tmp2 |cut -f1 -d:))
+	END=$(( $END - 1 ))
+elif [[ $(grep '^find ' $NAME.tmp2 |grep xargs |grep strip) ]] ; then
+	# some official SlackBuilds
+	END=$(grep -n '^find ' $NAME.tmp2 |grep xargs |grep strip |tail -n 1 |cut -f1 -d:)
+	END=$(( $END - 1 ))
+else
+	# even more last ditch for packages with no docs either
+	# this means nearly the whole SlackBuild is in the 'build' function
+	END=$(grep -n '^makepkg' $NAME.tmp2 |tail -n 1 |cut -f1 -d:)
+	END=$(( $END - 2 ))
+fi
+
+#tail -n +$END $NAME.tmp2 |head -n 1
+#read
+#if [[ "$(tail -n +$END $NAME.tmp2 |head -n 1)" =~ "( cd $PKG" ]] ; then
+	#END=$(( $END - 1 ))
+#fi
+
+if [[ -n $START ]] ; then
+	if [[ -n $END ]] ; then
+		NUMBER_OF_LINES=$(( $END - $START ))
+	else
+		echo $RED"Failed! "$NORMAL"No ending line found"
+		rm -f $NAME.tmp1 $NAME.tmp2
+		exit
+	fi
+else
+	echo $RED"Failed! "$NORMAL"No starting line found"
+	rm -f $NAME.tmp1 $NAME.tmp2
+	exit
+fi
+#echo START=$START
+#echo END=$END
+#echo NUMBER_OF_LINES=$NUMBER_OF_LINES
+
+! [[ $HOST_OS ]] && HOST_OS=$(gcc -dumpmachine)
+# save the NAME we assumed ($NAME.SlackBuild)
+OLD_NAME=$NAME
+if [[ $(grep '^PRGNAM=' $SCRIPT) ]] ; then
+	# SlackBuilds.org, Hameleers
+	PRGNAM=$(eval echo $(grep -m 1 '^PRGNAM=' $SCRIPT |cut -f2- -d=))
+fi
+
+if [[ $(grep '^NAME=' $SCRIPT) ]] ; then
+	# normal SlackBuild and most 3rd-party
+	NAME=$(eval echo $(grep -m 1 '^NAME=' $SCRIPT |cut -f2- -d=))
+elif [[ $(grep '^PKGNAME=' $SCRIPT) ]] ; then
+	# PhantomX
+	PKGNAME=$(eval echo $(grep -m 1 '^PKGNAME=' $SCRIPT |cut -f2- -d=))
+	NAME=$PKGNAME
+elif [[ $(grep 'PKGNAM=' $SCRIPT) ]] ; then
+	# official SlackBuilds
+	PKGNAM=$(eval echo $(grep -m 1 'PKGNAM=' $SCRIPT |cut -f2- -d=))
+	# echo $PKGNAM
+	if [[ $PKGNAM = "\$PKGNAM" ]] ; then
+		PKGNAM=$(echo $SCRIPT |cut -f1 -d'.')
+	fi
+	NAME=$PKGNAM
+else
+	# official and SlackBuilds.org
+	#PRGNAM=$(grep '^makepkg' $NAME.tmp2 |rev |cut -f1 -d'/' |rev)
+	#echo $PRGNAM
+	#PRGNAM=$(eval echo $PRGNAM |rev |cut -f4- -d'-' |rev)
+	#PRGNAM=$(echo $PRGNAM |rev |cut -f4- -d'-' |rev)
+	#echo $(eval $PRGNAM)
+	# PRGNAM=$(eval echo $PRGNAM |rev |cut -f4- -d'-' |cut -f1 -d'/' |rev)
+	
+	if [[ -z $PRGNAM ]] ; then
+		PRGNAM=$(eval echo $(grep makepkg $SCRIPT |rev |cut -f4- -d'-' |cut -f1 -d'/' |rev))
+	else
+		NAME=$PRGNAM
+	fi
+fi
+
+# if the NAME found internally is not the same as the NAME part of the script name,
+# do something -but what?
+if [[ "$OLD_NAME" != "$NAME" ]] ; then
+	ALT_NAME="$NAME"
+fi
+
+if [[ $(grep '^SRCVER' $SCRIPT) ]] ; then
+	SRCVER=$(eval echo $(grep -m 1 '^SRCVER' $SCRIPT |cut -f2- -d=))
+fi
+
+if [[ $(grep '^VERSION' $SCRIPT) ]] ; then
+	VERSION=$(eval echo $(grep -m 1 '^VERSION' $SCRIPT |cut -f2- -d=))
+fi
+
+if [[ $(grep '^ARCH' $SCRIPT) ]] ; then
+	ARCH=$(eval echo $(grep -m 1 '^ARCH' $SCRIPT |cut -f2- -d=))
+fi
+if [[ $(grep '^DOCS=' $SCRIPT) ]] ; then
+	# Hameleers
+	DOCLIST=$(eval echo $(grep -m 1 '^DOCS' $SCRIPT |cut -f2- -d=))
+elif [[ $(grep '^cp -a' $NAME.tmp2 |grep '$PKG/usr/doc') ]] ; then
+	# official SlackBuild
+	DOCLIST=$(grep '^cp -a' $NAME.tmp2 |grep '$PKG/usr/doc' |cut -f3- -d' ' |cut -f1 -d '$')
+elif [[ $(grep '^cp -a' $NAME.tmp2 |grep '${DOCDIR}') ]] ; then
+	# PhantomX
+	DOCLIST=$(grep '^cp -a' $NAME.tmp2 |grep '${DOCDIR}' |cut -f3- -d' ')
+	DOCLIST=${DOCLIST%%\$\{DOCDIR\}*}
+	DOCLIST=${DOCLIST//\$\{CWD\}\/ChangeLog.SB }
+fi
+# strip trailing space
+if [[ ${DOCLIST: -1} = ' ' ]] ; then
+	DOCLIST=${DOCLIST:0:$(( ${#DOCLIST} - 1 ))}
+fi
+
+# PhantomX build scripts use many MIRROR variables which must be resolved to get the URL
+if [[ $(grep 'MIRROR' $SCRIPT) ]] ; then
+  if [[ $(grep 'BERLIOS_MIRROR' $SCRIPT) ]] ; then
+	BERLIOS_MIRROR=$(eval echo $(grep -m 1 '^BERLIOS_MIRROR' $SCRIPT |cut -f2- -d=))
+  fi
+  if [[ $(grep 'DEB_MIRROR' $SCRIPT) ]] ; then
+	DEB_MIRROR=$(eval echo $(grep -m 1 '^DEB_MIRROR' $SCRIPT |cut -f2- -d=))
+  fi
+  if [[ $(grep 'GENTOO_MIRROR' $SCRIPT) ]] ; then
+	GENTOO_MIRROR=$(eval echo $(grep -m 1 '^GENTOO_MIRROR' $SCRIPT |cut -f2- -d=))
+  fi
+  if [[ $(grep 'GIMP_MIRROR' $SCRIPT) ]] ; then
+	GIMP_MIRROR=$(eval echo $(grep -m 1 '^GIMP_MIRROR' $SCRIPT |cut -f2- -d=))
+  fi
+  if [[ $(grep 'GNOME_MIRROR' $SCRIPT) ]] ; then
+	GNOME_MIRROR=$(eval echo $(grep -m 1 '^GNOME_MIRROR' $SCRIPT |cut -f2- -d=))
+  fi
+  if [[ $(grep 'GNUA_MIRROR' $SCRIPT) ]] ; then
+	GNUA_MIRROR=$(eval echo $(grep -m 1 '^GNUA_MIRROR' $SCRIPT |cut -f2- -d=))
+  fi
+  if [[ $(grep 'IM_MIRROR' $SCRIPT) ]] ; then
+	IMMIRROR=$(eval echo $(grep -m 1 '^IM_MIRROR' $SCRIPT |cut -f2- -d=))
+  fi
+  if [[ $(grep 'KDE_MIRROR' $SCRIPT) ]] ; then
+	KDE_MIRROR=$(eval echo $(grep -m 1 '^KDE_MIRROR' $SCRIPT |cut -f2- -d=))
+  fi
+  if [[ $(grep 'KERNEL_MIRROR' $SCRIPT) ]] ; then
+	KERNEL_MIRROR=$(eval echo $(grep -m 1 '^KERNEL_MIRROR' $SCRIPT |cut -f2- -d=))
+  fi
+  if [[ $(grep 'NGNU_MIRROR' $SCRIPT) ]] ; then
+	NGNU_MIRROR=$(eval echo $(grep -m 1 '^NGNU_MIRROR' $SCRIPT |cut -f2- -d=))
+  fi
+  if [[ $(grep 'OO_MIRROR' $SCRIPT) ]] ; then
+	OO_MIRROR=$(eval echo $(grep -m 1 '^OO_MIRROR' $SCRIPT |cut -f2- -d=))
+  fi
+  if [[ $(grep 'OO_ENMIRROR' $SCRIPT) ]] ; then
+	OO_ENMIRROR=$(eval echo $(grep -m 1 '^OO_ENMIRROR' $SCRIPT |cut -f2- -d=))
+  fi
+  if [[ $(grep 'OPERA_MIRROR' $SCRIPT) ]] ; then
+	OPERA_MIRROR=$(eval echo $(grep -m 1 '^OPERA_MIRROR' $SCRIPT |cut -f2- -d=))
+  fi
+  if [[ $(grep 'QT_MIRROR' $SCRIPT) ]] ; then
+	QT_MIRROR=$(eval echo $(grep -m 1 '^QT_MIRROR' $SCRIPT |cut -f2- -d=))
+  fi
+  if [[ $(grep 'SF_MIRROR' $SCRIPT) ]] ; then
+	SF_MIRROR=$(eval echo $(grep -m 1 '^SF_MIRROR' $SCRIPT |cut -f2- -d=))
+  fi
+  if [[ $(grep 'SFJ_MIRROR' $SCRIPT) ]] ; then
+	SFJ_MIRROR=$(eval echo $(grep -m 1 '^SFJ_MIRROR' $SCRIPT |cut -f2- -d=))
+  fi
+  if [[ $(grep 'SLK_MIRROR' $SCRIPT) ]] ; then
+	SLK_MIRROR=$(eval echo $(grep -m 1 '^SLK_MIRROR' $SCRIPT |cut -f2- -d=))
+  fi
+  if [[ $(grep 'VIM_MIRROR' $SCRIPT) ]] ; then
+	VIM_MIRROR=$(eval echo $(grep -m 1 '^VIM_MIRROR' $SCRIPT |cut -f2- -d=))
+  fi
+fi
+# end MIRRORs
+
+if [[ $(grep 'PNAME' $SCRIPT) ]] ; then
+	PNAME=$(eval echo $(grep -m 1 '^PNAME' $SCRIPT |cut -f2- -d=))
+fi
+if [[ $(grep 'SRCDIR' $SCRIPT) ]] ; then
+	SRCDIR=$(eval echo $(grep -m 1 '^SRCDIR' $SCRIPT |cut -f2- -d=))
+fi
+if [[ $(grep 'SRCARCHIVE' $SCRIPT) ]] ; then
+	SRCARCHIVE=$(eval echo $(grep -m 1 '^SRCARCHIVE' $SCRIPT |cut -f2- -d=))
+fi
+if [[ $(grep '^SRCURL' $SCRIPT) ]] ; then
+	SOURCE_URL=$(eval echo $(grep -m 1 '^SRCURL' $SCRIPT |cut -f2- -d=))
+	SOURCE_NAME=$(basename "$SOURCE_URL")
+elif [[ $(grep '^DL_URL' $SCRIPT) ]] ; then
+	SOURCE_URL=$(eval echo $(grep -m 1 '^DL_URL' $SCRIPT |cut -f2- -d=))
+	SOURCE_NAME=$(basename "$SOURCE_URL")
+else
+	SOURCE_NAME=$(eval echo $(grep -m 1 '^tar ' $SCRIPT |cut -f2- -d'/' |cut -f1 -d' '))
+fi
+
+if [[ $(grep 'prefix=' $SCRIPT) ]] ; then
+	PRE_FIX=$(eval echo $(grep -m 1 'prefix' $SCRIPT |cut -f2- -d= |cut -f1 -d ' '))
+	case $PRE_FIX in
+		/*)PRE_FIX=${PRE_FIX:1} ;;
+	esac 
+else
+	PRE_FIX=usr
+fi
+
+if [[ $SIMPLE = 1 ]] ; then
+  if [[ $(grep './configure' $NAME.tmp2) ]] ; then
+	for CHUNK in  $(grep './configure' $NAME.tmp2) ; do
+		# skip over these options
+		case "${CHUNK}" in
+			LDFLAGS*|CFLAGS*|CXXFLAGS*|./configure) true ;;
+			--prefix*|--build*|--host*|--target*|--docdir*|--libdir*|--mandir*|--infodir*|--program-suffix*|--program-prefix*) true ;;
+			prefix*|build*|host*|target*|docdir*|libdir*|mandir*|infodir*|program-suffix*|program-prefix*) true ;;
+			# take even these out -most SlackBuild writers add
+			# these by default -even when they are not needed
+			# We don't want them if they are not needed
+			*sysconfdir*|*localstatedir*) true ;;
+			*) REBUILT_LINE="$REBUILT_LINE $CHUNK" ;;
+		esac
+	done
+	# strip leading spaces
+	while [[ "${REBUILT_LINE:0:1}" = " " ]] ; do
+		REBUILT_LINE="${REBUILT_LINE:1}"
+	done
+	# get rid of any trailing '|| exit 1'
+	REBUILT_LINE="${REBUILT_LINE%%'||'*}"
+	EXTRA_CONFIGS="$REBUILT_LINE"
+	#echo EXTRA_CONFIGS="$REBUILT_LINE"
+	# strip trailing space
+	if [[ ${EXTRA_CONFIGS: -1} = ' ' ]] ; then
+		EXTRA_CONFIGS=${EXTRA_CONFIGS:0:$(( ${#EXTRA_CONFIGS} - 1 ))}
+	fi
+  else
+	echo $CYAN"Notice - "$NORMAL"Unable to create script with simple format. Using long form instead."
+  fi
+else
+	# if the script has no ./configure command or SIMPLE is not requested
+	WRITE_BUILD=1
+fi
+
+
+# Load Eliminate whitespace function early:
+white_out() {
+  while read GAGA ; do
+    echo $GAGA
+  done
+}
+
+get_patch_list() {
+if [[ ! -d "$CWD"/patches ]] && [[ ! -d "$CWD"/$NAME-patches ]] ; then
+	# if there are patches in the CWD use them
+	PATCHLIST=$(find * -maxdepth 0 -type f -name '*.patch*' -o -name '*.diff*' -o -name '*.dpatch' | sort)
+elif [[ -d "$CWD"/patches ]] ; then
+	# otherwise if there are patches in the CWD/patches use them
+	PATCHLIST=$(find patches -maxdepth 1 -type f -name '*.patch*' -o -name '*.diff*' -o -name '*.dpatch' | sort)
+elif [[ -d "$CWD"/$NAME-patches ]] ; then
+	# otherwise if there are patches in the CWD/patches use them
+	PATCHLIST=$(find $NAME-patches -maxdepth 1 -type f -name '*.patch*' -o -name '*.diff*' -o -name '*.dpatch' | sort)
+fi
+}
+
+BUILD=1
+
+## write the script
+echo $BLUE"Writing build script - "$NORMAL"$NAME.src2pkg.auto in the current directory."
+# 
+echo "#!/bin/bash" > "$CWD"/$NAME.src2pkg.auto
+echo "## src2pkg script for: 	$NAME" >> "$CWD"/$NAME.src2pkg.auto
+echo "## Auto-generated by sb2sp-$SB2SP_VERSION" >> "$CWD"/$NAME.src2pkg.auto
+echo "## sb2sp - Copyright 2009-2013 Gilbert Ashley <amigo@ibilio.org>" >> "$CWD"/$NAME.src2pkg.auto
+if [[ $SIMPLE != 1 ]] || [[ $WRITE_BUILD = 1 ]] ; then
+echo "## This script is based on $SCRIPT" >> "$CWD"/$NAME.src2pkg.auto
+grep "# Copyright" $SCRIPT >>  "$CWD"/$NAME.src2pkg.auto
+echo "## See the end of this file for the full Copyright/License" >> "$CWD"/$NAME.src2pkg.auto
+fi
+#echo "## Full package name: $SHORT_NAME.tgz" >> $CWD/$NAME.src2pkg.auto
+echo "" >> "$CWD"/$NAME.src2pkg.auto
+if [[ "$SOURCE_URL" ]] ; then
+	echo "SOURCE_URL='$SOURCE_URL'" >> "$CWD"/$NAME.src2pkg.auto
+	echo "# SOURCE_NAME='$SOURCE_NAME'" >> "$CWD"/$NAME.src2pkg.auto
+elif [[ "$SOURCE_NAME" ]] ; then
+	echo "SOURCE_NAME='$SOURCE_NAME'" >> "$CWD"/$NAME.src2pkg.auto
+fi
+if [[ "$ALT_NAME" != "" ]] ;then
+	echo "ALT_NAME='$ALT_NAME'" >> "$CWD"/$NAME.src2pkg.auto
+else
+	echo "NAME='$NAME'   # Use ALT_NAME to override guessed value" >> "$CWD"/$NAME.src2pkg.auto
+fi
+#if [[ "$ALT_VERSION" != "" ]] ;then
+#	echo "ALT_VERSION='$ALT_VERSION'" >> "$CWD"/$NAME.src2pkg.auto
+#else
+	echo "VERSION='$VERSION'   # Use ALT_VERSION to override guessed value" >> "$CWD"/$NAME.src2pkg.auto
+#fi
+#echo "# ARCH='$ARCH'" >> "$CWD"/$NAME.src2pkg.auto
+if [[ $ARCH = "noarch" ]] ; then
+	echo "ARCH='$ARCH'" >> "$CWD"/$NAME.src2pkg.auto
+else
+	echo "# ARCH='$ARCH'" >> "$CWD"/$NAME.src2pkg.auto
+fi
+if [[ "$BUILD" != 1 ]] ; then
+	echo "BUILD='$BUILD'" >> "$CWD"/$NAME.src2pkg.auto
+else
+	echo "#BUILD='$BUILD'" >> "$CWD"/$NAME.src2pkg.auto
+fi
+# echo BUILD='${BUILD:-'$BUILD'}' >> "$CWD"/$NAME.src2pkg.auto
+echo "# PRE_FIX='$PRE_FIX'" >> "$CWD"/$NAME.src2pkg.auto
+echo "# Any extra options go here:" >> "$CWD"/$NAME.src2pkg.auto
+
+if [[ "$EXTRA_CONFIGS" != "" ]] ; then
+	echo "EXTRA_CONFIGS=\"${EXTRA_CONFIGS}\"" >> "$CWD"/$NAME.src2pkg.auto
+else
+	echo "# EXTRA_CONFIGS=\"${EXTRA_CONFIGS}\"" >> "$CWD"/$NAME.src2pkg.auto
+fi
+
+get_patch_list
+
+[[ "$PATCHLIST" != "" ]] && echo "PATCHLIST='${PATCHLIST}'" >> "$CWD"/$NAME.src2pkg.auto
+[[ "$DOCLIST" ]] && echo "DOCLIST='$DOCLIST'" >> "$CWD"/$NAME.src2pkg.auto
+echo "" >> "$CWD"/$NAME.src2pkg.auto
+
+echo "# Optional function replaces configure_source, compile_source, fake_install" >> "$CWD"/$NAME.src2pkg.auto
+if [[ $SIMPLE != 1 ]] || [[ $WRITE_BUILD = 1 ]] ; then
+	echo 'build() {' >> "$CWD"/$NAME.src2pkg.auto
+	echo "$(tail -n +$START $NAME.tmp2 |head -n $NUMBER_OF_LINES)" >> "$CWD"/$NAME.src2pkg.auto
+	echo '}' >> "$CWD"/$NAME.src2pkg.auto
+	
+else
+	echo "# To use, uncomment and write/paste CODE between the {} brackets." >> "$CWD"/$NAME.src2pkg.auto
+	echo "# build() { CODE }" >> "$CWD"/$NAME.src2pkg.auto
+fi
+echo "" >> "$CWD"/$NAME.src2pkg.auto
+
+echo "# Get the functions and configs" >> "$CWD"/$NAME.src2pkg.auto
+echo ". /usr/libexec/src2pkg/FUNCTIONS ;" >> "$CWD"/$NAME.src2pkg.auto
+echo "" >> "$CWD"/$NAME.src2pkg.auto
+echo "# Execute the named packaging steps:" >> "$CWD"/$NAME.src2pkg.auto
+#echo "" >> "$CWD"/$NAME.src2pkg.auto
+cat >> "$CWD"/$NAME.src2pkg.auto << EOF
+pre_process
+find_source
+make_dirs
+unpack_source
+fix_source_perms
+configure_source #
+compile_source   # If used, the 'build' function replaces these 3
+fake_install     #
+fix_pkg_perms
+strip_bins
+create_docs
+compress_man_pages
+make_description
+make_doinst
+make_package
+post_process
+EOF
+
+echo "" >> "$CWD"/$NAME.src2pkg.auto
+# echo "# src2pkg - Copyright 2005-2013  Gilbert Ashley <amigo@ibiblio.org>" >> "$CWD"/$NAME.src2pkg.auto
+echo "## See the documentation for more help and examples. Below are some of" >> "$CWD"/$NAME.src2pkg.auto
+echo "# the most common Extras and Options for easy cut-and-paste use." >> "$CWD"/$NAME.src2pkg.auto
+echo "# DOCLIST='' PATCHLIST='' INSTALL_TYPE=''" >> "$CWD"/$NAME.src2pkg.auto
+echo "# CONFIG_COMMAND='' MAKE_COMMAND='' INSTALL_LINE='' " >> "$CWD"/$NAME.src2pkg.auto
+#echo "# SHELL_INSTALL='YES' CORRECT_PERMS='NO'" >> "$CWD"/$NAME.src2pkg.auto
+echo "# When editing src2pkg scripts to add custom code, use these variables" >> "$CWD"/$NAME.src2pkg.auto
+echo "# to refer to the current directory, the sources or the package tree:" >> "$CWD"/$NAME.src2pkg.auto
+echo "# \$CWD (current directory), \$SRC_DIR (sources), \$PKG_DIR (package tree)" >> "$CWD"/$NAME.src2pkg.auto
+echo "# Other commonly-used directories include: \$DOC_DIR (document directory)" >> "$CWD"/$NAME.src2pkg.auto
+echo "# \$MAN_DIR (man-page directory) \$DATA_DIR (shared-data directory)" >> "$CWD"/$NAME.src2pkg.auto
+if [[ $SIMPLE != 1 ]] || [[ $WRITE_BUILD = 1 ]] ; then
+echo "" >> "$CWD"/$NAME.src2pkg.auto
+echo "## Original $SCRIPT Copyright & License:" >> "$CWD"/$NAME.src2pkg.auto
+grep "# Build script by Phantom X" $SCRIPT >>  "$CWD"/$NAME.src2pkg.auto
+grep "Written by" $SCRIPT >>  "$CWD"/$NAME.src2pkg.auto
+grep "Copyright" $SCRIPT >>  "$CWD"/$NAME.src2pkg.auto
+cat >> "$CWD"/$NAME.src2pkg.auto <<EOF
+# All rights reserved.
+#
+# Redistribution and use of this script, with or without modification, is
+# permitted provided that the following conditions are met:
+#
+# 1. Redistributions of this script must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+#  THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+#  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO
+#  EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#  OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+EOF
+fi
+
+if [[ $DEBUG ]] ; then
+echo SRCVER=$SRCVER
+echo SOURCE_URL=$SOURCE_URL
+echo SOURCE_NAME=$SOURCE_NAME
+echo NAME=$NAME
+echo VERSION=$VERSION
+echo ARCH=$ARCH
+echo EXTRA_CONFIGS=$EXTRA_CONFIGS
+echo PATCHLIST=$PATCHLIST
+echo DOCLIST=$DOCLIST
+fi
+
+if ! [[ $DEBUG ]] ; then
+	for TMP_FILE in  $NAME.tmp1 $NAME.tmp2 ; do
+		rm -f $TMP_FILE
+	done
+fi
+
+#rm -f $NAME.tmp2

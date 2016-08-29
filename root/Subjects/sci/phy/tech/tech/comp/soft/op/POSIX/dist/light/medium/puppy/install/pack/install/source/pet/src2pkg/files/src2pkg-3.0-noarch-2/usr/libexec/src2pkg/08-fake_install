@@ -1,0 +1,514 @@
+# This file is part of the src2pkg program:
+# Copyright 2005-2013 Gilbert Ashley <amigo@ibilio.org>
+# src2pkg is released under the GNU General Public License Version 2
+
+### fake_install
+fake_install() {
+if [[ $ALLOW_USER_EXTENSIONS = "YES" ]] ; then
+ # check if the user has any pre-execution extensions to this file and run them, if so.
+ [[ -f "$HOME"/.src2pkg/extensions/08.pre ]] && . "$HOME"/.src2pkg/extensions/08.pre
+fi
+
+if [[ "$INSTALL_COMMAND" = "skip" ]] ; then
+    if [[ $HAVE_BUILD_FUNCTION = 1 ]] ; then
+		[[ $DEBUG ]] && echo $BLUE"Using 'build' function instead of fake_install - "$NORMAL
+	else
+		echo $BLUE"Skipping fake_install - "$NORMAL
+	fi
+elif [[ "$FAILED" = "" ]] && [[ ! $USER_CANCELLED ]] ; then
+  if [[ ! $RESUME ]] || [[ $RESUME = $FUNCNAME ]] || [[ $HAVE_RESUMED ]] ; then
+	[[ $RESUME = $FUNCNAME ]] && HAVE_RESUMED=1 && echo $CYAN"   Notice - "$BLUE"Resuming build at: "$NORMAL "$FUNCNAME"
+	if [[ $PAUSE = "BEFORE" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+		echo $MAGENTA"Notice - "$BLUE"Pausing before: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+		read
+	fi
+	if [[ $HAVE_RESUMED ]] ; then
+		if [[ -d $PKG_DIR ]] && [[ "$PKG_DIR" != '/' ]] && [[ "$PKG_DIR" != '' ]] ; then
+		( cd $PKG_DIR ;
+			if [[ $(find * 2> /dev/null) != "" ]] ; then
+				[[ $DEBUG ]] && echo $CYAN"   Notice - "$NORMAL"Removing old content in PKG_DIR"
+				( cd "$PKG_DIR" && rm -rf ./* )
+			fi
+		)
+		fi
+	fi
+	
+	! [[ $CONFIG_DIR ]] && CONFIG_DIR="$SRC_DIR"
+	! [[ $OBJ_DIR ]] && OBJ_DIR="$CONFIG_DIR"
+	find_makefile
+	
+	# install using an install.sh script or other named script
+	# The -S option turns off redirection of stdout and stderr -allowing tracking of  interactive install scripts.
+	# But if we are running QUIET it will be reset just after critical install install operations
+	if [[ $SHELL_INSTALL ]] ; then
+		if ! [[ $INSTALL_LINE ]] ; then 
+			INSTALL_LINE="sh install.sh"
+			if [[ -e "$OBJ_DIR"/install.sh ]] ; then
+			 echo $BLUE"Found install.sh script - "$NORMAL"Interactive input may be required."
+			 sleep 2
+			 INSTALL_TYPE="JAIL"
+			else
+			 echo $CYAN"NOTICE! "$NORMAL"No install.sh script found!"
+			fi
+		fi
+		[[ "$QUIET" = "YES" ]] && RESTORE_QUIET=1
+		QUIET="NO"
+	elif [[ ! $MAKEFILE ]] ; then
+	  [[ "$QUIET" = "YES" ]] && RESTORE_QUIET=1
+	  QUIET="NO"
+	fi
+	
+	# if the INSTALL_LINE was given to src2pkg, split it into INSTALL_COMMAND
+	# and INSTALL_RULE. This lets us insert the DESTDIR if needed
+	if [[ $INSTALL_LINE ]] ; then
+		INSTALL_LINE=$(echo $INSTALL_LINE |white_out)
+		if [[ $(echo $INSTALL_LINE |grep " ") ]] ; then
+			INSTALL_COMMAND=${INSTALL_LINE%% *}
+			INSTALL_RULE=${INSTALL_LINE#* }
+		fi
+		while [[ ${INSTALL_RULE:0:1} = '-' ]] ; do
+				if [[ ${INSTALL_RULE:0:2} = '-f' ]] ; then
+					# if the -f argument is given we need to get the filename
+					INSTALL_COMMAND="${INSTALL_COMMAND} ${INSTALL_RULE%% *}"
+					INSTALL_RULE=${INSTALL_RULE#* }
+					# we need to get the filename also
+					INSTALL_COMMAND="${INSTALL_COMMAND} ${INSTALL_RULE%% *}"
+					INSTALL_RULE=${INSTALL_RULE#* }
+				else
+					# if we have something like INSTALL_LINE='make -i install install-libs'
+					# then we need to add the make options to INSTALL_COMMAND
+					# and remove them from INSTALL_RULE
+					INSTALL_COMMAND="${INSTALL_COMMAND} ${INSTALL_RULE%% *}"
+					INSTALL_RULE=${INSTALL_RULE#* }
+				fi
+		done
+		
+	elif [[ $INSTALL_COMMAND ]] && [[ $INSTALL_RULE ]] ; then
+		true
+	else
+		FAILED="NO INSTALL_LINE in: $FUNCNAME"
+		echo $RED"FAILED!! "$NORMAL"No INSTALL_LINE given."
+		exit
+	fi
+	# 
+	if ! [[ $LOG_DIR ]] ; then
+		LOG_DIR="$OBJ_DIR"
+	elif [[ "$LOG_DIR" != "$CWD" ]] ; then
+		if [[ "${LOG_DIR:0:1}" != "/" ]] ; then
+			echo $YELLOW"Warning! "$NORMAL"LOG_DIR is set to an invalid path."
+			echo "         It must be set to \$CWD or an absolute path."
+		else
+			[[ ! -d "$LOG_DIR" ]] && mkdir -p "$LOG_DIR"
+		fi
+	fi
+	# pretty tricky to figure out whether the INSTALL_RULE will work, and whether DESTDIR is supported
+	# Running the install rule an extra time and checking the exit status takes longer but is more dependable
+	if [[ -e "$OBJ_DIR"/$MAKEFILE ]] ; then
+	  if [[ "$INSTALL_COMMAND" =~ "make" ]] ; then
+		
+		if [[ $INSTALL_LINE ]] ; then
+			# if the INSTALL_LINE was given explicitly don't test it -this is to cover cases like this:
+			# MAKE_COMMAND='make -f Makefile.unix'
+			# INSTALL_LINE='make -f Makefile.unix install install_data'
+			# otherwise we'd need to do even more parsing of the params
+			#true
+			STATUS=SUCCESS
+		else
+			echo -n $BLUE"Checking for $MAKEFILE rule: "$NORMAL"'$INSTALL_RULE' "$NORMAL
+			cd "$OBJ_DIR"
+			# do a dry-run of the install rule
+			#"$MAKE_COMMAND" -n "$INSTALL_RULE" &> /dev/null
+			#$MAKE_COMMAND -n "$INSTALL_RULE" > "$LOG_DIR"/$NAME-test-make-install.log 2> /dev/null
+			# background the process...
+			$MAKE_COMMAND -n $INSTALL_RULE > "$LOG_DIR"/$NAME-test-make-install.log 2> /dev/null &
+			# so we can get the process pid
+			PID=$!
+			# sleep a trivial amount of time
+			sleep 1
+			# if the directory /proc/$PID exists, then the process is still running
+			if [[ -d /proc/$PID ]] ; then
+				# we are in a 'race' condition anyway, so silence any error output
+				# interrupt the process first to avoid nasty error output
+				(kill -INT $PID) &> /dev/null
+				# (kill -KILL $PID) &> /dev/null
+				STATUS=SUCCESS
+			else
+				# otherwise, the process either failed or succeeded very quickly
+				# so run it again and check the exit status directly
+				# $MAKE_COMMAND -n "$INSTALL_RULE" > "$LOG_DIR"/$NAME-test-make-install.log &> /dev/null
+				$MAKE_COMMAND -n "$INSTALL_RULE" &> "$LOG_DIR"/$NAME-test-make-install.log
+				ERR=$?
+				case $ERR in
+					0) STATUS=SUCCESS ;;
+					*) 
+						if [[ $(grep 'No rule to make target' "$LOG_DIR"/$NAME-test-make-install.log 2> /dev/null) ]] ; then
+							STATUS=FAILED
+						else
+							STATUS=SUCCESS
+						fi
+					;;
+				esac
+			fi
+			if [[ "$STATUS" = "SUCCESS" ]] ; then
+				echo $GREEN"Okay"$NORMAL
+			else
+				echo "None found"
+			fi
+		fi
+		
+		# and check the value returned
+		if [[ "$STATUS" = "SUCCESS" ]] ; then
+			#echo $GREEN"Okay"$NORMAL
+			if [[ "$INSTALL_TYPE" = "DESTDIR" ]] ; then
+				echo -n $BLUE"Checking support for DESTDIR (or similar) - "$NORMAL
+				# search for other files included by the Makefile: [include $(CONFIG), include $(TOPLEVEL)]
+				find_makefile_includes
+				if [[ -f make-file-includes-all ]] ; then
+				  # read each file in the list
+				  while read FILE ; do
+					for KEYWORD in CMAKE_INSTALL_PREFIX DESTDIR BUILDROOT INSTALLROOT INSTALL_ROOT INSTALL_PREFIX install_root instroot DIST_ROOT ; do
+						# and search for the KEYWORD
+						if [[ $(grep "\b$KEYWORD" $FILE) ]] ; then
+							# ignore lines that simply declare DESTIR=  they don't  mean DESTDIR is supported
+							if [[ "$KEYWORD" = "DESTDIR" ]] ; then
+								if [[ $(grep "\b$KEYWORD" $FILE |grep -v DESTDIR= |grep -v '^#') ]] ; then
+									DEST_DIR="$KEYWORD"
+									echo "Found $KEYWORD"
+									HAVE_DESTDIR=1
+									break 2 ;
+								fi
+							else
+								DEST_DIR="$KEYWORD"
+								echo "Found $KEYWORD"
+								HAVE_DESTDIR=1
+								break 2 ;
+							fi
+						fi
+					done
+				  done < make-file-includes-all
+				fi
+				! [[ $DEBUG ]] && rm -f make-file-includes-all
+				if [[ $HAVE_DESTDIR != 1 ]] ; then
+					echo "Not found"
+					echo $CYAN"   Notice - "$NORMAL"DESTDIR support not found. Falling back to JAIL install"
+					INSTALL_TYPE=JAIL
+				fi
+			fi
+		else
+			#echo "None found"
+			INSTALL_TYPE="DEFAULT"
+			echo $CYAN"Notice - "$NORMAL"No $INSTALL_RULE rule in $MAKEFILE. Falling back to DEFAULT install."
+		fi
+		# if the user is not 'root', then chown commands will not work, so warn 
+		if [[ $EUID != 0 ]] ; then
+			if [[ $(grep chown $NAME-test-make-install.log) ]] || \
+				[[ $(grep 'install\b' $NAME-test-make-install.log |grep 'root') ]] ; then
+				echo $YELLOW"Warning! "$NORMAL"Installation uses 'chown' or 'install ... root' command."
+				echo $CYAN"Notice - "$NORMAL"But you are not user 'root'. These commands will fail when run."
+				echo $CYAN"Notice - "$NORMAL"You may have to build this package as root for proper results."
+			fi
+		fi
+	  elif [[ "$INSTALL_COMMAND" = "scons" ]] ; then
+		if [[ $(grep 'DESTDIR' "${OBJ_DIR}"/${MAKEFILE} 2> /dev/null) != "" ]] ; then
+			INSTALL_TYPE="DESTDIR"
+			DEST_DIR="DESTDIR"
+		else
+			INSTALL_TYPE="JAIL"
+			#mkdir -p $PKG_DIR/$PRE_FIX
+			#INSTALL_TYPE="REAL"
+		fi
+	  #elif [[ "$INSTALL_COMMAND" =~ "python" ]] ; then
+		#if [[ $USE_PY_SETUP = 1 ]] ; then
+		#	INSTALL_TYPE="REAL"
+		#else
+		#	INSTALL_TYPE="JAIL"
+		#fi
+	  fi
+	fi
+	# get rid of this as we don't need it anymore
+	! [[ $DEBUG ]] && rm -f $NAME-test-make-install.log
+	
+	if [[ "$INSTALL_TYPE" = "UNION" ]] ; then
+	  if ! [[ $UNIONFS_TYPE ]] ; then
+		if which unionfs-fuse &> /dev/null ; then
+			UNIONFS_TYPE=unionfs-fuse
+		elif [[ $(cat /proc/filesystems 2> /dev/null |grep unionfs) ]] ; then
+			UNIONFS_TYPE=unionfs
+		elif modprobe unionfs &> /dev/null ; then
+			# strangely, this doesn't work right using brackets as above...
+			UNIONFS_TYPE=unionfs
+		else
+			echo $YELLOW"Warning - "$NORMAL"Cannot find any known unionfs implementation!"
+			echo $CYAN"Notice - "$NORMAL"Resetting INSTALL_TYPE to DESTDIR"
+			INSTALL_TYPE=DESTDIR
+		fi
+	  fi
+	  # make sure the fuse module is loaded
+	  if [[ $UNIONFS_TYPE = "unionfs-fuse" ]] ; then
+		if ! [[ $(cat /proc/filesystems |grep fuse &> /dev/null ) ]] ; then
+			modprobe fuse 1> /dev/null 2> /dev/null
+		fi
+	  fi
+	fi
+	
+	if [[ "$INSTALL_TYPE" = "DEFAULT" ]] ; then
+		do_generic_installation
+	elif [[ "$INSTALL_TYPE" = "DESTDIR" ]] ; then
+		# from 08A-destdir_install
+		. "$SRC2PKG_LIBDIR/fake_install/08A-destdir_install"
+		install_to_destdir
+	elif [[ "$INSTALL_TYPE" = "JAIL" ]] ; then
+		# from 08B-jail_root_install
+		. "$SRC2PKG_LIBDIR/fake_install/08B-jail_root_install"
+		install_to_jail_root
+	elif [[ "$INSTALL_TYPE" = "REAL" ]] ; then
+		# from 08C-real_root_install
+		. "$SRC2PKG_LIBDIR/fake_install/08C-real_root_install"
+		install_to_real_root
+	elif [[ "$INSTALL_TYPE" = "SAFE" ]] ; then
+		# from 08C-real_root_install
+		SAFE_METHOD=YES
+		. "$SRC2PKG_LIBDIR/fake_install/08C-real_root_install"
+		install_to_real_root
+	elif [[ "$INSTALL_TYPE" = "UNION" ]] ; then
+		# from 08D-union_root_install
+		. "$SRC2PKG_LIBDIR/fake_install/08D-union_root_install"
+		install_to_union_root
+	fi
+	
+	##  during the above installation routines a stricter trap is used, so here
+	## we reset it to a more lenient trap which doesn't scold the user
+	trap safe_user_cancel 2
+	
+	[[ $RESTORE_QUIET ]] && QUIET="YES"
+	
+	if [[ "$FAILED" = "" ]] ; then
+		post_fake_install
+	fi
+  fi
+  if [[ $PAUSE = "AFTER" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+    echo $MAGENTA"Notice - "$BLUE"Pausing after: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+    read
+  fi
+fi
+
+if [[ $ALLOW_USER_EXTENSIONS = "YES" ]] ; then
+ # check if the user has any post-execution extensions to this file and run them, if so.
+ [[ -f "$HOME"/.src2pkg/extensions/08.post ]] && . "$HOME"/.src2pkg/extensions/08.post
+fi
+
+}
+# end fake_install
+
+post_fake_install() {
+	# correct X11R6 paths
+	if [[ "$CORRECT_USRX11R6" = "YES" ]] ; then
+		# remove some X11 cruft and re-arrange stuff
+		# app-defaults go in /etc/X11/app-defaults
+		if [[ -L $PKG_DIR/usr/lib/X11 ]] ; then
+			rm -f $PKG_DIR/usr/lib/X11
+		fi
+		if [[ -L $PKG_DIR/usr/lib/X11/app-defaults ]] ; then
+			# remove it
+			rm -f $PKG_DIR/usr/lib/X11/app-defaults
+		elif [[ -d $PKG_DIR/usr/lib/X11/app-defaults ]] ; then
+			echo $CYAN"   Notice - "$NORMAL"Moving usr/lib/X11/app-defaults to etc/X11/app-defaults"
+			if [[ $(ls $PKG_DIR/usr/lib/X11/app-defaults) != "" ]] ; then
+				mkdir -p $PKG_DIR/etc/X11/app-defaults
+				cp -f $PKG_DIR/usr/lib/X11/app-defaults/* $PKG_DIR/etc/X11/app-defaults
+				chmod 644 $PKG_DIR/etc/X11/app-defaults/*
+				rm -f $PKG_DIR/usr/lib/X11/app-defaults/*
+				rmdir $PKG_DIR/usr/lib/X11/app-defaults &> /dev/null
+				# remove parents if they are empty
+				rmdir $PKG_DIR/usr/lib/X11 &> /dev/null
+				rmdir $PKG_DIR/usr/lib &> /dev/null
+			fi
+		fi
+		# fix any old font locations
+		if [[ -d $PKG_DIR/usr/lib/X11/fonts ]] ; then
+			echo $CYAN"   Notice - "$NORMAL"Moving usr/lib/X11/fonts to usr/share/fonts"
+			mkdir -p $PKG_DIR/usr/share/fonts
+			mv $PKG_DIR/usr/lib/X11/fonts/* $PKG_DIR/usr/share/fonts
+			rmdir $PKG_DIR/usr/lib/X11/fonts 2> /dev/null
+			rmdir $PKG_DIR/usr/lib/X11 2> /dev/null
+			rmdir $PKG_DIR/usr/lib 2> /dev/null
+		fi
+		if [[ -d $PKG_DIR/usr/share/fonts/X11 ]] ; then
+			echo $CYAN"   Notice - "$NORMAL"Moving usr/share/fonts/X11 to usr/share/fonts"
+			( cd $PKG_DIR/usr/share/fonts/X11 && mv * ../ )
+			rmdir $PKG_DIR/usr/share/fonts/X11 2> /dev/null
+		fi
+		
+		if [[ -d $PKG_DIR/usr/X11R6/lib/X11 ]] ; then
+			if [[ $(ls $PKG_DIR/usr/X11R6/lib/X11) = "" ]] ; then
+				rmdir $PKG_DIR/usr/X11R6/lib/X11/*
+				rmdir $PKG_DIR/usr/X11R6/lib/X11
+			else
+				mkdir -p $PKG_DIR/usr/lib
+				mv $PKG_DIR/usr/X11R6/lib/X11 $PKG_DIR/usr/lib
+				rmdir $PKG_DIR/usr/X11R6/lib
+			fi
+		fi
+		# put binaries in /usr/bin
+		if [[ -d $PKG_DIR/usr/X11R6/bin ]] ; then
+			echo $CYAN"   Notice - "$NORMAL"Moving usr/X11R6/bin to usr/bin"
+			mkdir -p $PKG_DIR/usr/bin
+			cp -a $PKG_DIR/usr/X11R6/bin/* $PKG_DIR/usr/bin
+			rm -rf $PKG_DIR/usr/X11R6/bin
+		fi
+		# put man-pages in $MAN_DIR
+		if [[ -d $PKG_DIR/usr/X11R6/man ]] ; then
+			echo $CYAN"   Notice - "$NORMAL"Moving usr/X11R6/man to MAN_DIR"
+			mkdir -p $MAN_DIR
+			cp -a $PKG_DIR/usr/X11R6/man/* $MAN_DIR
+			rm -rf $PKG_DIR/usr/X11R6/man
+		fi
+		# we can't move include or share dirs, but if /usr/X11R6 is empty, remove it
+		if [[ -d $PKG_DIR/usr/X11R6 ]] ; then
+			if [[ $(find $PKG_DIR/usr/X11R6 -type f) = "" ]] ; then
+				echo $CYAN"   Notice - "$NORMAL"Removing empty directory usr/X11R6"
+				rm -rf $PKG_DIR/usr/X11R6
+			fi
+		fi
+	fi
+	# end CORRECT_USRX11R6
+	
+	# shortcut switch for deleting all development files
+	[[ $RUNTIME_ONLY = "YES" ]] && {
+	 DELETE_STATIC_LIBS="YES" DELETE_HEADERS="YES"
+	}
+	# Remove  only static libs
+	[[ $DELETE_STATIC_LIBS = "YES" ]] && {
+		for dir in $LIB_DIRS ; do
+		 rm -f "$PKG_DIR"/$dir/*.a 
+		done
+	}
+	# Remove only include header files and directories
+	[[ $DELETE_HEADERS = "YES" ]] && {
+		for dir in $INC_DIRS ; do
+		 rm -rf "$PKG_DIR"/$dir
+		done
+	}
+}
+
+do_generic_installation() {
+if [[ -x "$OBJ_DIR"/$NAME ]] ; then
+	echo $BLUE"Found executable in OBJ_DIR - "$NORMAL"Matches NAME '$NAME'"
+	echo $BLUE"Doing generic installation - "$NORMAL
+	mkdir -p "$PKG_DIR"/$PRE_FIX/bin
+	cp -a "$OBJ_DIR"/$NAME "$PKG_DIR"/$PRE_FIX/bin
+elif [[ -x "$OBJ_DIR"/$ORIG_NAME ]] ; then
+	echo $BLUE"Found executable in OBJ_DIR - "$NORMAL"Matches ORIG_NAME '$ORIG_NAME'"
+	echo $BLUE"Doing generic installation - "$NORMAL
+	mkdir -p "$PKG_DIR"/$PRE_FIX/bin
+	cp -a "$OBJ_DIR"/$ORIG_NAME "$PKG_DIR"/$PRE_FIX/bin
+elif [[ -x "$OBJ_DIR"/bin/$NAME ]] ; then
+	echo $BLUE"Found executable in OBJ_DIR/bin - "$NORMAL"Matches NAME '$NAME'"
+	echo $BLUE"Doing generic installation - "$NORMAL
+	mkdir -p "$PKG_DIR"/$PRE_FIX/bin
+	cp -a "$OBJ_DIR"/bin/$NAME "$PKG_DIR"/$PRE_FIX/bin
+else
+	FAILED="GENERIC_INSTALL No executables found in: $FUNCNAME"
+	echo $RED"FAILED!"$NORMAL
+fi
+}
+
+#
+find_makefile() {
+	! [[ $OBJ_DIR ]] && OBJ_DIR="$SRC_DIR"
+	if [[ "${MAKE_COMMAND:0:7}" = "make -f" ]] ; then
+	 # keep what's to the right of 'make -f '
+	 filename=${MAKE_COMMAND:8}
+	 # keep what's to the left of the first space
+	 MAKEFILE=${filename%%" "*}
+	 ! [[ $MAKE_COMMAND ]] && INSTALL_COMMAND="$DEFAULT_MAKE_COMMAND -f $MAKEFILE"
+	 ! [[ $INSTALL_COMMAND ]] && INSTALL_COMMAND="$DEFAULT_MAKE_COMMAND -f $MAKEFILE"
+	 ! [[ $INSTALL_RULE ]] && INSTALL_RULE="install"
+	elif [[ -e "$OBJ_DIR"/GNUmakefile ]] ; then
+	 MAKEFILE="GNUmakefile"
+	 ! [[ $MAKE_COMMAND ]] && MAKE_COMMAND="$DEFAULT_MAKE_COMMAND"
+	 ! [[ $INSTALL_COMMAND ]] && INSTALL_COMMAND="$DEFAULT_MAKE_COMMAND"
+	 ! [[ $INSTALL_RULE ]] && INSTALL_RULE="install"
+	elif [[ -e "$OBJ_DIR"/Makefile ]] ; then
+	 MAKEFILE="Makefile"
+	 ! [[ $MAKE_COMMAND ]] && MAKE_COMMAND="$DEFAULT_MAKE_COMMAND"
+	 ! [[ $INSTALL_COMMAND ]] && INSTALL_COMMAND="$DEFAULT_MAKE_COMMAND"
+	 ! [[ $INSTALL_RULE ]] && INSTALL_RULE="install"
+	elif [[ -e "$OBJ_DIR"/makefile ]] ; then
+	 MAKEFILE="makefile"
+	 ! [[ $MAKE_COMMAND ]] && MAKE_COMMAND="$DEFAULT_MAKE_COMMAND"
+	 ! [[ $INSTALL_COMMAND ]] && INSTALL_COMMAND="$DEFAULT_MAKE_COMMAND"
+	 ! [[ $INSTALL_RULE ]] && INSTALL_RULE="install"
+	elif [[ -e "$OBJ_DIR"/SConstruct ]] ; then
+	 MAKEFILE="SConstruct"
+	 ! [[ $MAKE_COMMAND ]] && MAKE_COMMAND="scons"
+	 ! [[ $INSTALL_COMMAND ]] && INSTALL_COMMAND="scons"
+	 ! [[ $INSTALL_RULE ]] && INSTALL_RULE="install"
+	elif [[ -e "$OBJ_DIR"/Jamfile ]] ; then
+	 MAKEFILE="Jamfile"
+	 ! [[ $MAKE_COMMAND ]] && MAKE_COMMAND="jam"
+	 ! [[ $INSTALL_COMMAND ]] && INSTALL_COMMAND="jam"
+	 ! [[ $INSTALL_RULE ]] && INSTALL_RULE="install"
+	elif [[ -e "$OBJ_DIR"/setup.py ]] ; then
+	 MAKEFILE="./setup.py"
+	 ! [[ $MAKE_COMMAND ]] && MAKE_COMMAND="python ./setup.py build"
+	 # need to try: "python ./setup.py install --root=$PKG_DIR"
+	 ! [[ $INSTALL_LINE ]] && INSTALL_LINE="python ./setup.py install"
+	fi
+}
+
+find_makefile_includes() {
+# get a list of the include statements in the main Makefile
+# we are already in the OBJ_DIR, so write the files right here
+cd "$OBJ_DIR"
+if [[ $(grep '^include' $MAKEFILE) ]] ; then
+	grep '^include' $MAKEFILE > make-file-includes-1
+fi
+# start final  list with the main Makefile
+echo $MAKEFILE > make-file-includes-all
+# if these are cmake sources, check for the cmake_install.cmake file
+# if present, it may contain the CMAKE_INSTALL_PREFIX (see unionfs-fuse sources)
+[[ -f cmake_install.cmake ]] && echo 'cmake_install.cmake' >> make-file-includes-all
+
+if [[ -f make-file-includes-1 ]] ; then
+	while read LINE ; do
+		#FILE=$(eval echo ${LINE#* } 2> /dev/null)
+		FILE=${LINE#* }
+		FILE=${FILE/\$\(DEPTH\)\//}
+		FILE=${FILE/\$\(topdir\)\//}
+		if [[ -f $FILE ]] ; then
+			# add this included file to the list
+			echo $FILE >> make-file-includes-all
+			# If this file has include lines add them to a new list
+			if [[ $(grep '^include' $FILE) ]] ; then
+				grep '^include' $FILE >> make-file-includes-2
+			fi
+		fi
+	done < make-file-includes-1
+fi
+
+if [[ -f make-file-includes-2 ]] ; then
+	while read LINE ; do
+		#FILE=$(eval echo ${LINE#* } 2> /dev/null)
+		FILE=${LINE#* }
+		FILE=${FILE/\$\(DEPTH\)\//}
+		FILE=${FILE/\$\(topdir\)\//}
+		if [[ -f $FILE ]] ; then
+			echo $FILE >> make-file-includes-all
+		fi
+	done < make-file-includes-2
+fi
+
+# in case DESTDIR is only found in subdirs -see gperf for an example where topdir Makefile
+# does not contain DESTDIR, but subdir Makefiles do. 
+# This is gonna make the search slow for sources with lots of subdirs...
+for MF in $(find * -name $MAKEFILE) ; do
+	case $MF in
+		$MAKEFILE) : ;;
+		*) echo $MF >> make-file-includes-all
+	esac
+done
+
+! [[ $DEBUG = '' ]] && rm -f make-file-includes-1 make-file-includes-2
+
+}

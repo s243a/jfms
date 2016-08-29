@@ -1,0 +1,493 @@
+# /etc/src2pkg/src2pkg.conf Version 2.9
+# This file is part of the src2pkg program:
+# src2pkg - Copyright 2005-2013 Gilbert Ashley <amigo@ibilio.org>
+# src2pkg is released under the GNU General Public License Version 2
+
+# Only change stuff here that you want to *always* apply.
+# Most configuration options are set up with sane defaults
+# in the file /usr/libexec/src2pkg/DEFINES.
+# This src2pkg.conf file is not required for src2pkg to work
+# You can use any src2pkg variable in this file, but it really
+# should only be used for options which are non package-specific.
+# 
+# Individual users can also have their own src2pkg.conf file.
+# It should be named .src2pkg.conf and placed in their $HOME directory
+# - that is the file should be: ~/.src2pkg.conf
+# Since the GLOBAL_CONF file in /etc/src2pkg/src2pkg.conf is read
+# afterwards, this gives the system administrator a chance to
+# override any risky or unwanted settings by using the proper syntax
+# which declares variables unconditionally, like this(without #):
+# SRC_BUILDS_DIR="/tmp"  instead of:
+# '[[ $SRC_BUILDS_DIR ]] || SRC_BUILDS_DIR="$CWD"'
+# SOURCES_DIR=${SOURCES_DIR:-$CWD}
+
+# Signature for line 11 of automatically created slack-desc files
+# PACKAGER=""
+# SIGNATURE="Packaged by $PACKAGER"
+
+# SIG is a suffix to BUILD for 'signing' package names
+# [[ $SIG ]] || SIG=""
+
+# settings for generic puppy
+[[ $ARCH ]] || ARCH="i486"
+[[ $MARCH_FLAG ]] || MARCH_FLAG="i486"
+[[ $PKG_FORMAT ]] || PKG_FORMAT=pet
+PET2=1
+[[ $INIT_DIR ]] || INIT_DIR=/etc/rc.d
+
+# Uncomment to turn off color prompting
+# COLOR_PROMPT="NO"
+
+# Uncomment to always see all ouput from commands
+# QUIET="NO"
+
+# src2pkg defaults to using prefix=/usr, but you can
+# uncomment and edit the next line to change this (not recommended)
+# [[ $PRE_FIX ]] || PRE_FIX=/usr
+
+# specify the program for downloading files 
+# wget, rsync, curl and lynx are supported --wget is used by default
+# DOWNLOADER=wget
+# specify options to the downloader program (only for wget or aria2c)
+# the options shown are the defaults which are used for wget
+# DOWNLOADER_OPTIONS="--tries=3 --timeout=15 -O"
+
+# Do not create md5 schecksums by default
+# uncomment if you want src2pkg to create md5 checksums for each package
+# CREATE_MD5_CHECKSUM="YES"
+
+## Extended database features:
+## src2pkg can generate files to include in the package which list the package
+## dependencies and/or the list of libraries supplied by the package
+## Setting EXTENDED_DATABASE="YES" causes both features to be enabled
+## Or, they can be controlled individually
+# [[ $EXTENDED_DATABASE ]] || EXTENDED_DATABASE="YES"
+# Do not generate a PKG_REQUIRED (slack-required) file by default
+# uncomment if you want to create slack-required files in the package
+# [[ $ADD_REQUIRED_FILE ]] || ADD_REQUIRED_FILE="YES"
+# by default only simple package names are listed in the PKG_REQUIRED file
+# [[ $INCLUDE_DEP_VERSIONS ]] || INCLUDE_DEP_VERSIONS="NO"
+# by default, the base packages glibc, aaa_elflibs and gcc are left out of  the PKG_REQUIRED file
+# [[ $INCLUDE_BASE_LIBS ]] || EXCLUDE_BASE_LIBS=NO
+
+# Do not generate a PKG_PROVIDES (slack-provides) file by default
+# uncomment if you want to create slack-provides files in the package
+# [[ $ADD_PROVIDES_FILE ]] || ADD_PROVIDES_FILE="YES"
+# you can specify the names to use for the 'required' and 'provides' files
+# or they will be named 'slack-required' and 'slack-provides' by default
+# [[ $PKG_REQUIRED ]] || PKG_REQUIRED='pkg-required'
+# [[ $PKG_PROVIDES ]] || PKG_PROVIDES='pkg-provides'
+ 
+# [[ $PKG_SUGGEST ]] || PKG_SUGGESTS='pkg-suggests'
+# [[ $PKG_CONFLICTS ]] || PKG_CONFLICTS='pkg-conflicts'
+
+# note that the standard Slackware pkgtools does not support these features.
+# However, if the files use the default 'slack-*' name this will not cause
+# any problems. If you choose another name, installpkg will not remove
+# them when the package is installed and will fail to remove the  /install directory
+# The 'slack-required' files are used by package managers like slapt-get to
+# resolve dependencies when installing packages. The slack-provides
+# are only used to provide a complete listing of libraries installed by the package.
+# the slack-provides files can only be used with a package installer which
+# supports them.
+
+# options for inclusion of src2pkg scripts inside the package
+# by default src2pkg build scripts are not included in the package
+# if you want them to be included uncomment the next line
+[[ $ADD_SRC2PKG_SCRIPT ]] || ADD_SRC2PKG_SCRIPT="YES"
+# The default directory for including src2pkg build scripts if ADD_SRC2PKG_SCRIPT="YES"
+# By default the scripts are placed in the same directory with the package documents (DOC_DIR)
+# opinions vary greatly as to what is the best place to put them if they are included.
+# src2pkg provides a directory structure under /user/src/src2pkg where they can be placed
+# To use that location, uncomment the following line or edit to your preference for another location
+# [[ $SRC2PKG_SCRIPT_DIR ]] || SRC2PKG_SCRIPT_DIR="/usr/src/src2pkg/scripts"
+# Do not use program  version numbers by default when placing scripts somewhere besides DOC_DIR
+# uncomment the following line to include the version number
+# [[ $USE_VERSION_NUMBERS ]] || USE_VERSION_NUMBERS="YES"
+# By default, if src2pkg scripts are stored outside of DOC_DIR, do not link to them in DOC_DIR
+# uncomment the following line to have links created
+# [[ $LINK_SCRIPT_TO_DOC_DIR ]] || LINK_SCRIPT_TO_DOC_DIR="YES"
+# Summary: if you don't want src2pkg scripts included in your packages leave all the above commented out
+# If you want to include scripts with the documents, uncomment the ADD_SRC2PKG_SCRIPT="YES" line
+# If you want to include scripts but in some other location, uncomment the ADD_SRC2PKG_SCRIPT="YES" line
+# and edit the SRC2PKG_SCRIPT_DIR line to suit your preferences. The directory given should be a
+# base directory where a directory for each program will exist. By default, each directory will be named
+# simply with the program NAME. If you want to include the version number in the directory name
+# uncomment the USE_VERSION_NUMBERS="YES" line.
+# If you are using any directory other than the DOC_DIR and want links to be created in the DOC_DIR
+# to the included src2pkg scripts, uncomment the LINK_SCRIPT_TO_DOC_DIR="YES" line
+
+# compatibility options
+# src2pkg normally does quite a few checks and corrections to make sure that
+# documents, man-pages, info pages and other files are in the 'proper' location
+# according to the standard Slackware directory layout. The variable FHS_POLICY
+# allows this to be changed or limited. The default setting is FHS_POLICY=SLACK
+# setting this to FHS_POLICY=LSB allows for lsb-compliant locations for docs,
+# man-pages and info pages. Setting this to FHS_POLICY=NONE allows for
+# all files in a package to be located under a single directory. Do not change this
+# option unless you have a very good reason and have studied what it does.
+[[ $FHS_POLICY  ]] || FHS_POLICY=NONE
+
+# PKG_FORMAT
+# src2pkg can create packages using bzip2 or lzma instead of gzip. These packages
+# are not compatible with standard Slackware pkgtools, but can be installed using
+# the tukaani pkgtools or other installers which support them. This defaults to
+# the normal 'tgz' packages, or can be set to 'tbz' for bzip2 or 'tlz' for lzma
+# [[ $PKG_FORMAT ]] || PKG_FORMAT="tgz"
+
+# COMPRESS_BINS 
+# src2pkg can automatically compress binaries  in the package, using upx, upx-ucl or exepak, if
+# available on your system. This can save a lot of space in your packages and on your hard-drive.
+#It may  occasionally cause problems, but most binary executables work fine compressed. You need 
+# to have upx-ucl,upx or exepak  installed on your system for this to work -src2pkg does not supply them.
+# BIN_COMPRESSOR
+# You can choose which compressor to ues. The default is to use upx-ucl since it is open source.
+# uncomment the following line to use upx (or edit to use some other program like exepak)
+# [[ $BIN_COMPRESSOR ]] || BIN_COMPRESSOR=upx
+# You can set the options to upx/upx-ucl here. Possible options include -1 to -9, --best, --brute, --ultra-brute
+# The default is '--brute' which seems to be the fastest way to achieve the best compression
+# [[ $BIN_COMPRESSOR_OPTIONS ]] || BIN_COMPRESSOR_OPTIONS="--brute"
+# If you use 'exepak' as the BIN_COMPRESSOR, the only option is '-b#', where # is the block size.
+# src2pkg will not attempt to compress files smaller than the COMPRESSION_SIZE_LIMIT
+# the default size limit is 50K. Files smaller than ~50K may be *larger* after compression. exepak
+# doesn't compress programs as well as either upx or upx-ucl, but works with files down to 5K.
+# [[ $COMPRESSION_SIZE_LIMIT ]] || COMPRESSION_SIZE_LIMIT=50
+# Uncomment the following line to have binaries compressed
+# [[ $COMPRESS_BINS ]] || COMPRESS_BINS=YES
+# Be sure to test compressed programs to be sure they work!
+
+# Preferred type of installation -this allows you to set the default method to use
+# for creating package content. The JAIL installation method uses
+# the libsentry libraries to install files directly into the PKG_DIR in much
+# the same was as using the DESTDIR variable -except that this method can
+# be used with Makefiles that don't support the DESTDIR variable. You can also
+# set this to REAL to  use the method that used to be the src2pkg default.
+# Using REAL lets the 'make install' command write files directly to your
+# real root '/' directory. But files which are about to be overwritten are backed up
+# first and then restored before package creation is finished.
+# Using DESTDIR is familiar to and trusted by many people. If you choose this
+# method and it is not supported by the Makefile(s) for a package you are building,
+# src2pkg will revert to using the JAIL method.
+# Using the DESTDIR or JAIL method and building packages while logged in
+# a normal user is probably the safest way to make packages. 
+# The REAL method can only be used while logged in as root, but it is the most 
+# precise -that is it is the most likely to install all the files that are supposed to be
+# installed and in the right place. Use it when you are having problems with the
+# other two methods. Some packages can only be built correctly by using the -REAL
+# option. When possible, avoid using this option to build packages of software which
+# is already installed to your system. The backup feature works very well with real
+# directories and files, but may not correctly backup some links.
+[[ $INSTALL_TYPE ]] || INSTALL_TYPE=DESTDIR
+
+## Options for interactivity
+# QUERY_FOR_EXTRA_CONFIGS lets you configure sources interactively
+# by first running './configure --help' to let you see available options and then
+# waiting for input from the user which will be set in the EXTRA_CONFIGS variable
+# uncomment the following line for interactive mode
+# QUERY_FOR_EXTRA_CONFIGS=YES
+# CONFIRM_BUILD lets you pause after configuring the sources to confirm whether
+# you want to continue by compiling the sources and creating the package
+# CONFIRM_BUILD=YES
+# QUERY_FOR _PKG_DESC lets you pause to add a package description whenever
+# a default slack-desc (PKG_DESC) is being created
+# QUERY_FOR_PKG_DESC=YES
+# You can set the above three options individually by uncommenting the line or lines you want
+# or use all the interactive features together by uncommenting the line below:
+# INTERACTIVE_MODE="ALL"
+
+## Working Directories
+# The default settings for these are like for Slackware SlackBuilds:
+#
+# The tarball, or link to it, is in the current directory 
+# SOURCES_DIR="$CWD"
+# Sources are unpacked and built in /tmp
+# SRC_BUILDS_DIR="/tmp"
+# The package build tree is also in /tmp
+# PKG_BUILDS_DIR="/tmp"
+# Finished packages are left in /tmp
+# PKG_DEST_DIR="/tmp"
+#
+# libsentry needs a directory to backup overwritten files:
+# BACKUP_DIR=/tmp
+# If you keep backup archives they will saved to this directory:
+# BACKUPS_SAVE_DIR=/tmp
+
+# You can create a separate directory for each package
+# and then do everything in the current directory:
+# This is the way that I use src2pkg so that I can
+# easily see both the compiled sources directory
+# and the uncompressed package tree.
+[[ $SOURCES_DIR ]] || SOURCES_DIR="$CWD"
+[[ $SRC_BUILDS_DIR ]] || SRC_BUILDS_DIR="$CWD"
+[[ $PKG_BUILDS_DIR ]] || PKG_BUILDS_DIR="$CWD"
+[[ $PKG_DEST_DIR ]] || PKG_DEST_DIR="$CWD"
+[[ $BACKUP_DIR ]] || BACKUP_DIR="$CWD"
+#
+# You can also set it up like rpm does and use the build area
+# in /usr/src/src2pkg. There are subdirectories with the names
+# 'packages', 'sources' and 'scripts'. You can place all source
+# archives in the 'sources' directory. Then for each package
+# you want to build, create a new directory under the 'scripts'
+# directory. And you can have all the finished packages placed
+# in the 'packages directory. If plan to build packages as a normal
+# user you'll have to make sure that user has permission to
+# read and write to all these directories. Then you can set up the
+# directory variables like this:
+# [[ $SOURCES_DIR ]] || SOURCES_DIR="/usr/src/src2pkg/sources"
+# [[ $SRC_BUILDS_DIR ]] || SRC_BUILDS_DIR="/tmp"
+# [[ $PKG_BUILDS_DIR ]] || PKG_BUILDS_DIR="/tmp"
+# [[ $PKG_DEST_DIR ]] || PKG_DEST_DIR="/usr/src/scr2pkg/packages"
+# [[ $BACKUP_DIR ]] || BACKUP_DIR="$CWD"
+# PATCHES_DIR - You can put patches in a common dir
+# [[ $PATCHES_DIR ]] || PATCHES_DIR="$CWD"
+
+# If you are using some architecture besides ix86, you may want to
+# change the defaults for these. See the DEFINES file for more
+# info on how these are set by src2pkg
+# [[ $STD_CONFIGS  ]]  ||  STD_CONFIGS=
+# [[ $STD_FLAGS ]] || STD_FLAGS=
+# This is a better place to put extra compiler flags -for example '-pipe'
+# [[ $EXTRA_FLAGS ]] || EXTRA_FLAGS="-pipe"
+# Here's an example for building really small binaries
+# [[ $EXTRA_FLAGS ]] || EXTRA_FLAGS="-pipe -momit-leaf-frame-pointer -fomit-frame-pointer -fmerge-all-constants -mpreferred-stack-boundary=2"
+# You can use EXTRA_LDFLAGS to pass extra options to the linker
+# This example helps keep binaries smaller
+# [[ $EXTRA_LDFLAGS ]] || EXTRA_LDFLAGS="-relax,--sort-common,--no-keep-memory"
+
+# set some useful, conservative and portable options
+[[ $EXTRA_FLAGS ]] || EXTRA_FLAGS="-pipe -fomit-frame-pointer -fno-strict-aliasing -Wno-shadow -Wno-unused"
+[[ $EXTRA_LDFLAGS ]] || EXTRA_LDFLAGS="--relax,--sort-common,--no-keep-memory"
+
+
+# DEFAULT_CONFIG_COMMAND
+# you may wish to use something else like 'linux32 ./configure'
+# [[ $DEFAULT_CONFIG_COMMAND ]] || DEFAULT_CONFIG_COMMAND='./configure'
+
+# DEFAULT_ MAKE_COMMAND
+# you may wish to use something else like 'remake', 'pmake'
+# [[ $DEFAULT_MAKE_COMMAND ]] || DEFAULT_MAKE_COMMAND='make'
+# JOBS  (MAKE_COMMAND)
+# the default number of concurrent jobs to use with the make command
+# This is blank by default. If you have a fast processor set it to '-j3' or more
+# [[ $JOBS ]] || JOBS='-j3'
+
+## User and user conf file authorizations
+## To use the following authorization options, the system administrator must
+# create a new group called 'src2pkg'. Adding a normal user to the group
+# then allows them to use src2pkg and/or personal src2pkg.conf files in their HOME.
+# AUTHORIZE_USERS="YES" only allows users in the src2pkg group to run src2pkg
+# AUTHORIZE_USER_CONF="YES" only disallows the use of personal conf files
+# for users who are not in the src2pkg group.
+# uncomment the following line to enable authorization of users
+# AUTHORIZE_USERS="YES"
+# uncomment the following line to enable authorization of personal conf files
+# AUTHORIZE_USER_CONF="YES"
+## Both of the options are off (set to NO) by default.
+
+## ALLOW_USER_EXTENSIONS
+## this option allows users to extend the src2pkg functions by adding code to
+# files in their $HOME/.src2pkg/extensions directory. The default setting  
+# for this setting is NO. Uncomment the following line to allow extensions
+# ALLOW_USER_EXTENSIONS="YES"
+
+## AUTO_CONFIG
+## src2pkg can search for options to the configure script and add them automatically
+# The option AUTO_CONFIG can be set to either FOREIGN or NATIVE
+# If set to FOREIGN, then src2pkg will try to retrieve options from any RPM *.spec file
+# or debian/rules file which is found in the sources
+# If AUTO_CONFIG is set to NATIVE, then src2pkg checks the configure script located
+# in the sources and adds some valid options among those found there.
+# Otherwise, src2pkg skips AUTO_CONFIG
+# AUTO_CONFIG=FOREIGN
+## AUTO_CONFIG_OPTIONS
+## When using AUTO_CONFIG=NATIVE, src2pkg will search the configure script for
+# a list of possible configure options. You can se the list of options that it should search for.
+# The default list is very short: AUTO_CONFIG_OPTIONS="sysconfdir localstatedir"
+# This is because many of these options will not always be the same from one package
+# to the next. Also, setting these when not really needed can make your scripts less
+# portable to other platforms or FHS policy standards. The two defaults listed above are
+# the ones that most commonly cause problems if not set. Another pretty safe one is datadir
+# You might also set: docdir, infodir and mandir, but this will make your scripts less portable
+# by hard-coding these into the script, and these can all be handled automatically anway
+# by setting FHS_POLICY. Here's a full list of the options which can be searched for:
+# bindir, sbindir, libexecdir, sysconfdir. sharedstatedir, localstatedir, libdir,
+# includedir,  oldincludedir, datarootdir, datadir, infodir, localedir, mandir,
+# docdir, htmldir, dvidir. pdfdir, psidir, gamesbindir, gamesdatadir
+# The default values for these are set in 01-pre_process according to your choice
+# of FHS_POLICY. Though they can also be set manually inside your scripts
+# you'll find it much easier to just set them using EXTRA_CONFIGS or the '-e=??' option
+#AUTO_CONFIG_OPTIONS="sysconfdir localstatedir"
+
+AUTO_CONFIG_OPTIONS="sysconfdir localstatedir infodir mandir"
+
+## LINK_LICENSES
+# Setting this to YES causes src2pkg to create a link to common licenses like GPL or LGPL
+# src2pkg looks through the document directory to locate copies of the GPL, LGPL and Artistic license
+# It then identifies the version of the license and moves it into a common-license directory and
+# creates a link to it from the regular document directory. This doesn't make the package any
+# smaller, but saves space on the disk being installed to. Saves a few MB on most systems.
+# Uncomment and set to YES to have the licenses linked in your packages.
+# LINK_LICENSES=NO
+
+## COMPRESS_DOCS
+# If you want to have the package documents compressed, uncomment this and set this to YES
+# Note that if you used LINK_LICENSES above, the link will remain apart from the docs archive.
+# COMPRESS_DOCS=NO
+## DOC_COMPRESSOR
+# Specify which compression method to use for compressing docs: gzip, bzip2 or lzma (default gzip)
+# DOC_COMPRESSOR=gzip
+## DOCLIST
+# Setting DOCLIST=MINIMAL will cause only a small subset of the possible documents
+# DOCLIST=MINIMAL 
+
+# DESC_WRAP_LENGTH
+# this variable tells text_wrapper how characters to use for each line
+# in the PKG_DESC files created -normal range is 70-80. Default is 80
+# [[ $DESC_WRAP_LENGTH ]] || DESC_WRAP_LENGTH=70
+# [[ $HANDY_RULER_TEXT ]] || HANDY_RULER_TEXT="Use this guide to format your text with"
+# this variable tells the text wrapper how many lines to pad the PKG_DESC file.
+
+## DESC_MAX_LINES
+# PKG_DESC files can have from 9 to 13 lines with the default being 11 lines
+# You can set this to any value from 9-13
+# [[ $DESC_MAX_LINES ]] || DESC_MAX_LINES=11
+
+## EXIT_ON_PATCH_FAILURE
+## By default, src2pkg only warns you when patching fails.
+## If you want src2pkg to exit when patches fail, uncomment the following line
+# [[ $EXIT_ON_PATCH_FAILURE ]] || EXIT_ON_PATCH_FAILURE="YES"
+
+## LOG_COMMANDS
+## If you don't want src2pkg to keep logs of the output from the 'configure',
+## 'make'  and 'make install' commands uncomment the following line
+# [[ $LOG_COMMANDS ]] || LOG_COMMANDS="NO"
+
+# By default, logs are written to the $OBJ_DIR. You can change the default here, but you can only use
+# $CWD or an absolute path
+# [[ $LOG_DIR ]] || LOG_DIR="$CWD"
+
+## AUTO_DESKTOP
+## Setting this to YES makes src2pkg try to create a *.desktop menu file when applicable.
+[[ $AUTO_DESKTOP  ]] || AUTO_DESKTOP=YES
+
+## AUDIO_NOTIFICATION
+## Now a little fun -src2pkg can notify you when a build is succesful or has failed
+## There are three modes: BEEP, PLAY and SAY. In 'beep' mode, src2pkg plays a beep sound
+## on the PC speaker. In 'play' mode, a recorded sound is played. In 'say' mode, src2pkg
+## uses flite or festival to speak a sentence. Notification takes place when a build has finished
+## successfully, when the build has failed or when the build is cancelled.
+## Various sounds are provided in /usr/share/src2pkg/sounds. See the README file there
+## if you want to change which sound is played for each event.
+## AUDIO_NOTIFICATION is off by default.
+#AUDIO_NOTIFICATION=SAY
+
+## TTS_ENGINE
+## If using AUDIO_NOTIFICATION=SAY,
+## you can specify which Text-To-Speech engine to use. 
+## 'flite' and 'festival' are supported. Defaults to 'flite'.
+#TTS_ENGINE="flite"
+
+######################################################################################
+## HOST_OS,  BUILD_OS and TARGET_OS
+## You can set these individually or all three will be set automatically set
+## The default value is the same as the output from the command 'gcc -dumpmachine'
+## That means they will match the native 'target' of the gcc compiler being used.
+## If you are using src2pkg to cross-compile programs, you may need to set
+## each of these variables to the appropriate values. These variables are not used
+## unless you uncomment one of the options below: ADD_EXPLICIT_HOST or ADD_HOST
+
+## ADD_EXPLICIT_HOST
+## Set this to YES to have the explicit BUILD_OS HOST_OS and TARGET_OS 
+## added to the configuration options where applicable. Using this option means that
+## the options are passed to the configure script explicitly as seen below:
+## CFLAGS=-O2 -march=i486 -mtune=i686 ./configure --prefix=/usr --build=i486-slackware-linux --host=i486-slackware-linux
+## Normally the --target=?? option does not apply so don't expect to always see it.
+#ADD_EXPLICIT_HOST=YES
+
+## ADD_HOST
+## Set this to YES to have the HOST_OS added to the configuration options
+## This is the simple way to add the HOST to the configure options. Using this option
+## adds the HOST_OS string at the end of the configure options. Here's an example
+## of the optioons to configure that you'd see using this option:
+## CFLAGS=-O2 -march=i486 -mtune=i686 ./configure --prefix=/usr i486-slackware-linux
+## This is the syntax seen in most Slackbuild scripts, and unless you are cross-compiling
+## you should never need to use any other settings beside setting this to YES:
+#ADD_HOST=YES
+
+## Adding the HOST string to the configure options is standard practice for most
+## SlackBuild scripts, but is rarely needed and only in a few cases will it
+## have any effect on the compiled program. Programs like 'bash', the Xorg server
+## browser or email clients pick up the HOST information and include it in the
+## text which is printed out when running the program with the --version option
+## or may be displayed when the program is started.
+## The inclusion of these variables is kept separate from the normal configuration
+## options to make your src2pkg scripts more portable. These variables and
+## their values do not get written into any generated src2pkg scripts. Instead,
+## these values are treated as 'transient' values which depend on which machine
+## they are being run on. Including them in the src2pkg build scripts would
+## mean that the script would have to be edited to use on another architecture.
+## For that reason, I discourage you from manually adding these options
+## to the EXTRA_CONFIGS variable.
+######################################################################################
+
+# UNIONFS_TYPE
+# You only need to set this if you use the -UNION (INSTALL_TYPE=UNION)  option
+# By default, src2pkg will use unionfs-fuse. If you'd rather use the unionfs kernel
+# module, uncomment the following line
+# [[ $UNIONFS_TYPE ]] || UNIONFS_TYPE=unionfs
+
+## COMPAT_NAME_SUFFIX
+# If building on a 64-bit multilib system, 32-bit compatibility packages should have
+# a unique name to avoid name conflicts with the normal packages. On Slackware,
+# the 32-bit compatibility packages add -compat32 to the name. On Slamd64, it's '32'
+# Uncomment and edit the following line to use anything other than '-compat32'
+# [[ $COMPAT_NAME_SUFFIX ]] || COMPAT_NAME_SUFFIX='-compat32'
+
+## COMPAT_NAME_PREFIX
+# Similarly, some multi-lib systems may name 32-bit packages using a prefix to the name
+# [[ $COMPAT_NAME_PREFIX ]] || COMPAT_NAME_PREFIX='ia32-'
+
+## FAIL_ON_BAD_DIRS
+# If a build installs 'incorrect' or potentially dangerous directories, src2pkg will, by default
+# abort the package build. Uncomment the following line to allow builds to continue anyway.
+[[ $FAIL_ON_BAD_DIRS ]] || FAIL_ON_BAD_DIRS=NO
+
+### Settings for creating debian *.deb packages
+## DEB_COMPAT
+# set the binary compat level for debian packages( defaults to 2.0)
+# DEB_COMPAT=2.0
+
+## PKG_COMPRESSOR
+# Set the compressor to use for data.tar (defaults to gzip)
+# Possible choices: gzip, bzip2, lzma, xz
+# PKG_COMPRESSOR=gzip
+
+## EXTRA_CMAKE_OPTIONS
+# Set any extra options to be used by cmake -excluding CMAKE_INSTALL_PREFIX, DLIB_SUFFIX
+# SYSCONF_INSTALL_DIR and LOCALSTATE_INSTALL_DIR
+# the defult setting for this is: "-DCMAKE_BUILD_TYPE=Release"
+# [[ $EXTRA_CMAKE_OPTIONS ]] || EXTRA_CMAKE_OPTIONS="-DCMAKE_BUILD_TYPE=Release"
+
+## EXIT_ON_CHECK_FAILURE
+# Uncomment if you want builds to abort when 'make check' (or TEST_COMMAND) fails
+# [[ $EXIT_ON_CHECK_FAILURE ]] || EXIT_ON_CHECK_FAILURE="YES"
+
+## DOC_SPLIT_SIZE
+# When using SPLIT_PACKAGE with 'docs', only create a 'NAME-docs' package if the documents contents
+# are above this limit (Total of DOC_DIR,MAN_DIR, INFO_DIR and PKG_DIR/usr/share/gtk-doc)
+# The figure you give here should be how many KB (kilobytes) to set the limit to.
+# The default is 100 K (100 kilobytes). If you want *lots* of little docs packages, use 50 or 20 :-( 
+# [[ $DOC_SPLIT_SIZE ]] || DOC_SPLIT_SIZE=100
+
+# MOVE_LIBTOOL_FILES
+# If you want to preserve libtool *.la files, but not have copies
+# left in a split binary package, then uncomment this
+# [[ $MOVE_LIBTOOL_FILES ]] || MOVE_LIBTOOL_FILES="YES"
+
+# PKG_EXCLUDES
+# PKG_EXCLUDES lets you 'blacklist' certain files or directories from a package
+# If you want to always check packages for certain items and remove them,
+# then uncomment and edit the following line:
+#! [[ $PKG_EXCLUDES ]] && PKG_EXCLUDES=/dev,/proc,/sys
+# A more aggressive example might include: /dev,/proc,/sys,/tmp,/var/tmp,/initrd
+# Otherwise, you can use PKG_EXCLUDES as an environmental variable or place it in a *.src2pkg build script

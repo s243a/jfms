@@ -1,0 +1,3 @@
+http://distro.ibiblio.org/pub/linux/distributions/amigolinux/examples/which/which-2.20.tar.gz
+http://distro.ibiblio.org/pub/linux/distributions/amigolinux/download/Utils/disktype-8/disktype-8.tar.gz
+http://distro.ibiblio.org/pub/linux/distributions/amigolinux/download/Utils/tar-1.13/tar-1.13.tar.bz2

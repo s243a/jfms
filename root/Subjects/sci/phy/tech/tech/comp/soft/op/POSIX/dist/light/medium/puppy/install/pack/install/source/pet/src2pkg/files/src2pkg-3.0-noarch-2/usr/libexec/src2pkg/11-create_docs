@@ -1,0 +1,607 @@
+# This file is part of the src2pkg program:
+# Copyright 2005-2013 Gilbert Ashley <amigo@ibilio.org>
+# src2pkg is released under the GNU General Public License Version 2
+
+### create_docs
+create_docs() {
+if [[ $ALLOW_USER_EXTENSIONS = "YES" ]] ; then
+ # check if the user has any pre-execution extensions to this file and run them, if so.
+ [[ -f "$HOME"/.src2pkg/extensions/11.pre ]] && . "$HOME"/.src2pkg/extensions/11.pre
+fi
+
+if [[ "$FAILED" = "" ]] && [[ ! $USER_CANCELLED ]] ; then
+ if [[ ! $RESUME ]] || [[ $RESUME = $FUNCNAME ]] || [[ $HAVE_RESUMED ]] ; then
+	[[ $RESUME = $FUNCNAME ]] && HAVE_RESUMED=1 && echo $CYAN"Notice - "$BLUE"Resuming build at: "$NORMAL "$FUNCNAME"
+	if [[ $PAUSE = "BEFORE" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+		echo $MAGENTA"Notice - "$BLUE"Pausing before: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+		read
+	fi
+
+	! [[ $CONFIG_DIR ]] && CONFIG_DIR=$SRC_DIR
+	cd $PKG_DIR ;
+	if [[ $(find . -type f) = "" ]] ; then
+		echo $RED"ERROR!  "$NORMAL"The package tree has no content!"
+		echo "For now, we bail out from the top of create_docs."
+		FAILED="EMPTY PKG_DIR in: $FUNCNAME"
+	elif [[ "$CORRECT_DOCS" = "YES" ]] ; then
+		# Move docs which don't agree with the system type
+		if [[ -L "$PKG_DIR"/$BAD_DOC_PATH ]] ; then
+			rm -f "$PKG_DIR"/$BAD_DOC_PATH
+		fi
+		if [[ -L "$PKG_DIR"/$GOOD_DOC_PATH ]] ; then
+		rm -f "$PKG_DIR"/$GOOD_DOC_PATH
+		fi
+		if [[ -d "$PKG_DIR"/$BAD_DOC_PATH ]] && [[ $(ls "$PKG_DIR"/$BAD_DOC_PATH/ 2> /dev/null) != "" ]] ; then
+			echo $CYAN"   Notice - "$NORMAL"Moving docs installed under $BAD_DOC_PATH to $GOOD_DOC_PATH."
+			mkdir -p "$PKG_DIR"/${GOOD_DOC_PATH}
+			( cd "$PKG_DIR"/$BAD_DOC_PATH && tar --remove-files -cpf - * | tar -f - -xpC "$PKG_DIR"/$GOOD_DOC_PATH )
+			# remove nicely, if possible
+			rmdir "$PKG_DIR"/$BAD_DOC_PATH/* 2> /dev/null
+			rmdir "$PKG_DIR"/$BAD_DOC_PATH 2> /dev/null
+			
+		fi
+		
+		if [[ -d "$PKG_DIR"/$BAD_DOC_PATH ]] && [[ $(ls "$PKG_DIR"/$BAD_DOC_PATH/ 2> /dev/null) = "" ]] ; then
+			echo $BLUE"Removing empty $BAD_DOC_PATH directory - "$NORMAL
+			rm -rf "$PKG_DIR"/$BAD_DOC_PATH
+		fi
+		# if nothing else was installed under share then remove it
+		if [[ -d "$PKG_DIR"/usr/share ]] && [[ $(ls "$PKG_DIR"/usr/share/ 2> /dev/null) = "" ]] ; then
+			echo $BLUE"Removing empty usr/share directory - "$NORMAL
+			rm -rf "$PKG_DIR"/usr/share
+		fi
+		# if docs have been installed without a version number correct it
+		if [[ -d "$PKG_DIR"/$GOOD_DOC_PATH/$NAME ]] ; then
+			if [[ ! -d "$PKG_DIR"/$GOOD_DOC_PATH/$NAME-$VERSION ]] ; then
+				echo $CYAN"   Notice - "$NORMAL"Renaming doc directory installed without a version number."
+				( cd "$PKG_DIR"/$GOOD_DOC_PATH ; mv $NAME $NAME-$VERSION &> /dev/null )
+			fi
+		elif [[ -d "$PKG_DIR"/$GOOD_DOC_PATH ]] && [ $(ls "$PKG_DIR"/$GOOD_DOC_PATH |wc -l) -eq 1 ] ; then
+			if [[ ! -d "$PKG_DIR"/$GOOD_DOC_PATH/$NAME-$VERSION ]] ; then
+				DIRME=$(ls "$PKG_DIR"/$GOOD_DOC_PATH)
+				echo $CYAN"   Notice - "$NORMAL"Renaming doc directory installed without a version number."
+				( cd "$PKG_DIR"/$GOOD_DOC_PATH ; mv $DIRME $NAME-$VERSION &> /dev/null )
+			fi
+		fi
+	fi
+	! [[ -d "$DOC_DIR" ]] && mkdir -p "$DOC_DIR"
+
+	if [[ $DOCLIST = "MINIMAL" ]] ; then
+		rm -rf $DOC_DIR
+		mkdir -p $DOC_DIR
+		echo -n $BLUE"Checking for minimal set of documents - "$NORMAL
+		for SEARCH_PATH in "$CONFIG_DIR" "$SRC_DIR" ; do
+			for doc in $(find "$SEARCH_PATH" -maxdepth 1 -name "README*" -o -name "*.README" -o -name "Readme*" -o -name "readme*") ; do
+				cp -f $doc "$DOC_DIR" &> /dev/null
+			done
+			for doc in $(find "$SEARCH_PATH" -maxdepth 1 -name "GPL*" -o -name "gpl*" -o -name "LGPL*" -o -name "lgpl*" -o -name "COPYING*") ; do
+				cp -f $doc "$DOC_DIR" &> /dev/null
+			done
+			for doc in $(find "$SEARCH_PATH" -maxdepth 1 -name "LICENCE*" -o -name "LICENSE*" -o -name "License*" -o -name "license*") ; do
+				cp -f $doc "$DOC_DIR" &> /dev/null
+			done
+		done
+		echo $GREEN"Done"$NORMAL
+	elif [[ $DOCLIST != "" ]] ; then
+		echo -n $BLUE"Copying documents - "$NORMAL"Using user-supplied DOCLIST - "
+		for doc in $DOCLIST ; do
+			if [[ -e "$CONFIG_DIR"/$doc ]] ; then
+			  cp -a "$CONFIG_DIR"/$doc "$DOC_DIR" &> /dev/null
+			elif [[ -e "$SRC_DIR"/$doc ]] ; then
+			  cp -a "$SRC_DIR"/$doc "$DOC_DIR" &> /dev/null
+			fi
+		done
+		echo $GREEN"Done"$NORMAL
+	else
+		# some doc installations are quite incomplete so search for more
+		echo -n $BLUE"Checking for standard documents - "$NORMAL
+		# handle this in several passes to avoid such a long line here
+		for doc in ABOUT ANNOUNCE AUTHORS BUGS CHANGES \
+				CONTRIBUTORS COPYRIGHT CREDITS FAQ FEATURES \
+				History HINTS HISTORY INSTALL LSM $NAME-$VERSION.lsm $NAME.lsm MANIFEST \
+				NEWS PKGINFO PKG-INFO THANKS TIPS TODO VERSION CONFIGURATION ; do
+			if [[ -f "$CONFIG_DIR"/$doc ]] ; then                                                 
+				cp -a "$CONFIG_DIR"/$doc "$DOC_DIR" &> /dev/null
+			elif [[ -f "$SRC_DIR"/$doc ]] ; then
+				cp -a "$SRC_DIR"/$doc "$DOC_DIR" &> /dev/null
+			fi
+		done
+		# For changelogs, trim the size to 1000 lines as some of these are really big.
+		for doc in CHANGELOG ChangeLog Changelog ; do
+			if [[ -f "$CONFIG_DIR"/$doc ]] ; then                                                 
+				#cp -a "$CONFIG_DIR"/$doc "$DOC_DIR" &> /dev/null
+				head -n 1000 "$CONFIG_DIR"/$doc > "$DOC_DIR"/$doc
+				touch -r "$CONFIG_DIR"/$doc "$DOC_DIR"/$doc
+			elif [[ -f "$SRC_DIR"/$doc ]] ; then
+				#cp -a "$SRC_DIR"/$doc "$DOC_DIR" &> /dev/null
+				head -n 1000 "$SRC_DIR"/$doc > "$DOC_DIR"/$doc
+				touch -r "$SRC_DIR"/$doc "$DOC_DIR"/$doc
+			fi
+		done
+		
+		# wildcards don't work well above, so use find
+		# we do each set twice and force copy , so if a doc exists in the toplevel it gets priority
+		for SEARCH_PATH in "$CONFIG_DIR" "$SRC_DIR" ; do
+			for doc in $(find "$SEARCH_PATH" -maxdepth 1 -name "README*" -o -name "*.README" -o -name "Readme*" -o -name "readme*") ; do
+				cp -f $doc "$DOC_DIR" &> /dev/null
+			done
+			for doc in $(find "$SEARCH_PATH" -maxdepth 1 -name "GPL*" -o -name "gpl*" -o -name "LGPL*" -o -name "lgpl*" -o -name "COPYING*") ; do
+				cp -f $doc "$DOC_DIR" &> /dev/null
+			done
+			for doc in $(find "$SEARCH_PATH" -maxdepth 1 -name "LICENCE*" -o -name "LICENSE*" -o -name "License*" -o -name "license*") ; do
+				cp -f $doc "$DOC_DIR" &> /dev/null
+			done
+		done
+		  
+		if [[ $(find "$PKG_DIR"/$GOOD_DOC_PATH -type f) = "" ]] ; then
+			echo "None found yet..."
+		else
+			echo $GREEN"Done"$NORMAL
+		fi
+	fi
+	cd "$PKG_DIR"/$GOOD_DOC_PATH ;
+	
+	if [[ $(find -type f) != "" ]] ; then
+		true
+	elif [[ -d "$SRC_DIR"/doc ]] ; then
+		echo -n $BLUE"Installing documents from SRC_DIR/doc -"$NORMAL
+		cp -a "$SRC_DIR"/doc/*.txt "$SRC_DIR"/doc/*.doc "$SRC_DIR"/doc/*.ps \
+		"$SRC_DIR"/doc/*.html "$SRC_DIR"/doc/*.htm "$DOC_DIR"/ &> /dev/null
+		echo $GREEN"Done"$NORMAL
+	elif [[ -d "$SRC_DIR"/Doc ]] ; then
+		echo -n $BLUE"Installing documents from SRC_DIR/Doc -"$NORMAL
+		cp -a "$SRC_DIR"/Doc/*.txt "$SRC_DIR"/Doc/*.doc "$SRC_DIR"/Doc/*.ps \
+		"$SRC_DIR"/Doc/*.html "$SRC_DIR"/Doc/*.htm "$DOC_DIR"/ &> /dev/null
+		echo $GREEN"Done"$NORMAL
+	elif [[ -d "$SRC_DIR"/docs ]] ; then
+		echo -n $BLUE"Installing documents from SRC_DIR/docs -"$NORMAL
+		cp -a "$SRC_DIR"/docs/*.txt "$SRC_DIR"/docs/*.doc "$SRC_DIR"/docs/*.ps \
+		"$SRC_DIR"/docs/*.html "$SRC_DIR"/docs/*.htm "$DOC_DIR"/ &> /dev/null
+		echo $GREEN"Done"$NORMAL
+	elif [[ -d "$SRC_DIR"/Docs ]] ; then
+		echo -n $BLUE"Installing documents from SRC_DIR/Docs -"$NORMAL
+		cp -a "$SRC_DIR"/Docs/*.txt "$SRC_DIR"/Docs/*.doc "$SRC_DIR"/Docs/*.ps \
+		"$SRC_DIR"/Docs/*.html "$SRC_DIR"/Docs/*.htm "$DOC_DIR"/ &> /dev/null
+		echo $GREEN"Done"$NORMAL
+	fi
+	
+	cd "$DOC_DIR"
+	if [[ -n "$EXTRA_DOCS" ]] ; then
+		echo -n $BLUE"Installing extra docs - "$NORMAL
+		for DOC in $EXTRA_DOCS ; do
+			cp -af "$SRC_DIR"/"$DOC" "$DOC_DIR" #&> /dev/null
+		done
+		echo $GREEN"Done"$NORMAL
+	fi
+	cd "$PKG_DIR"/$GOOD_DOC_PATH
+	
+	if [[ $(find -type f) = "" ]] ; then 
+		#echo "None found"
+		echo $CYAN"NOTICE - "$NORMAL"No documents were found in the sources."
+	fi	
+	if [[ $DOCLIST != "MINIMAL" ]] ; then 
+	  for FILENAME in $NAME.html $NAME.htm $ORIG_NAME.html $ORIG_NAME.htm $NAME.txt $ORIG_NAME.txt ; do
+		for SEARCH_PATH in "$PATCHES_DIR" "$SRC_DIR" "$PATCHES_DIR"/$NAME-patches "$CWD"/patches "$CWD"/Resources ; do
+			if [[ -f $SEARCH_PATH/$FILENAME ]] ; then
+				case $SEARCH_PATH in
+					$CWD) echo $BLUE"Found '$FILENAME' in CWD - "$NORMAL"Copying to DOC_DIR" ;;
+					$SRC_DIR) echo $BLUE"Found '$FILENAME' in SRC_DIR - "$NORMAL"Copying to DOC_DIR" ;;
+					*) echo $BLUE"Found '$FILENAME' in $(basename $SEARCH_PATH) - "$NORMAL"Copying to DOC_DIR" ;;
+				esac 
+				mkdir -p $DOC_DIR
+				cp $SEARCH_PATH/$FILENAME $DOC_DIR
+				FOUNDIT=1
+			fi
+			[[ $FOUNDIT = 1 ]] && break ;
+		done
+		[[ $FOUNDIT = 1 ]] && break ;
+	  done
+	fi
+	
+	cd "$PKG_DIR" ;
+	if [[ $(find $GOOD_DOC_PATH -type f -size 0) ]] && [[ "$CORRECT_DOCS" = "YES" ]] ; then
+		echo $BLUE"Found empty documents - "$NORMAL"Removing zero-length files in DOC_DIR."
+		find $GOOD_DOC_PATH -type f -size 0 -exec rm -f {} \;
+	fi
+	find "$GOOD_DOC_PATH" -type f -exec chmod 644 {} \;
+	# be more thorough... for really weird installations
+	find "$PKG_DIR"/$PRE_FIX -path './*/doc/*' -type f -exec chmod 644 {} \;
+	find "$PKG_DIR"/$PRE_FIX -path './*/share/doc/*' -type f -exec chmod 644 {} \;
+	find "$PKG_DIR"/$PRE_FIX -path './*/share/$NAME/doc/*' -type f -exec chmod 644 {} \;
+	
+	if [[ $(find $GOOD_DOC_PATH -type f) = "" ]] ; then 
+		echo $BLUE"Removing empty DOC_DIR - "$GREEN"Done"$NORMAL
+	fi
+	# check for other files
+	advanced_docs
+	if [[ $PAUSE = "AFTER" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+		echo $MAGENTA"Notice - "$BLUE"Pausing after: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+		read
+	fi
+ fi
+fi
+
+if [[ $ALLOW_USER_EXTENSIONS = "YES" ]] ; then
+ # check if the user has any post-execution extensions to this file and run them, if so.
+ [[ -f "$HOME"/.src2pkg/extensions/11.post ]] && . "$HOME"/.src2pkg/extensions/11.post
+fi
+
+}
+# end create_docs
+
+# Internal Routine
+advanced_docs() {
+
+# correct any mis-placed pkgconfig directories
+if [[ -d $PKG_DIR/usr/share/pkgconfig ]] ; then
+	echo $CYAN"   Notice - "$NORMAL"Moving pkgconfig files from usr/share/pkgconfig to usr/lib${LIBDIRSUFFIX}/pkgconfig"
+	mkdir -p $LIB_DIR/pkgconfig
+	mv $PKG_DIR/usr/share/pkgconfig/* $LIB_DIR/pkgconfig 2> /dev/null
+	rmdir $PKG_DIR/usr/share/pkgconfig
+fi
+## look for pkgconfig '*.pc' files first in the sources
+if [[ $AUTO_PC = 'NO' ]] ; then
+	if [[ ! -f $LIB_DIR/pkgconfig/*.pc ]] ; then
+		if [[ $(find "$SRC_DIR" -name '*.pc'  ! -name '*uninstalled.pc' 2> /dev/null) ]] ; then
+			# try to validate the file -sometimes sources contain a *.pc file which is not
+			# a pkgconfig file (example: cpio's Makefile.pc)
+			echo $BLUE"Found pkgconfig (.pc) file in SRC_DIR - "$NORMAL"Copying to PKG_DIR$libdir/pkgconfig"
+			for pcfile in $(find "$SRC_DIR" -name '*.pc' ! -name '*uninstalled.pc') ; do
+				if [[ $(grep Cflags $pcfile) ]] ; then
+					mkdir -p $LIB_DIR/pkgconfig
+					cat $pcfile > $LIB_DIR/pkgconfig/$(basename $pcfile)
+				fi
+			done
+		fi
+	fi
+	# then check in the other search paths
+	for SEARCH_PATH in "$CWD" "$PATCHES_DIR"/$NAME-patches "$CWD"/patches "$CWD"/Resources ; do
+		if [[ $(find "$SEARCH_PATH" -maxdepth 1 -name '*.pc'  ! -name '*uninstalled.pc' 2> /dev/null) ]] ; then
+			for pcfile in $(find $SEARCH_PATH -maxdepth 1 -name '*.pc' ! -name '*uninstalled.pc') ; do
+				if [[ $(grep Cflags $pcfile) ]] ; then
+					mkdir -p "$LIB_DIR"/pkgconfig
+					[[ "$SEARCH_PATH" = "$CWD" ]] && SEARCH_PATH=CWD || SEARCH_PATH=$(basename "$SEARCH_PATH")
+					echo $BLUE"Found $(basename $pcfile) (.pc) file in $SEARCH_PATH - "$NORMAL"Copying to PKG_DIR$libdir/pkgconfig"
+					cat $pcfile > "$LIB_DIR"/pkgconfig/$(basename $pcfile)
+				fi
+			done
+		fi
+	done
+fi
+## check for xinitrc.*.new and  xinitrc.* files
+for SEARCH_PATH in "$CWD" "$PATCHES_DIR"/$NAME-patches "$CWD"/patches "$CWD"/Resources ; do
+	if [[ $(find "$SEARCH_PATH" -maxdepth 1 -name 'xinitrc.*.new' 2> /dev/null) ]] ; then
+		if [[ $AUTO_DOT_NEW != "NO" ]] ; then
+			mkdir -p "$PKG_DIR"/etc/X11/xinit
+			find "$SEARCH_PATH" -maxdepth 1 -name 'xinitrc.*.new' -exec cp -af {} "$PKG_DIR"/etc/X11/xinit \;
+			[[ "$SEARCH_PATH" = "$CWD" ]] && SEARCH_PATH=CWD || SEARCH_PATH=$(basename "$SEARCH_PATH")
+			echo $BLUE"Found 'xinitrc.*.new' in $SEARCH_PATH - "$NORMAL"Copying to PKG_DIR/etc/X11/xinit"
+		fi
+	elif [[ $(find "$SEARCH_PATH" -maxdepth 1 -name 'xinitrc.*.gz' 2> /dev/null) ]] ; then
+		mkdir -p "$PKG_DIR"/etc/X11/xinit
+		find "$SEARCH_PATH" -maxdepth 1 -name 'xinitrc.*' -exec cp -af {} "$PKG_DIR"/etc/X11/xinit \;
+		gunzip "$PKG_DIR"/etc/X11/xinit/*.gz
+		[[ "$SEARCH_PATH" = "$CWD" ]] && SEARCH_PATH=CWD || SEARCH_PATH=$(basename "$SEARCH_PATH")
+		echo $BLUE"Found 'xinitrc.*.gz' in $SEARCH_PATH - "$NORMAL"Unzipping to PKG_DIR/etc/X11/xinit"
+	elif [[ $(find "$SEARCH_PATH" -maxdepth 1 -name 'xinitrc.*' 2> /dev/null) ]] ; then
+		mkdir -p "$PKG_DIR"/etc/X11/xinit
+		find "$SEARCH_PATH" -maxdepth 1 -name 'xinitrc.*' -exec cp -af {} "$PKG_DIR"/etc/X11/xinit \;
+		[[ "$SEARCH_PATH" = "$CWD" ]] && SEARCH_PATH=CWD || SEARCH_PATH=$(basename "$SEARCH_PATH")
+		echo $BLUE"Found 'xinitrc.*' in $SEARCH_PATH - "$NORMAL"Copying to PKG_DIR/etc/X11/xinit"
+	fi
+done
+
+## check for rc.* and rc.*.new files
+for SEARCH_PATH in "$CWD" "$PATCHES_DIR"/$NAME-patches "$CWD"/patches "$CWD"/Resources ; do
+	if [[ $(find "$SEARCH_PATH" -maxdepth 1 -name 'rc.*.new' 2> /dev/null) ]] ; then
+		if [[ $AUTO_DOT_NEW != "NO" ]] ; then
+			mkdir -p "$INIT_DIR"
+			# use cp -f so that any files found here will overwrite any installed above from the sources
+			find "$SEARCH_PATH" -maxdepth 1 -name 'rc.*.new' -exec cp -af {} "$INIT_DIR" \;
+			[[ "$SEARCH_PATH" = "$CWD" ]] && SEARCH_PATH=CWD || SEARCH_PATH=$(basename "$SEARCH_PATH")
+			echo $BLUE"Found 'rc.*.new' file in $SEARCH_PATH - "$NORMAL"Copying to PKG_DIR/$initdir "
+		fi
+	elif [[ $(find "$SEARCH_PATH" -maxdepth 1 -name 'rc.*' 2> /dev/null) ]] ; then
+		mkdir -p "$INIT_DIR"
+		# use cp -f so that any files found here will overwrite any installed above from the sources
+		find "$SEARCH_PATH" -maxdepth 1 -name 'rc.*' -exec cp -af {} "$INIT_DIR" \;
+		[[ "$SEARCH_PATH" = "$CWD" ]] && SEARCH_PATH=CWD || SEARCH_PATH=$(basename "$SEARCH_PATH")
+		echo $BLUE"Found 'rc.*' file in $SEARCH_PATH - "$NORMAL"Copying to PKG_DIR$initdir "
+	fi
+done
+
+## check for NAME.conf files
+for SEARCH_PATH in "$CWD" "$PATCHES_DIR"/$NAME-patches "$CWD"/patches "$CWD"/Resources ; do
+	if [[ $(find "$SEARCH_PATH" -maxdepth 1 -name "$NAME.conf" 2> /dev/null) ]] ; then
+		mkdir -p "$PKG_DIR"/$sysconfdir
+		find "$SEARCH_PATH" -maxdepth 1 -name "$NAME.conf" -exec cp -af {} "$PKG_DIR"/$sysconfdir \;
+		[[ "$SEARCH_PATH" = "$CWD" ]] && SEARCH_PATH=CWD || SEARCH_PATH=$(basename "$SEARCH_PATH")
+		echo $BLUE"Found '$NAME.conf' file in $SEARCH_PATH - "$NORMAL"Copying to PKG_DIR$sysconfdir"
+	elif [[ $(find "$SEARCH_PATH" -maxdepth 1 -name "${NAME}rc" 2> /dev/null) ]] ; then
+		mkdir -p "$PKG_DIR"/$sysconfdir
+		find "$SEARCH_PATH" -maxdepth 1 -name "${NAME}rc" -exec cp -af {} "$PKG_DIR"/$sysconfdir \;
+		[[ "$SEARCH_PATH" = "$CWD" ]] && SEARCH_PATH=CWD || SEARCH_PATH=$(basename "$SEARCH_PATH")
+		echo $BLUE"Found '${NAME}rc' file in $SEARCH_PATH - "$NORMAL"Copying to PKG_DIR$sysconfdir"
+	fi
+done
+
+## check for other *.new files, but skip xinitrc.*.new and rc.*.new as they have already been handled
+if [[ $AUTO_DOT_NEW != "NO" ]] ; then
+  for SEARCH_PATH in "$CWD" "$PATCHES_DIR"/$NAME-patches "$CWD"/patches "$CWD"/Resources ; do
+	if [[ $(find $SEARCH_PATH -maxdepth 1 -name "*.new" ! -name "xinitrc.*" ! -name "rc.*" 2> /dev/null) ]] ; then
+		mkdir -p "$PKG_DIR"/$sysconfdir
+		find "$SEARCH_PATH" -maxdepth 1 -name "*.new" ! -name "xinitrc.*" ! -name "rc.*" -exec cp -af {} "$PKG_DIR"/$sysconfdir \;
+		[[ "$SEARCH_PATH" = "$CWD" ]] && SEARCH_PATH=CWD || SEARCH_PATH=$(basename "$SEARCH_PATH")
+		echo $BLUE"Found '*.new' file in $SEARCH_PATH - "$NORMAL"Copying to PKG_DIR$sysconfdir"
+	fi
+  done
+fi
+
+# Look for program icons or pixmaps. *.xpm's go in datadir/pixmaps, *.png's go in datadir/icons/hicolor/48x48, *.svg's go in datadir/icons/scalable
+if [[ $AUTO_ICON != "NO" ]] ; then
+  for SEARCH_PATH in "$SRC_DIR" "$PATCHES_DIR"/$NAME-patches "$CWD"/patches "$CWD"/Resources "$CWD" ; do
+	case $SEARCH_PATH in
+		"$SRC_DIR") MAXDEPTH="" ;;
+		"$CWD") MAXDEPTH="-maxdepth 1" ;;
+		*) MAXDEPTH="-maxdepth 1" ;;
+	esac
+	if [[ $(find "$SEARCH_PATH" $MAXDEPTH \( -name "$NAME.xpm" -o -name "$ORIG_NAME.xpm" \) -print -quit 2> /dev/null) ]] ; then
+	   if ! [[ -d "$PIXMAPS_DIR" ]] ; then
+		mkdir -p "$PIXMAPS_DIR"
+		for XPM in $(find "$SEARCH_PATH" $MAXDEPTH \( -name "$NAME.xpm" -o -name "$ORIG_NAME.xpm" \) -print -quit) ; do
+		   case "$SEARCH_PATH" in
+			"$CWD") echo $BLUE"Found '$(basename $XPM)' in CWD - "$NORMAL"Copying to PKG_DIR/PIXMAPS_DIR" ;;
+			"$SRC_DIR") echo $BLUE"Found '$(basename $XPM)' in SRC_DIR - "$NORMAL"Copying to PKG_DIR/PIXMAPS_DIR" ;;
+			*) echo $BLUE"Found '$(basename $XPM)' in $(basename $SEARCH_PATH) - "$NORMAL"Copying to PKG_DIR/PIXMAPS_DIR" ;;
+		   esac
+		   #if [[ $CORRECT_ICONS = "YES" ]] && ! [[ $(grep -q -m 1 '^"48 48' "$XPM") ]] ; then
+		   # less sure:
+		   if [[ $CORRECT_ICONS = "YES" ]] && ! [[ $(grep -wm 1 '48' "$XPM") ]] ; then
+				[[ $DEBUG ]] && echo $CYAN"Notice - "$NORMAL"$(basename $XPM) is not size 48x48"
+				if [[ $(which convert 2> /dev/nul) ]] ; then
+					[[ $DEBUG ]] && echo $CYAN"Notice - "$NORMAL"Resizing PKG_DIR${PIXMAPS_DIR#*$PKG_DIR}/$(basename $XPM) to size 48x48"
+					#convert "$XPM" -resize 48x48 "$PIXMAPS_DIR"/$(basename $XPM).xpm
+					convert "$XPM" -resize 48x48 "$PIXMAPS_DIR"/$(basename "$XPM")
+				fi
+		   else
+			cp -f "$XPM" "$PIXMAPS_DIR"
+		   fi
+		   
+		done
+	   fi
+	fi
+	if [[ $(find "$SEARCH_PATH" $MAXDEPTH \( -name "$NAME.png" -o -name "$ORIG_NAME.png" \) -print -quit 2> /dev/null) ]] ; then
+	   if ! [[ -d "$ICONS_DIR"/hicolor/48x48/apps ]] ; then
+		mkdir -p "$ICONS_DIR"/hicolor/48x48/apps
+		for PNG in $(find "$SEARCH_PATH" $MAXDEPTH \( -name "$NAME.png" -o -name "$ORIG_NAME.png" \) -print -quit) ; do
+			case "$SEARCH_PATH" in
+				"$CWD") echo $BLUE"Found '$(basename $PNG)' in CWD - "$NORMAL"Copying to PKG_DIR/ICONS_DIR/hicolor/48x48/apps" ;;
+				"$SRC_DIR") echo $BLUE"Found '$(basename $PNG)' in SRC_DIR - "$NORMAL"Copying to PKG_DIR/ICONS_DIR/hicolor/48x48/apps" ;;
+				*) echo $BLUE"Found '$(basename $PNG)' in $(basename $SEARCH_PATH) - "$NORMAL"Copying to PKG_DIR/ICONS_DIR/hicolor/48x48/apps" ;;
+			esac
+			if [[ $CORRECT_ICONS = "YES" ]] && [[ ! $(file "$PNG" |grep '48 x 48') ]] ; then
+				[[ $DEBUG ]] && echo $CYAN"Notice - "$NORMAL"$(basename $PNG) is not size 48x48"
+				if [[ $(which convert 2> /dev/null) ]] ; then
+					[[ $DEBUG ]] && echo $CYAN"Notice - "$NORMAL"Resizing PKG_DIR${ICONS_DIR#*$PKG_DIR}/hicolor/48x48/apps/$(basename $PNG) to size 48x48"
+					convert "$PNG" -resize 48x48 "$ICONS_DIR"/hicolor/48x48/apps/$(basename "$PNG")
+				else
+					# iconsdir has a leading /, so below means ./dir
+					( cd $PKG_DIR && rm -rf ."$iconsdir" )
+				fi
+			else
+				cp -f "$PNG" "$ICONS_DIR"/hicolor/48x48/apps
+			fi
+			
+		done
+	   fi
+	fi
+	if [[ $(find "$SEARCH_PATH" $MAXDEPTH \( -name "$NAME.svg" -o -name "$ORIG_NAME.svg" \) -print -quit 2> /dev/null) ]] ; then
+	   if ! [[ -d "$ICONS_DIR"/hicolor/scalable/apps ]] ; then
+		mkdir -p "$ICONS_DIR"/hicolor/scalable/apps
+		for SVG in $(find "$SEARCH_PATH" $MAXDEPTH \( -name "$NAME.svg" -o -name "$ORIG_NAME.svg" \) -print -quit) ; do
+		   cp -f "$SVG" "$ICONS_DIR"/hicolor/scalable/apps
+		   case "$SEARCH_PATH" in
+			"$CWD") echo $BLUE"Found '$(basename $SVG)' in CWD - "$NORMAL"Copying to PKG_DIR/ICONS_DIR/hicolor/scalable/apps" ;;
+			"$SRC_DIR") echo $BLUE"Found '$(basename $SVG)' in SRC_DIR - "$NORMAL"Copying to PKG_DIR/ICONS_DIR/hicolor/scalable/apps" ;;
+			*) echo $BLUE"Found '$(basename $SVG)' in $(basename $SEARCH_PATH) - "$NORMAL"Copying to PKG_DIR/ICONS_DIR/hicolor/scalable/apps" ;;
+		   esac
+		done
+	   fi
+	fi
+  done
+fi
+
+# maybe linking to a common license is not a bad idea. Saves several MB of space on most systems. Debian uses the concept,
+# but we go one better. Each package actually includes the license, so license compliance is assured package-by-package.
+# But each package overwrites the license in a common location and then links to it so there is only one copy on the system.
+# This routine only links to GPL, LGPL and Artistic licenses. Other licenses like BSD, apache and mozilla are too hard to 
+# postively identify and most systems won't have many of them, anyway.
+# if [[ $LINK_LICENSES = "YES" ]] ; then
+if [[ $LINK_LICENSES = "YES" ]] || [[ $SAVE_SPACE -gt 2 ]] && [[ -d /usr/share/src2pkg/common-licenses ]] ; then
+	for FILE in $(find "$DOC_DIR" \( -name "COPYING*" -o -name "LICENSE*" -o -name "GPL*" -o -name "gpl*" -o -name "LGPL*" \) ) ; do
+		if [[ $(grep 'GNU GENERAL PUBLIC LICENSE' $FILE) ]] ; then
+			mkdir -p "$PKG_DIR"/$GOOD_DOC_PATH/common-licenses
+			if [[ $(grep 'Version 2, June 1991' $FILE) ]] ; then
+				echo $CYAN"   Notice - "$NORMAL"Linking $(basename $FILE) to $GOOD_DOC_PATH/common-licenses/GPL-2"
+				cp /usr/share/src2pkg/common-licenses/LGPL-2 "$PKG_DIR"/$GOOD_DOC_PATH/common-licenses
+				rm $FILE
+				ln -sf $GOOD_DOC_PATH/common-licenses/GPL-2 $FILE
+			elif [[ $(grep 'Version 3, 29 June 2007' $FILE) ]] ; then
+				echo $CYAN"   Notice - "$NORMAL"Linking $(basename $FILE) to $GOOD_DOC_PATH/common-licenses/GPL-3"
+				cp /usr/share/src2pkg/common-licenses/LGPL-3 "$PKG_DIR"/$GOOD_DOC_PATH/common-licenses
+				rm $FILE
+				ln -sf $GOOD_DOC_PATH/common-licenses/GPL-3 $FILE
+			elif [[ $(grep 'Version 1, February 1989' $FILE) ]] ; then
+				echo $CYAN"   Notice - "$NORMAL"Linking $(basename $FILE) to $GOOD_DOC_PATH/common-licenses/GPL-1"
+				cp /usr/share/src2pkg/common-licenses/LGPL-1 "$PKG_DIR"/$GOOD_DOC_PATH/common-licenses
+				rm $FILE
+				ln -sf $GOOD_DOC_PATH/common-licenses/GPL-1 $FILE
+			fi
+		elif [[ $(grep 'GNU LIBRARY GENERAL PUBLIC LICENSE' $FILE) ]] ; then
+			mkdir -p "$PKG_DIR"/$GOOD_DOC_PATH/common-licenses
+			if [[ $(grep 'Version 2, June 1991' $FILE) ]] ; then
+				echo $CYAN"   Notice - "$NORMAL"Linking $(basename $FILE) to $GOOD_DOC_PATH/common-licenses/LGPL-2"
+				cp /usr/share/src2pkg/common-licenses/LGPL-2 "$PKG_DIR"/$GOOD_DOC_PATH/common-licenses
+				rm $FILE
+				ln -sf $GOOD_DOC_PATH/common-licenses/LGPL-2 $FILE
+			fi
+		elif [[ $(grep 'GNU LESSER GENERAL PUBLIC LICENSE' $FILE) ]] ; then
+			mkdir -p "$PKG_DIR"/$GOOD_DOC_PATH/common-licenses
+			if [[ $(grep 'Version 2.1, February 1999' $FILE) ]] ; then
+				echo $CYAN"   Notice - "$NORMAL"Linking $(basename $FILE) to $GOOD_DOC_PATH/common-licenses/LGPL-2.1"
+				cp /usr/share/src2pkg/common-licenses/LGPL-2.1 "$PKG_DIR"/$GOOD_DOC_PATH/common-licenses
+				rm $FILE
+				ln -sf $GOOD_DOC_PATH/common-licenses/LGPL-2.1 $FILE
+			elif [[ $(grep 'Version 3, 29 June 2007' $FILE) ]] ; then
+				echo $CYAN"   Notice - "$NORMAL"Linking $(basename $FILE) to $GOOD_DOC_PATH/common-licenses/LGPL-3"
+				cp /usr/share/src2pkg/common-licenses/LGPL-3 "$PKG_DIR"/$GOOD_DOC_PATH/common-licenses
+				rm $FILE
+				ln -sf $GOOD_DOC_PATH/common-licenses/LGPL-3 $FILE
+			fi
+		fi
+	done
+	for FILE in $(find "$DOC_DIR"  -name "Artistic*") ; do
+		if [[ $(grep 'The "Artistic License"' $FILE) ]] ; then
+			mkdir -p "$PKG_DIR"/$GOOD_DOC_PATH/common-licenses
+			echo $CYAN"   Notice - "$NORMAL"Linking $(basename $FILE) to $GOOD_DOC_PATH/common-licenses/Artistic"
+			cp /usr/share/src2pkg/common-licenses/Artistic "$PKG_DIR"/$GOOD_DOC_PATH/common-licenses
+			rm $FILE
+			ln -sf $GOOD_DOC_PATH/common-licenses/Artistic $FILE
+		fi
+	done
+fi
+
+##compress docs was here but has been moved to 14A-last_minute_details
+
+# purge_locales 
+if [[ "$PURGE_LOCALES" = "YES" ]] ; then
+	! [[ $DONT_PURGE_LIST ]] && DONT_PURGE_LIST="/etc/src2pkg/DONT_PURGE.locales"
+	! [[ $LOCALE_LIST ]] && LOCALE_LIST="/usr/share/src2pkg/all-locales.txt"
+	if [[ -e $DONT_PURGE_LIST ]] && [[ -e $LOCALE_LIST ]] ; then
+		echo $BLUE"Purging locale files- "$NORMAL"Removing extra language files if found"
+		for LOCALE_DIR in $LOCALE_DIRS ; do
+			if [[ -d "$PKG_DIR"/$LOCALE_DIR ]] ; then
+				( cd "$PKG_DIR"/$LOCALE_DIR && {
+					for DIR in $(find * -maxdepth 0 -type d 2> /dev/null) ; do
+						if ! grep -x $DIR $DONT_PURGE_LIST ; then
+						 rm -rf $DIR
+						fi
+					done
+					}
+				)
+				# if now emtpy, remove it
+				rmdir "$PKG_DIR"/$LOCALE_DIR 2> /dev/null
+			fi
+		done
+	else
+	 echo $YELLOW"Notice! "$NORMAL"LOCALE_PURGE configuration files were not found."
+	 echo "See the documentation for how to set up locale purging. "$BLUE"Skipping..."$NORMAL
+	fi
+fi
+
+## look for '*.desktop' files first in the sources
+if [[ "$AUTO_DESKTOP" = "YES" ]] ; then
+	if [[ $(find "$PKG_DIR" -name '*.desktop' 2> /dev/null) = "" ]] && [[ $(find "$SRC_DIR" -name '*.desktop' 2> /dev/null) ]] ; then
+		for FILE in $(find "$SRC_DIR" -name '*.desktop' 2> /dev/null) ; do
+		# try to figure out if this program is a window manager -if so install the desktop file under /usr/share/xsessions
+			if [[ -f "$PKG_DIR/etc/X11/xinit/xinitrc.$NAME" ]] && [ "$(basename $FILE)" = $NAME.desktop -o "$(basename $FILE)" = $ORIG_NAME.desktop ] ; then
+				echo $BLUE"Found "$NAME.desktop" in SRC_DIR - "$NORMAL"Copying to PKG_DIR/usr/share/xsessions"
+				##find "$SRC_DIR" -type f -name "$NAME.desktop" -exec cp -a {} "$PKG_DIR"/etc/X11/dm/Sessions \;
+				#mkdir -p "$PKG_DIR"/etc/X11/dm/Sessions
+				#cp $FILE "$PKG_DIR"/etc/X11/dm/Sessions
+				mkdir -p "$PKG_DIR"/usr/share/xsessions
+				cp $FILE "$PKG_DIR"/usr/share/xsessions
+			else
+				echo $BLUE"Found '*.desktop' file(s) in SRC_DIR - "$NORMAL"Copying to PKG_DIR$datadir/applications"
+				mkdir -p "$PKG_DIR"/$datadir/applications
+				#find "$SRC_DIR" -type f -name '*.desktop' -exec cp -a {} "$PKG_DIR"/$datadir/applications \;
+				cp $FILE "$PKG_DIR"/$datadir/applications
+			fi
+		done
+	fi
+	# then check in the other search paths
+	for SEARCH_PATH in "$CWD" "$PATCHES_DIR"/$NAME-patches "$CWD"/patches "$CWD"/Resources ; do
+		if [[ $(find "$SEARCH_PATH" -maxdepth 1 -name '*.desktop' ! -name "new.*" 2> /dev/null) ]] ; then
+			for FILE in $(find "$SEARCH_PATH" -maxdepth 1 -name '*.desktop' ! -name "new.*" 2> /dev/null) ; do
+				# if we have an xinitrc.* file, then this package probably contains a window manager
+				# so install the *.desktop file to the display manager Sessions directory
+				if [[ -f $PKG_DIR/etc/X11/xinit/xinitrc.$NAME ]] ; then
+				  if [[ "$(basename $FILE)" = $NAME.desktop ]] || [[ "$(basename $FILE)" = $ORIG_NAME.desktop ]] ; then
+					[[ "$SEARCH_PATH" = "$CWD" ]] && SEARCH_PATH=CWD || SEARCH_PATH=$(basename "$SEARCH_PATH")
+					echo $BLUE"Found $NAME.desktop in $SEARCH_PATH - "$NORMAL"Copying to PKG_DIR/usr/share/xsessions"
+					#mkdir -p "$PKG_DIR"/etc/X11/dm/Sessions
+					#cp $FILE "$PKG_DIR"/etc/X11/dm/Sessions
+					mkdir -p "$PKG_DIR"/usr/share/xsessions
+					cp -f $FILE "$PKG_DIR"/usr/share/xsessions
+				  fi
+				else
+					mkdir -p "$PKG_DIR"/$datadir/applications
+					# use cp -f so that any .desktop files found here will overwrite any installed above from the sources
+					cp -f $FILE "$PKG_DIR"/$datadir/applications
+					[[ "$SEARCH_PATH" = "$CWD" ]] && SEARCH_PATH=CWD || SEARCH_PATH=$(basename "$SEARCH_PATH")
+					echo $BLUE"Found '*.desktop' in $SEARCH_PATH - "$NORMAL"Copying to PKG_DIR$datadir/applications"
+				fi
+			done
+		fi
+	done
+fi
+
+# check to make sure directory perms are correct:
+if [[ -d "$DOC_DIR" ]] ; then
+	chmod 755 "$DOC_DIR"
+	( cd "$DOC_DIR" && find -type d -exec chmod 755 {} \; )
+	( cd "$DOC_DIR" && find -type f -exec chmod 644 {} \; )
+elif [[ -d "$PKG_DIR"/$PRE_FIX/doc ]] ; then
+	chmod 755 "$PKG_DIR"/$PRE_FIX/doc
+	( cd "$PKG_DIR"/$PRE_FIX/doc && find -type d -exec chmod 755 {} \; )
+	( cd "$PKG_DIR"/$PRE_FIX/doc && find -type f -exec chmod 644 {} \; )
+fi
+if [[ -d "$PKG_DIR"/usr/share ]] ; then
+	chmod 755 "$PKG_DIR"/usr/share
+	# exclude usr/share/$NAME as it may have some weird perms
+	(cd "$PKG_DIR"/usr/share && find * -type d -a ! -name "$NAME" -exec chmod 755 {} \;)
+	if [[ -d "$PKG_DIR"/usr/share/applications ]] ; then
+		if [[ $(find "$PKG_DIR"/usr/share/applications -type f 2> /dev/null) = ""  ]] ; then
+		  (cd $PKG_DIR && rm -rf usr/share/applications)
+		else
+		  chown -R $OWNER:$GROUP "$PKG_DIR"/usr/share/applications
+		  (cd "$PKG_DIR"/usr/share/applications && find -type f -exec chmod 644 {} \;)
+		fi
+	fi
+elif [[ -d "$PKG_DIR"/$PRE_FIX/share ]] ; then
+	chmod 755 "$PKG_DIR"/$PRE_FIX/share
+	(cd "$PKG_DIR"/$PRE_FIX/share && find -type d -exec chmod 755 {} \;)
+	if [[ -d "$PKG_DIR"/$PRE_FIX/share/applications ]] ; then
+		if [[ $(find "$PKG_DIR"/usr/share/applications -type f 2> /dev/null) = ""  ]] ; then
+		  (cd $PKG_DIR && rm -rf usr/share/applications)
+		else
+		  chown $OWNER:$GROUP "$PKG_DIR"/$PRE_FIX/share/applications/*
+		  (cd "$PKG_DIR"/$PRE_FIX/share/applications && find -type f -exec chmod 644 {} \;)
+		fi
+	fi
+fi
+if [[ -d "$LIB_DIR"/pkgconfig ]] ; then
+	chown -R $OWNER:$GROUP "$LIB_DIR"
+	chmod 755 "$LIB_DIR"
+	chmod 755 "$LIB_DIR"/pkgconfig
+	chmod 644 "$LIB_DIR"/pkgconfig/*
+	# make sure libdir paths are correct
+	( cd "$LIB_DIR"/pkgconfig
+		for FILE in *.pc ; do
+			sanitize_lib_paths $FILE
+		done
+	)
+fi
+if [[ -d $PKG_DIR/usr/share/pixmaps ]] ; then
+	chown -R $OWNER:$GROUP $PKG_DIR/usr/share/pixmaps
+	find $PKG_DIR/usr/share/pixmaps -type d -exec chmod 755 {} \; &> /dev/null
+	find $PKG_DIR/usr/share/pixmaps -type f -exec chmod 644 {} \; &> /dev/null
+fi
+if [[ -d $PKG_DIR/usr/share/icons ]] ; then
+	chown -R $OWNER:$GROUP $PKG_DIR/usr/share/icons
+	find $PKG_DIR/usr/share/icons -type d -exec chmod 755 {} \; &> /dev/null
+	find $PKG_DIR/usr/share/icons -type f -exec chmod 644 {} \; &> /dev/null
+fi
+}
+
+# End advanced_docs

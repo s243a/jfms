@@ -1,0 +1,88 @@
+# This file is part of the src2pkg program:
+# Copyright 2005-2013 Gilbert Ashley <amigo@ibilio.org>
+# src2pkg is released under the GNU General Public License Version 2
+
+# make_package
+make_package() {
+if [[ $ALLOW_USER_EXTENSIONS = "YES" ]] ; then
+	# check if the user has any pre-execution extensions to this file and run them, if so.
+	[[ -f "$HOME"/.src2pkg/extensions/15.pre ]] && . "$HOME"/.src2pkg/extensions/15.pre
+fi
+if [[ "$FAILED" = "" ]] && [[ ! $USER_CANCELLED ]] ; then
+	if [[ ! $RESUME ]] || [[ $RESUME = $FUNCNAME ]] || [[ $HAVE_RESUMED ]] ; then
+		[[ $RESUME = $FUNCNAME ]] && HAVE_RESUMED=1 && echo $CYAN"   Notice - "$BLUE"Resuming build at: "$NORMAL "$FUNCNAME"
+		if [[ $PAUSE = "BEFORE" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+			echo $MAGENTA"Notice - "$BLUE"Pausing before: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+			read
+		fi
+		
+		#segregate_package
+		
+		nahh() {
+		if [[ $HAVE_RESUMED ]] ; then
+			if [[ -f $PACKAGE ]] ; then
+				[[ $DEBUG ]] && echo $CYAN"   Notice - "$NORMAL"Removing old PACKAGE"
+				rm -f $PACKAGE
+			fi
+		fi
+		}
+		rm -f $PACKAGE
+		
+		# Build the package:
+		if [[ "$PKG_FORMAT" = "deb" ]] ; then
+			. "$SRC2PKG_LIBDIR/make_package/15-make_package_deb"
+			make_debian_pkg
+		elif [[ "$PKG_FORMAT" = "pet" ]] ; then
+			. "$SRC2PKG_LIBDIR/make_package/15-make_package_pet"
+			make_pet_pkg
+		elif [[ "$PKG_FORMAT" = "rpm" ]] ; then
+			. "$SRC2PKG_LIBDIR/make_package/15-make_package_rpm"
+			make_rpm_pkg
+		elif [[ "$PKG_FORMAT" = "tazpkg" ]] ; then
+			. "$SRC2PKG_LIBDIR/make_package/15-make_package_taz"
+			make_taz_pkg
+		elif [[ "$PKG_FORMAT" = "txz" ]] ; then
+			. "$SRC2PKG_LIBDIR/make_package/15-make_package_slack"
+			make_slack_pkg
+		elif [[ "$PKG_FORMAT" = "tpm" ]] ; then
+			. "$SRC2PKG_LIBDIR/make_package/15-make_package_tpm"
+			make_tpm_pkg
+		else
+			. "$SRC2PKG_LIBDIR/make_package/15-make_package_kiss"
+			make_kiss_pkg
+		fi
+		if [[ ! $DEBUG ]] ; then
+			rm -f "$SRC_DIR"/$NAME-libtool-files "$SRC_DIR"/$NAME-header-files
+			rm -f "$SRC_DIR"/$NAME-static-libs "$SRC_DIR"/$NAME-ELF-libs
+			rm -f "$SRC_DIR"/$NAME-ELF-bins "$SRC_DIR"/$NAME-ELF-compressed-bins
+		fi
+	fi
+fi
+
+if [[ $ALLOW_USER_EXTENSIONS = "YES" ]] ; then
+	# check if the user has any post-execution extensions to this file and run them, if so.
+	[[ -f "$HOME"/.src2pkg/extensions/15.post ]] && . "$HOME"/.src2pkg/extensions/15.post
+fi
+}
+# end make_package
+
+# really install the package only if REALLY_INSTALL="YES"
+really_install() {
+if [[ "$FAILED" = "" ]] && [[ "$REALLY_INSTALL" = "YES" ]] ; then
+	case $PKG_FORMAT in
+		tpkg|tbz|tgz|tlz|txz)
+			if [[ "$INSTALLPKG" = "internal" ]] ; then
+				mini_installpkg_slack "$PACKAGE"
+			else
+				echo $BLUE"Installing package $PKG_NAME"$NORMAL
+				if [[  $QUIET="YES" ]] ; then
+					$INSTALLPKG "$PACKAGE" 2> /dev/null 1> /dev/null
+				else
+					$INSTALLPKG "$PACKAGE"
+				fi
+			fi
+		;;
+		*) echo $CYAN"   Notice - "$NORMAL"No installation routine available for '$PKG_FORMAT' packages." ;;
+	esac
+fi
+}

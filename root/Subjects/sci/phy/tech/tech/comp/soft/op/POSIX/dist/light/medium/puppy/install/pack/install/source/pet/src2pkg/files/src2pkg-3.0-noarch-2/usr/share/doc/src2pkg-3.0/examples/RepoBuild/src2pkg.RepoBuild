@@ -1,0 +1,182 @@
+#!/bin/bash
+# src2pkg.RepoBuild
+# Copyright 2008 Gilbert Ashley <amig@ibiblio.org>
+# This program is free software released under the GPL version 2
+
+THISDIR=$(pwd)
+EXEC_NAME="${0##*/}"
+REPOBUILD_VERSION=0.3
+
+# This example is used to build a directory full of archives repo-style
+# sources may be in this dir, in a directory relative to this one or in a hard coded location
+# export SOURCES_DIR=$(pwd)
+#export SOURCES_DIR=`pwd`/../../Sources/g
+# export SOURCES_DIR=/usr/src/src2pkg/sources
+export SOURCES_DIR=$(pwd)
+# same for packages
+# export PKG_DEST_DIR=$(pwd)
+# export PKG_DEST_DIR=`pwd`/../../Packages
+# export PKG_DEST_DIR=/usr/src/src2pkg/packages
+export PKG_DEST_DIR=$(pwd)/PKGS
+# make a separate subdir for the builds too
+export BUILDS_DIR=$(pwd)/BUILDS
+# if you want to create arch-specific BUILD or PKGS directories
+# you could do this:
+# source /usr/libexec/src2pkg/FUNCTIONS
+# get_flags
+# this makes the ARCH variable available, so you could use:
+# export PKG_DEST_DIR=$(pwd)/PKGS-$ARCH
+# note that when you source the FUNTIONS file, it in turn sources
+# all the other files in /usr/libexec/src2pkg, so you can, in theory
+# run any individual function. In this case, the get_flags function
+# is just a small function that gets run inside of pre_process
+# This could get flaky, though if you happen to build an odd package
+# that needs ARCH=noarch.
+# Probably better to use some other variable name like FLAVOR
+# if you build for multiple arches, you will probably wind up
+# with a significant number of packages which need
+# separate patches and/or src2pkg scripts. Surely you could
+# manually move arch_specific stuff out of this dir or create
+# a new build area for separate arches?
+
+## transient options
+# -I is used for chain builds where packages need to be installed
+# -W will cleanup -only use this when you are sure everything builds cleanly
+# -X use -X if you are running a list of src2pkg scripts in directories
+
+# TRANSIENT_TARBALL_OPTIONS that are used when the target of src2pkg are the raw tarballs
+# it is not a good idea to use -W here the first time you run this script
+# if you do, you'll only wind up with links to the sources in BUILDS 
+# -the slack-desc, *.src2pkg and doinst.sh's would be wiped out
+TRANSIENT_TARBALL_OPTIONS="-A"
+
+# TRANSIENT_SCRIPT_OPTIONS to use when src2pkg scripts are present
+TRANSIENT_SCRIPT_OPTIONS="-X"
+
+# here's a couple of general behaviour options
+# setting this to '1' stops the whole thing with just one failed package
+EXIT_ON_FAILURE=0
+# you might prefer to just log failed builds -set to '0' to disable
+LOG_FAILURES=1
+# log file
+FAILURE_LOG_FILE=$THISDIR/failed_builds.txt
+# start with a fresh log file
+rm -f $FAILURE_LOG_FILE
+
+
+# you can use a list of URL's to have the archives downloaded for you
+if [[ -f URL-list.txt ]] ; then
+	BUILD_LIST=$(cat URL-list.txt)
+else
+	# or a series of tarballs already in the current directory
+	BUILD_LIST=$(ls -1)
+fi
+
+echo "Running $EXEC_NAME in $THISDIR"
+echo ""
+
+# create the PKG_DESTDIR and BUILDS_DIR if not present
+! [[ -d $PKG_DESTDIR ]] && mkdir -p $PKG_DEST_DIR
+! [[ -d $BUILDS_DIR ]] && mkdir -p $BUILDS_DIR
+
+for FILE in $BUILD_LIST ; do
+	
+	# can't use this for URL's
+	#FILE=$(basename $FILE)
+	# pushd and popd aren't really needed but it doesn't hurt
+	#pushd $THISDIR
+	cd $THISDIR
+	# FILE should be a file or maybe even a link
+	case $FILE in
+		*.tar.bz2|*.tar.gz|*.tgz|*.rpm)
+			# reset the SOURCE_NAME for each archive
+			SOURCE_NAME=$FILE
+			# retrieve the package-specific variables as computed by src2pkg
+			# use a separate process each time so it doesn't get confused
+			# notice that we can source the FUNCTIONS and then call just one process (this is what src2pkg -N does)
+			INFO=$( (source /usr/libexec/src2pkg/FUNCTIONS ; pre_process &> /dev/null ;echo $NAME:$VERSION:$ARCH:$BUILD:$SIG ) )
+			# we really could just use the real internal names, but it is probably
+			# wiser to avoid polluting the internal package-specific variables
+			SHORT_NAME=$(echo $INFO |cut -d: -f1)
+			THIS_VERSION=$(echo $INFO |cut -d: -f2)
+			THIS_ARCH=$(echo $INFO |cut -d: -f3)
+			THIS_BUILD=$(echo $INFO |cut -d: -f4)
+			THIS_SIG=$(echo $INFO |cut -d: -f5)
+			
+			# use some kind of a name for each build dir
+			THIS_BUILD_DIR=$SHORT_NAME
+			# you could even use arch-specific build dirs like this:
+			# THIS_BUILD_DIR=$SHORT_NAME-$ARCH
+			echo "Processing $SHORT_NAME:"
+			# create the build directory and a link to the tarball, if necessary
+			! [[ -d $BUILDS_DIR/$THIS_BUILD_DIR ]] && mkdir -p $BUILDS_DIR/$THIS_BUILD_DIR
+			cd $BUILDS_DIR/$THIS_BUILD_DIR
+			if [[ -L $FILE ]] ; then
+			 rm -f $FILE
+			 if [[ -e $SOURCES_DIR/$FILE ]] ; then
+			  ln -sf $SOURCES_DIR/$FILE $FILE
+			 fi
+			fi
+			# how do you want this to work?
+			# check to see if a package already exists. If it does skip it. If not go build it
+			# this lets you resume building if one package has failed or if  you get tired and go to bed...
+			if ! [[ -f $PKG_DEST_DIR/$SHORT_NAME-$THIS_VERSION-$THIS_ARCH-$THIS_BUILD$THIS_SIG.tgz ]] ; then
+				if [[ -f $NAME.src2pkg ]] || [[ -f $NAME.src2pkg.auto ]] ; then
+					# if there is alread a $NAME.src2pkg here use it with whatever
+					# TRANSIENT_SCRIPT_OPTIONS were given
+					src2pkg $TRANSIENT_SCRIPT_OPTIONS
+				else
+				# otherwise, use whatever TRANSIENT_TARBALL_OPTIONS were given
+				# put whatever you want here below here
+				# create an initial script for each build dir
+				# src2pkg -N $FILE
+				# create a better script if possible
+				# src2pkg -A -Q $FILE
+				src2pkg $TRANSIENT_TARBALL_OPTIONS $FILE
+				fi
+				
+				# if we have downloade from a URL list, the link to $SOURCES_DIR/$FILE
+				# doesn't exist yet, so create it here for future reference
+				if ! [[ -L $(basename $FILE) ]] ; then
+					if [[ -e $SOURCES_DIR/$(basename $FILE) ]] ; then
+					 ln -sf $SOURCES_DIR/$(basename $FILE) $(basename $FILE)
+					fi
+				fi
+			
+				# src2pkg doesn't return a useful exit status when a build fails
+				# But, you can check to see if the build was successful like this
+				if [[ -f $PKG_DEST_DIR/$SHORT_NAME-$THIS_VERSION-$THIS_ARCH-$THIS_BUILD$THIS_SIG.tgz ]] ; then
+					# uncomment if you want, but if successful, src2pkg will have already notified you.
+					#echo "This was a successful build"
+					true
+				else
+					if [[ $LOG_FAILURES = 1 ]] ; then
+						echo "Building $SHORT_NAME failed" >> $FAILURE_LOG_FILE
+					else
+						echo "Building $SHORT_NAME failed"
+					fi
+					if [[ $EXIT_ON_FAILURE = 1 ]] ; then
+						exit 0
+					fi
+					# this is all designed to let you resume without duplicating earlier builds
+					# or you could have it echo the names of failed/succeeded builds into a file(s), or whatever
+				fi
+			else
+				echo "Package: $SHORT_NAME-$THIS_VERSION-$THIS_ARCH-$THIS_BUILD$THIS_SIG.tgz already exists"
+			fi
+			echo ""
+			# if you wanted to, you could add command-line options to this script, then make conditional statements
+			# down here so that you could simply prepare a whole slew of build dirs first and then build them later
+			# with another command line option.
+			# by using -A -Q -R -W in the TRANSIENT_TARBALL_OPTIONS, you'd maximize your chances
+			# of getting it right the first time. If a build fails
+			;;
+		*)
+		# extra debugging message
+		#echo "Skipping non-archive $FILE"
+		true
+		;;
+	esac
+	
+done
+

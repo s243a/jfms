@@ -1,0 +1,28 @@
+The sounds included here come from a couple of different sources.
+
+These come from the freedesktop.org sound-theme package:
+bell.ogg		(success)
+complete-media-burn.ogg	(success)
+suspend-error.ogg	(failure or cancel)
+
+These come from the WSoundServer package:
+DefaultBoing.wav	(cancel)
+DefaultCrapOut.wav	(ouch)
+DefaultError.wav	(failure or cancel)
+DefaultKaboom.wav	(ouch or failure)
+DefaultOhNo.wav		(ouch or failure)
+DefaultOuch.wav		(ouch or failure)
+
+These come via the gamine-0.0.1 package:
+plick.ogg		(success) (bell sound) (orig from gcompris)
+bonus.wav		(success) (hoohoo sound)
+receive.wav		(success) (piano) (orig from gaim)
+
+If you want to change the sound 'theme' you can try some of the
+different sounds here or use other sounds of your choosing.
+These four sound 'events' are used by src2pkg:
+success, failure, cancel and ouch
+The name of each event is simply a symlink to the appropriate
+sound for the event. To change the sound used for an event,
+simply remove the existing symlink and create a new one linking
+to the new sound you want to use.

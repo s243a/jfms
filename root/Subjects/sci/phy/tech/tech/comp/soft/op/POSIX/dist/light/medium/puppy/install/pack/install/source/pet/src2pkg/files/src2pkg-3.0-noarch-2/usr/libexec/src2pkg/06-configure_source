@@ -1,0 +1,1042 @@
+# This file is part of the src2pkg program:
+# Copyright 2005-2013 Gilbert Ashley <amigo@ibilio.org>
+# src2pkg is released under the GNU General Public License Version 2
+
+### configure_source
+configure_source() {
+if [[ $ALLOW_USER_EXTENSIONS = "YES" ]] ; then
+ # check if the user has any pre-execution extensions to this file and run them, if so.
+ [[ -f "$HOME"/.src2pkg/extensions/06.pre ]] && . "$HOME"/.src2pkg/extensions/06.pre
+fi
+
+if [[ "$FAILED" = "" ]] && [[ ! $USER_CANCELLED ]] ; then
+ if [[ ! $RESUME ]] || [[ $RESUME = $FUNCNAME ]] || [[ $HAVE_RESUMED ]] ; then
+  [[ $RESUME = $FUNCNAME ]] && HAVE_RESUMED=1 && echo $CYAN"   Notice - "$BLUE"Resuming build at: "$NORMAL "$FUNCNAME"
+  if [[ $PAUSE = "BEFORE" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+    echo $MAGENTA"Notice - "$BLUE"Pausing before: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+    read
+  fi
+  if [[ "$CONFIG_COMMAND" = "skip" ]] ; then
+		if [[ $HAVE_BUILD_FUNCTION = 1 ]] ; then
+			[[ $DEBUG ]] && echo $BLUE"Using 'build' function instead of configure_source - "$NORMAL
+		else
+			echo $BLUE"Skipped configure_source - "$NORMAL
+		fi
+		CONFIG_DIR="$SRC_DIR"
+		OBJ_DIR="$SRC_DIR"
+  else
+  # find the main configuration directory
+	if [[ "$CONFIG_SUBDIR" ]] ; then
+		CONFIG_DIR="$SRC_DIR/$CONFIG_SUBDIR"
+	else
+		for keydir in "$SRC_DIR" "$SRC_DIR"/src "$SRC_DIR"/Src "$SRC_DIR"/source "$SRC_DIR/$NAME-$VERSION" "$SRC_DIR/$NAME" "$SRC_DIR/$NAMElib" "$SRC_DIR/lib$NAME" "$SRC_DIR/$VERSION" "$SRC_DIR"/abi "$SRC_DIR"/build "$SRC_DIR"/dist "$SRC_DIR"/unix ; do
+			for keyfile in configure CMakeLists.txt Makefile configure.in configure.ac Makefile.in Makefile.am autogen.sh bootstrap.sh GNUmakefile GNUmakefile.in GNUmakefile.am Imakefile imakefile SConstruct waf makefile Jamfile install.sh setup.py Build.PL Makefile.PL make.pl install.tcl $NAME.pro ; do
+				if [[ -e "$keydir/$keyfile" ]] ; then
+				  CONFIG_SUBDIR="$keydir"
+				  KEYFILE="$keyfile"
+			 	  break ;
+				fi
+			done
+			if [[ "$CONFIG_SUBDIR" ]] ; then
+			  CONFIG_DIR="$keydir"
+			  # hmmm, just reset to null since we don't need it anymore
+			  # this allows configure_source to be run multiple times! Only CONFIG_COMMAND needs to be unset
+			  CONFIG_SUBDIR=
+			  break ;
+			fi
+			if  [[ "$CONFIG_DIR" ]] ; then
+			  CONFIG_DIR="$keydir"
+			  break ;
+			fi
+		done
+	fi
+	[[ $DEBUG ]] && echo $BLUE"Using keyfile: "$NORMAL"$KEYFILE"
+	
+	! [[ "$CONFIG_DIR" ]] && CONFIG_DIR="$SRC_DIR"
+	if [[ "$CONFIG_DIR" != "$SRC_DIR" ]] ; then
+	  #FUNNY_SUBDIR=$(basename "$CONFIG_DIR")
+	  # if the CONFIG_SUBDIR is more than one level deep, the above shows the wrong result
+	  FUNNY_SUBDIR=$(echo ${CONFIG_DIR#$SRC_DIR/*})
+	  echo $CYAN"   Notice - "$NORMAL"The configuration files are in a subdirectory: $FUNNY_SUBDIR"
+	  ! [[ $USE_OBJ_DIR ]] && OBJ_DIR="$CONFIG_DIR"
+	fi
+	
+	! [[ $USE_OBJ_DIR ]] && [[ ! $OBJ_DIR ]] && OBJ_DIR="$CONFIG_DIR"
+	#
+	if ! [[ $LOG_DIR ]] ; then
+		LOG_DIR="$OBJ_DIR"
+	elif [[ "$LOG_DIR" != "$CWD" ]] ; then
+		if	[[ "${LOG_DIR:0:1}" != "/" ]] ; then
+			echo $YELLOW"Warning! "$NORMAL"LOG_DIR is set to an invalid path."
+			echo "         It must be set to \$CWD or an absolute path."
+		else
+			[[ ! -d "$LOG_DIR" ]] && mkdir -p "$LOG_DIR"
+		fi
+	fi
+
+	# If there are GNUmakefile.in or GNUmakefile.am files *and* a Makefile we have to get
+	# rid of the Makefile as it would take precedence over the generated GNUmakefile
+	if [[ -e "$CONFIG_DIR"/GNUmakefile.in ]] && [[ -e "$CONFIG_DIR"/Makefile ]] ; then
+		echo $CYAN"   Notice - "$NORMAL"These sources use GNUmakefiles, instead of Makefiles."
+		if ! [[ $USE_DEFAULT_MAKEFILES = "YES" ]] ; then
+			MAKEFILE="GNUmakefile"
+			if [[ $PEDANTIC = 'YES' ]] ; then
+				echo "   We rename the Makefile to Makefile.found and start fresh."
+				echo "   If not, the Makefile might be used instead of the new GNUmakefile."
+			fi
+			mv "$CONFIG_DIR"/Makefile "$CONFIG_DIR"/Makefile.found
+		fi
+	elif [[ -e "$CONFIG_DIR"/Makefile.in ]] && [[ -e "$CONFIG_DIR"/GNUmakefile ]] ; then
+		# If there are Makefile.in or Makefile.am files *and* a GNUmakefile we have to get
+		# rid of the GNUmakefile as it might take precedence over the generated Makefile
+		echo $CYAN"   Notice - "$NORMAL"These sources contain both a Makefile.in and a GNUmakefile."
+		if ! [[ $USE_DEFAULT_MAKEFILES = "YES" ]] ; then
+			MAKEFILE="Makefile"
+			if [[ $PEDANTIC = 'YES' ]] ; then
+				echo "   We rename the GNUmakefile to GNUmakefile.found and start fresh."
+				echo "   If not, the GNUmakefile might be used instead of the new Makefile."
+			fi
+			mv "$CONFIG_DIR"/GNUmakefile "$CONFIG_DIR"/GNUmakefile.found
+		fi
+	fi
+	if [[ -e "$CONFIG_DIR"/makefile ]] ; then
+	  MAKEFILE="makefile"
+	elif [[ -e "$CONFIG_DIR"/GNUmakefile ]] || [[ -e "$CONFIG_DIR"/GNUmakefile.am ]] || [[ -e "$CONFIG_DIR"/GNUmakefile.in ]] ; then
+	  MAKEFILE="GNUmakefile"
+	elif [[ -e "$CONFIG_DIR"/Makefile ]] || [[ -e "$CONFIG_DIR"/Makefile.am ]] || [[ -e "$CONFIG_DIR"/Makefile.in ]] ; then
+	  MAKEFILE="Makefile"
+	fi
+	
+	# moved here from compile_source.  Some sources will be 'de-configured' if 'make clean' is run after configuration
+	if [[ -f $MAKEFILE ]] ; then
+		# some sources will do strange things with CFLAGS if this is done -example: vim
+		if [[ $AUTO_MAKE_CLEAN != 'NO' ]] ; then
+			echo -n $CYAN"   Notice - "$NORMAL"Running 'make clean' in SRC_DIR - "
+			make clean &> /dev/null
+			echo $GREEN"Done"$NORMAL
+		fi
+	fi
+	# run touch if requested -boy does this fix lots of otherwise broken configurations
+	case $TOUCH in
+		YES|1) touch * ;;
+	esac
+	
+	[[ -d "$CONFIG_DIR"/autom4te.cache ]] && rm -rf "$CONFIG_DIR"/autom4te.cache
+	[[ -d "$CONFIG_DIR"/.deps ]] && rm -rf "$CONFIG_DIR"/.deps
+	[[ -f "$CONFIG_DIR"/.deps ]] && rm -f "$CONFIG_DIR"/.deps
+	[[ -f "$CONFIG_DIR"/config.status ]] && rm -f "$CONFIG_DIR"/config.status
+	[[ -f "$CONFIG_DIR"/config.cache ]] && rm -f "$CONFIG_DIR"/config.cache
+	[[ -f "$CONFIG_DIR"/config.log ]] && rm -f "$CONFIG_DIR"/config.log
+	# this is probably not a good idea -if the sources are non-autoconf they may contain a manually-created config.h
+	# [[ -f "$CONFIG_DIR"/config.h ]] && rm -f "$CONFIG_DIR"/config.h
+	[[ -f "$CONFIG_DIR"/configure ]] && chmod 755 "$CONFIG_DIR"/configure
+	find "$CONFIG_DIR" -name compile -exec chmod 755 {} \; \
+		-o -name config.guess -exec chmod 755 {} \; \
+		-o -name config.sub -exec chmod 755 {} \; \
+		-o -name depcomp -exec chmod 755 {} \; \
+		-o -name install-sh -exec chmod 755 {} \; \
+		-o -name missing -exec chmod 755 {} \; \
+		-o -name mkinstalldirs -exec chmod 755 {} \;
+	
+	if [[ $AUTOCONF = "NO" ]] ; then
+		find . -name 'stamp-h?.in' -exec touch {} \;
+		find . -name 'configure' -exec touch {} \;
+	fi
+	if [[ $AUTOMAKE = "NO" ]] ; then
+		find . -name 'aclocal.m4' -exec touch {} \;
+		find . -name 'Makefile.in' -exec touch {} \;
+	fi
+	# accept alternate variable name more consistent with other AUTO_*=NO options
+	[[ $AUTO_RECONF = 'NO' ]] && AUTORECONF=NO
+	[[ $AUTO_RECONF = 'YES' ]] && AUTORECONF=YES
+	if [[ $PATCHES_APPLIED ]] && [[ $SHOULD_AUTORECONF ]] && [[ "$AUTORECONF" != "NO" ]] ; then
+	   echo $CYAN"   Notice - "$NORMAL"'.am', '.ac' or '.in' config files were patched"
+	   #echo "         You can disable this with AUTORECONF=NO if necessary."
+	   cd "$CONFIG_DIR" ;
+	   if [[ -f autogen.sh ]] ; then
+		echo -n $BLUE"Regenerating config files - "$NORMAL"Using: autogen.sh "
+		sh ./autogen.sh &> /dev/null
+		echo $GREEN"Done!"$NORMAL
+	   else
+		echo -n $BLUE"Regenerating config files - "$NORMAL"Using: autoreconf -if "
+		autoreconf --install --force &> /dev/null
+		autoconf &> /dev/null
+		echo $GREEN"Done!"$NORMAL
+	   fi
+	fi
+	if [[ $AUTORECONF = "YES" ]] ; then
+		cd "$CONFIG_DIR" ;
+		echo -n $BLUE"Regenerating config files - "$NORMAL"Using: autoreconf -if "
+		autoreconf --install --force &> /dev/null
+		autoconf &> /dev/null
+		echo $GREEN"Done!"$NORMAL
+	elif [[ $AUTOGEN = "YES" ]] ; then
+		cd "$CONFIG_DIR" ;
+		if [[ -f autogen.sh ]] ; then
+		    echo -n $BLUE"Regenerating config files - "$NORMAL"Using: autogen.sh "
+		    sh ./autogen.sh &> /dev/null
+		    echo $GREEN"Done!"$NORMAL
+		else
+		    echo $YELLOW"Failed - "$NORMAL"AUTOGEN requested, no autogen.sh found"
+		fi
+	fi
+	if ! [[ -x "$CONFIG_DIR"/configure ]] ; then
+		if [[ -e "$CONFIG_DIR"/configure.in ]] || [[ -e "$CONFIG_DIR"/configure.ac ]] ; then
+			# remove the requirement for Makefile.in/am -autoconf can be used to generate other files like Jamfile
+			# or better -include the possibility of Jamfile.in
+			if [[ -e "$CONFIG_DIR"/$MAKEFILE.in ]] || [[ -e "$CONFIG_DIR"/$MAKEFILE.am ]] || [[ -e "$CONFIG_DIR"/Jamfile.in ]] || [[ -e "$CONFIG_DIR"/Jamconfig.in ]] ; then
+				echo $BLUE"Found incomplete autoconf sources - "$NORMAL"Regenerating config files - "
+				if [[ -e "$CONFIG_DIR"/autogen.sh ]] ; then
+					echo -n $BLUE"Found an autogen.sh script - "$NORMAL "We'll try running that - "
+					cd "$CONFIG_DIR" ;
+					sh ./autogen.sh &> /dev/null && echo $GREEN"Done"$NORMAL || echo $YELLOW"FAILED!"$NORMAL
+					echo -n $BLUE"Now we'll try running autoconf - "$NORMAL
+					autoconf 2> /dev/null && echo $GREEN"Done"$NORMAL || echo $YELLOW"FAILED!"$NORMAL
+				elif [[ -e "$CONFIG_DIR"/genconf.sh ]] ; then
+					echo -n $BLUE"Found a genconf.sh script - "$NORMAL" We'll try running that - "
+					cd "$CONFIG_DIR" ;
+					sh ./genconf.sh &> /dev/null && echo $GREEN"Done"$NORMAL || echo $YELLOW"FAILED!"$NORMAL
+					echo -n $BLUE"Now we'll try running autoconf - "$NORMAL
+					autoconf 2> /dev/null && echo $GREEN"Done"$NORMAL || echo $YELLOW"FAILED!"$NORMAL
+				elif [[ -e "$CONFIG_DIR"/bootstrap.sh ]] ; then
+					echo -n $BLUE"Found a bootstrap.sh script - "$NORMAL" We'll try running that - "
+					cd "$CONFIG_DIR" ;
+					sh ./bootstrap.sh &> /dev/null && echo $GREEN"Done"$NORMAL || echo $YELLOW"FAILED!"$NORMAL
+					echo -n $BLUE"Now we'll try running autoconf - "$NORMAL
+					autoconf 2> /dev/null && echo $GREEN"Done"$NORMAL || echo $YELLOW"FAILED!"$NORMAL
+				elif [[ -e "$CONFIG_DIR"/bootstrap ]] ; then
+					echo -n $BLUE"Found a bootstrap script - "$NORMAL" We'll try running that - "
+					cd "$CONFIG_DIR" ;
+					sh ./bootstrap &> /dev/null && echo $GREEN"Done"$NORMAL || echo $YELLOW"FAILED!"$NORMAL
+					echo -n $BLUE"Now we'll try running autoconf - "$NORMAL
+					autoconf 2> /dev/null && echo $GREEN"Done"$NORMAL || echo $YELLOW"FAILED!"$NORMAL
+				elif [[ -e "$CONFIG_DIR"/$MAKEFILE.in ]] && [[ -e "$CONFIG_DIR"/$MAKEFILE.am ]] ; then
+					echo -n $BLUE"Found autoconf files. "$NORMAL"We'll try running autoconf - "
+					cd "$CONFIG_DIR" ;
+					autoconf 2> /dev/null && echo $GREEN"Done"$NORMAL || echo $YELLOW"FAILED!"$NORMAL
+				else
+					echo -n $BLUE"Generating autoconf files - "$NORMAL"Running 'autoreconf -if' "
+					cd "$CONFIG_DIR" ;
+					autoreconf -if &> /dev/null
+					autoconf &> /dev/null
+					echo $GREEN"Done!"$NORMAL
+				fi
+			fi
+		fi
+	fi
+	
+	# if all else fails try this generic routine.
+	if ! [[ -x "$CONFIG_DIR"/configure ]] && [[ -e "$CONFIG_DIR"/$MAKEFILE.am ]] && [[ -e "$CONFIG_DIR"/$MAKEFILE.in ]] ; then
+		if [[ -e "$CONFIG_DIR"/configure.ac ]] || [[ -e "$CONFIG_DIR"/configure.in ]] ; then
+		   echo $BLUE"Found Makefile.am and configure.in. "$NORMAL"We'll try with these generic commands:"
+		   echo "aclocal -I. ; autoheader ; automake -a --force --copy --foreign ; autoconf"
+		   cd "$CONFIG_DIR" ;
+		   # automake
+		   aclocal -I . 2> /dev/null 1> /dev/null 
+		   autoheader 2> /dev/null 1> /dev/null 
+		   # automake --add-missing --copy --foreign 2> /dev/null 1> /dev/null
+		   automake -a --force --copy --foreign 2> /dev/null 1> /dev/null
+		   autoconf 2> /dev/null
+		fi
+		if ! [[ -x "$CONFIG_DIR"/configure ]]  ; then
+		   echo $YELLOW"WARNING! "$NORMAL"This looks like a non-working autoconf package or maybe needs automake-1.4."
+		   if [[ -e "$CONFIG_DIR"/$MAKEFILE ]] ; then
+		      echo "But we have a Makefile, so we'll proceed anyway. Maybe it's your lucky day."
+		   else
+		      echo $YELLOW"WARNING! "$NORMAL"No Makefile and no configure script found. "$BLUE"Skipping..."$NORMAL
+		   fi
+		fi
+	fi
+	
+	# replace config.guess and config.sub files if not disabled with AUTO_SUB_GUESS='NO',
+	# and not for debian-type packages -need to check on this more
+	# This used to be done in 05-fix_source_perms after applying patches
+	case $NAME in
+		automake|libtool|rpm) : ;;
+		# what about automake and libtool? We don't really want to replace the originals
+		# here, but we patch them instead in case they are out of sync with the src2pkg copies
+		*)
+			if [[ $(find . -name config.guess -o -name config.sub) != '' ]] ; then
+				if [[ "$PKG_FORMAT" != "deb" ]] && [[ $AUTO_SUB_GUESS != 'NO' ]] ; then
+					[[ $DEBUG ]] && echo $CYAN"   Notice - "$NORMAL"Replacing config.guess and config.sub with known good ones"
+					for FILE in $(find * -name config.guess -o -name config.sub) ; do
+						rm -f $FILE
+						cp -f /usr/share/src2pkg/$(basename $FILE) $FILE
+						chmod 755 $FILE
+					done
+				fi
+			fi
+		;;
+	esac
+	
+	# If the CONFIG_COMMAND has been given, use that
+	if [[ $CONFIG_COMMAND != "" ]] ; then
+		cd "$CONFIG_DIR"
+		if [[ ${CONFIG_COMMAND:0:1} = '/' ]] || [[ $CONFIG_COMMAND =~ "/" ]] ; then
+			echo $BLUE"Running user-specified CONFIG_COMMAND: "$NORMAL"$CONFIG_COMMAND $EXTRA_CONFIGS"
+			[[ $QUIET = "NO" ]] && $CONFIG_COMMAND $EXTRA_CONFIGS || $CONFIG_COMMAND $EXTRA_CONFIGS &> /dev/null
+		elif [[ $(which ${CONFIG_COMMAND%% *} ) ]] ; then
+			echo $BLUE"Running user-specified CONFIG_COMMAND: "$NORMAL"$CONFIG_COMMAND $EXTRA_CONFIGS"
+			[[ $QUIET = "NO" ]] && $CONFIG_COMMAND $EXTRA_CONFIGS || $CONFIG_COMMAND $EXTRA_CONFIGS &> /dev/null
+		else
+			echo $BLUE"Running user-specified CONFIG_COMMAND: "$NORMAL"./$CONFIG_COMMAND $EXTRA_CONFIGS"
+			[[ $QUIET = "NO" ]] && ./$CONFIG_COMMAND $EXTRA_CONFIGS || $CONFIG_COMMAND $EXTRA_CONFIGS &> /dev/null
+		fi
+	elif [[ -x "$CONFIG_DIR"/configure ]] ; then
+		trap safe_user_cancel 2
+		echo $BLUE"Found configure script - "$GREEN"Done"$NORMAL
+		if [[ $USE_OBJ_DIR = "YES" ]] ; then
+			echo ""
+			echo $BLUE"Using OBJ_DIR: "$NORMAL "$(basename ${OBJ_DIR})"
+			if [[ -e "$CONFIG_DIR"/$MAKEFILE ]] ; then
+			 echo $BLUE"   Notice - "$NORMAL"Stale Makefile found. Running 'make distclean' - "
+			 cd "$CONFIG_DIR" && make distclean &> /dev/null && echo $GREEN"Okay"$NORMAL
+			fi
+			if ! [[ $CONFIG_COMMAND ]] ; then
+				CONFIG_COMMAND="../$SRC_DIR_NAME/$DEFAULT_CONFIG_COMMAND" ;
+			else
+				CONFIG_COMMAND="../$SRC_DIR_NAME/$CONFIG_COMMAND" ;
+			fi
+		fi
+		if ! [[ $CONFIG_COMMAND ]] ; then
+			if [[ "$CONFIG_DIR" = "$OBJ_DIR" ]] ; then
+				CONFIG_COMMAND="$DEFAULT_CONFIG_COMMAND"
+			else
+				CONFIG_COMMAND="$CONFIG_DIR/$DEFAULT_CONFIG_COMMAND"
+			fi
+		else
+			case $CONFIG_COMMAND in
+					/*) true ;;	# absolute path
+					../*|./*|*/*) true ;; # path relative to CONFIG_DIR
+					*) CONFIG_COMMAND="$CONFIG_DIR/$CONFIG_COMMAND" ;; # hard path concatenated to CONFIG_DIR
+			esac
+		fi
+		# check to see of --prefix option is present
+		if ! [[ $(grep -m1 "\-\-prefix" "$CONFIG_DIR"/configure 2> /dev/null) ]] ; then
+			# check to make sure prefix hasn't been given in EXTRA_CONFIGS
+			# manedit and other pconf sources are weird
+			#if [[ $(echo $EXTRA_CONFIGS |grep prefix) = "" ]] ; then
+			# If EXTRA_CONFIGS has been set, then don't do interactive 
+			#if [[ "$EXTRA_CONFIGS" = "" ]] ; then
+			case $EXTRA_CONFIGS in
+				*'--prefix'*) : ;;
+				*)
+					echo $CYAN"   Notice - "$NORMAL"No '--prefix' option found in configure script."
+				;;
+			esac
+			  #QUIET=NO
+			  #echo $CYAN"   Notice - "$NORMAL"Activating interactive mode so you can fix that."
+			  #QUERY_FOR_EXTRA_CONFIGS=YES
+			#elif [[ $(echo $EXTRA_CONFIGS |grep prefix) = "" ]] ; then
+			#  echo $CYAN"   Notice - "$NORMAL"No '--prefix' option found in configure script."
+			#  echo $CYAN"   Notice - "$NORMAL"Activating interactive mode so you can fix that."
+			#  QUERY_FOR_EXTRA_CONFIGS=YES
+			#fi
+		else
+			HAVE_PREFIX_OPTION=1
+		fi
+		# create a configure-help.txt file -but only if there appears to be a '--help' option
+		if grep -m1 -q "\-\-help" "$CONFIG_DIR"/configure  ; then
+			# only do this if it's a real autoconf configure script -mplayer and other 'fake' configure scripts may break
+			if grep -q -m1 "Generated by GNU Autoconf" "$CONFIG_DIR"/configure ; then
+				"$CONFIG_DIR"/configure --help > "$CONFIG_DIR"/configure-help.txt #2> /dev/null
+				sleep 1
+			fi
+		else
+			# a program called openttd has all the --help stuff in a separate file which is sourced :-(
+			( "$CONFIG_DIR"/configure --help > "$CONFIG_DIR"/configure-help.txt 2> /dev/null ) &
+			sleep 1
+		fi
+		# need to sleep for a second for the file creation above to register
+		if [[ -f "$CONFIG_DIR"/configure-help.txt ]] && [[ $(cat "$CONFIG_DIR"/configure-help.txt 2> /dev/null) != "" ]] ; then
+			if [[ $(grep "help=short" "$CONFIG_DIR"/configure-help.txt) ]] ; then
+			 "$CONFIG_DIR/$CONFIG_COMMAND" --help=short > "$CONFIG_DIR"/configure-help-short.txt 2> /dev/null
+			fi
+			if [[ -f "$CONFIG_DIR"/configure-help-short.txt ]] ; then
+				SHORTHELPFILE="$CONFIG_DIR"/configure-help-short.txt
+			fi
+			HELPFILE="$CONFIG_DIR"/configure-help.txt
+		fi
+		
+		# if no EXTRA_CONFIGS were given and AUTO_CONFIG=FOREIGN is enabled
+		if [[ $EXTRA_CONFIGS = "" ]] ; then
+		  #  if AUTO_CONFIG=FOREIGN look for defaults in an rpm spec file or debian 'rules', if one is present
+		  if [[ $AUTO_CONFIG = "FOREIGN" ]] ; then
+			echo $BLUE"Searching for: "$NORMAL"FOREIGN_CONFIGS"
+			if [[ -e  "$SRC_DIR"/debian/rules ]] ; then
+				SPECFILE="$SRC_DIR"/debian/rules
+				FOREIGN_CONFIGS=$(get_deb_config "$SPECFILE")
+			elif [[ -e  "$SRC_DIR"/$NAME.spec ]] ; then
+				SPECFILE="$SRC_DIR"/$NAME.spec
+				FOREIGN_CONFIGS=$(get_rpm_config "$SPECFILE")
+			elif [[ -e  "$SRC_DIR"/$ORIG_NAME.spec ]] ; then
+				SPECFILE="$SRC_DIR"/$ORIG_NAME.spec
+				FOREIGN_CONFIGS=$(get_rpm_config "$SPECFILE")
+			elif [[ -e  "$SRC_DIR"/$NAME.spec.in ]] ; then
+				SPECFILE="$SRC_DIR"/$NAME.spec.in
+				FOREIGN_CONFIGS=$(get_rpm_config "$SPECFILE")
+			elif [[ -e  "$SRC_DIR"/$ORIG_NAME.spec.in ]] ; then
+				SPECFILE="$SRC_DIR"/$ORIG_NAME.spec.in
+				FOREIGN_CONFIGS=$(get_rpm_config "$SPECFILE")
+			elif [[ -e  "$SRC_DIR"/$RAW_SOURCE_NAME.spec ]] ; then
+				SPECFILE="$SRC_DIR"/$RAW_SOURCE_NAME.spec
+				FOREIGN_CONFIGS=$(get_rpm_config "$SPECFILE")
+			elif [[ -e  "$SRC_DIR"/$RAW_SOURCE_NAME.spec.in ]] ; then
+				SPECFILE="$SRC_DIR"/$RAW_SOURCE_NAME.spec.in
+				FOREIGN_CONFIGS=$(get_rpm_config "$SPECFILE")
+			fi
+			if [[ $FOREIGN_CONFIGS != "" ]] ; then
+				#echo""
+				#echo $BLUE"Found FOREIGN_CONFIGS options in: "$NORMAL"$(basename $SPECFILE)"
+				echo $BLUE"Found FOREIGN_CONFIGS options in: "$NORMAL"${SPECFILE#*$SRC_DIR/}"
+				# if we have new configs, then let AUTO_SCRIPT clobber the original script
+				DONT_CLOBBER_SCRIPT=
+				EXTRA_CONFIGS=${FOREIGN_CONFIGS}
+			fi
+		  #  if AUTO_CONFIG=NATIVE then compose options by detecting them in the configure script
+		  elif [[ $AUTO_CONFIG = "NATIVE" ]] ; then
+			if [[ "$HELPFILE" ]] ; then
+			   for option in $AUTO_CONFIG_OPTIONS ; do
+				if [[ $(grep "\-\-$option" "$HELPFILE") ]] ; then
+					HAVE_CONFIG_OPTIONS=1
+					SPECFILE="configure"
+				fi
+			   done
+			   if [[ $HAVE_CONFIG_OPTIONS = 1 ]] ; then
+				echo -n $BLUE"Adding default options: "$NORMAL
+				for option in $AUTO_CONFIG_OPTIONS ; do
+					if [[ $(grep "\-\-$option" "$HELPFILE") ]] ; then
+					  FOREIGN_CONFIGS="$FOREIGN_CONFIGS --$option=${!option}"
+					  echo -n "$option "
+					fi
+				done
+				echo ""
+				# if we have new configs, then let AUTO_SCRIPT clobber the original script
+				DONT_CLOBBER_SCRIPT=
+				EXTRA_CONFIGS=${FOREIGN_CONFIGS}
+			   fi
+			fi
+		  fi
+		fi
+		# if using interactive mode, pause and get config options from the user. Use the FOREIGN_CONFIGS from above if available
+		if [[ "$QUERY_FOR_EXTRA_CONFIGS" = "YES" ]] ; then
+			echo ""
+			echo $BLUE"Running interactive configuration - "$NORMAL
+			cd "$CONFIG_DIR" ;
+			
+			# show the configure options
+			show_config_help
+			# show this prompt again since the --help command throws the first one way off the screen
+			if [[ $FOREIGN_CONFIGS != "" ]] ; then
+				DEFAULT_CONFIGS="$FOREIGN_CONFIGS"
+				echo $BLUE"Possible default options were found in:"$NORMAL $(basename "$SPECFILE")
+				echo $BLUE"Interactive mode: "$NORMAL"Change arguments to the configure script now, if needed"
+				if [[ $HAVE_PREFIX_OPTION = 1 ]] ; then
+					echo "  Don't pass the '--prefix=/$PRE_FIX' as it is supplied separately."
+				else
+					echo "  No '--prefix' option found in the configure script. Look for other syntax"
+					echo "  like -prefix or --prefix-dir and supply that here like: --prefix=/$PRE_FIX"
+				fi
+				echo "  Type in options and press ENTER, or press ENTER to accept the default of:"
+				echo "  $FOREIGN_CONFIGS"
+				echo "  Or, type the word 'none' and press ENTER to erase the above defaults."
+			else
+				echo $BLUE"Interactive mode: "$NORMAL"Pass extra arguments to the configure script, if needed."
+				if [[ $HAVE_PREFIX_OPTION = 1 ]] ; then
+					echo "  Don't pass the '--prefix=/$PRE_FIX' as it is supplied separately."
+				else
+					echo "  No '--prefix' option found in the configure script. Look for other syntax"
+					echo "  like -prefix or --prefix-dir and supply that here like: --prefix=/$PRE_FIX"
+				fi
+				if [[ $EXTRA_CONFIGS = "" ]] ; then
+				   echo "  Just press ENTER to leave blank, or type in options and then press ENTER"
+				else
+				   echo "  Enter new options or paste and edit the ones shown below. Then press ENTER."
+				   echo "  $EXTRA_CONFIGS"
+				   echo "  Or, type the word 'none' and press ENTER to erase the above options."
+				fi
+			fi
+			read -e -p ">" NEW_CONFIGS
+			if [[ $NEW_CONFIGS != "" ]] ; then 
+				# if we have new configs, then let AUTO_SCRIPT clobber the original script
+				DONT_CLOBBER_SCRIPT=
+				if [[ "$NEW_CONFIGS" = "none" ]] ; then
+					EXTRA_CONFIGS=
+				else
+					EXTRA_CONFIGS="$NEW_CONFIGS"
+				fi
+			fi
+		fi
+		
+		# add libdir options
+		if [[ ! $(echo $STD_CONFIGS |grep libdir ) ]] && [[ ! $(echo $EXTRA_CONFIGS |grep libdir ) ]] ; then
+			if [[ -z $libdir ]] ; then
+				if [[ $(grep "\-\-libdir" "$HELPFILE" 2> /dev/null) ]] ; then
+					LIB_CONFIGS="$(echo $LIB_CONFIGS --libdir=/$PRE_FIX/lib$LIBDIRSUFFIX |white_out)"
+				fi
+			else
+				if [[ $(grep "\-\-libdir" "$HELPFILE" 2> /dev/null) ]] ; then
+					LIB_CONFIGS="$(echo $LIB_CONFIGS --libdir=$libdir |white_out)"
+				fi
+			fi
+		fi
+		
+		if [[ $ADD_EXPLICIT_HOST = "YES" ]] ; then
+			if [[ "$HELPFILE" ]] ; then
+			   for option in build host target ; do
+				if [[ $(grep "\-\-$option" "$HELPFILE") ]] ; then
+					HAVE_HOST_OPTIONS=1
+				fi
+			   done
+			   if [[ $HAVE_HOST_OPTIONS = 1 ]] ; then
+				echo -n $BLUE"Adding explicit host-build-target options: "$NORMAL
+				for option in build host target ; do
+					if [[ $(grep "\-\-$option" "$HELPFILE") ]] ; then
+					  if ! [[ $(echo $EXTRA_CONFIGS |grep $option) ]] ; then
+						HOST_CONFIGS="$HOST_CONFIGS --$option=${!option}"
+						echo -n "$option "
+					  fi
+					fi
+				done
+				echo ""
+			   else
+				if ! [[ $(echo $EXTRA_CONFIGS |grep $HOST_OS) ]] ; then
+					HOST_CONFIGS=$HOST_OS
+				fi
+			   fi
+			else
+				if ! [[ $(echo $EXTRA_CONFIGS |grep $HOST_OS) ]] ; then
+					HOST_CONFIGS=$HOST_OS
+				fi
+			fi
+		elif [[ $ADD_HOST = "YES" ]] ; then
+			if ! [[ $(echo $EXTRA_CONFIGS |grep $HOST_OS) ]] ; then
+				HOST_CONFIGS=$HOST_OS
+			fi
+		fi
+		
+		# put all the configure options together and remove white space
+		#if [[ -f "$HELPFILE" ]] && [[ $HAVE_PREFIX_OPTION = 1 ]] ; then
+		if [[ $HAVE_PREFIX_OPTION = 1 ]] ; then
+			if [[ ${PRE_FIX:0:1} = '/' ]] ; then
+				CONFIG_ARGS="$(echo --prefix=$PRE_FIX $STD_CONFIGS $EXTRA_CONFIGS $LIB_CONFIGS $HOST_CONFIGS| white_out)"
+			else
+				CONFIG_ARGS="$(echo --prefix=/$PRE_FIX $STD_CONFIGS $EXTRA_CONFIGS $LIB_CONFIGS $HOST_CONFIGS| white_out)"
+			fi
+		else
+			CONFIG_ARGS="$(echo $STD_CONFIGS $EXTRA_CONFIGS $LIB_CONFIGS $HOST_CONFIGS| white_out)"
+		fi
+		# if FLAG_LINE is not already set from src2pkg command line, set it and remove white space
+		if ! [[ $FLAG_LINE  ]] ; then
+			#FLAG_LINE="$(echo $STD_FLAGS $EXTRA_FLAGS |white_out)"
+			#FLAG_LINE="$(echo $EXTRA_FLAGS $STD_FLAGS |white_out)"
+			FLAG_LINE="$(echo $STD_FLAGS |white_out)"
+		fi
+		
+		# Remove stale configuration files
+		[[ -d "$CONFIG_DIR"/autom4te.cache ]] && rm -rf "$CONFIG_DIR"/autom4te.cache
+		find "$CONFIG_DIR" -name .deps -exec rm -rf {} \; 2> /dev/null
+		[[ -f "$CONFIG_DIR"/config.status ]] && rm -f "$CONFIG_DIR"/config.status
+		[[ -f "$CONFIG_DIR"/config.cache ]] && rm -f "$CONFIG_DIR"/config.cache
+		
+		# run the configure script
+		cd "$OBJ_DIR" ;
+		echo $BLUE"Configuring sources using:"$NORMAL
+		#export CFLAGS="$FLAG_LINE"
+		#export CXXFLAGS=$FLAG_LINE
+		# exporting both CFLAGS and CXXFLAGS seems like a good idea,
+		# but exporting both sometimes causes failure (libltdl ?)
+		if [[ $LDFLAGS != "none" ]] ; then
+			if [[ $EXTRA_LDFLAGS != "" ]] ; then
+				LDFLAGS="$LDFLAGS,$EXTRA_LDFLAGS"
+			fi
+			[[ $LDFLAGS ]] && export LDFLAGS && echo -n " LDFLAGS=\"$LDFLAGS\""
+		
+		fi
+		
+		# write the brief info to a file for use later when writing package meta_data file
+		echo "	LDFLAGS=\"$LDFLAGS\"" > "$SRC_DIR"/$NAME-config-command.txt
+		echo "	CFLAGS=\"$FLAG_LINE\"" >> "$SRC_DIR"/$NAME-config-command.txt
+		echo "	CXXFLAGS=\"$FLAG_LINE\"" >> "$SRC_DIR"/$NAME-config-command.txt
+		echo "	$CONFIG_COMMAND $CONFIG_ARGS" >> "$SRC_DIR"/$NAME-config-command.txt
+		
+		#echo " CFLAGS=$FLAG_LINE ${CONFIG_COMMAND##*/} $CONFIG_ARGS"
+		echo " CFLAGS=\"$FLAG_LINE\" ${CONFIG_COMMAND} $CONFIG_ARGS"
+		if [[ $LOG_COMMANDS = "YES" ]] ; then
+			echo $BLUE"Logging configuration output to: "$NORMAL"LOG_DIR/$NAME-configure.log"
+			CFLAGS="$FLAG_LINE" CXXFLAGS="$FLAG_LINE" $CONFIG_COMMAND $CONFIG_ARGS &> "$LOG_DIR"/$NAME-configure.log
+		elif [[ $QUIET = "YES" ]] ; then
+			CFLAGS="$FLAG_LINE" CXXFLAGS="$FLAG_LINE" $CONFIG_COMMAND $CONFIG_ARGS &> /dev/null
+		else
+			echo "Messages from configure:"
+			CFLAGS="$FLAG_LINE" CXXFLAGS="$FLAG_LINE" $CONFIG_COMMAND $CONFIG_ARGS
+		fi
+		if [[ $? -eq 0 ]] ; then
+		  echo $BLUE"Configuration has been - "$GREEN"Successful!"$NORMAL
+		  
+		  if [[ "$CONFIRM_CONFIGURATION" = "YES" ]] ; then
+			echo -n $BLUE"Continue with the build? [ y or n ] > "$NORMAL
+			read -n 1 ANSWER
+			echo ""
+			if [ $ANSWER == "n" ] ; then
+			 echo $RED"CANCELLED! "$NORMAL"Quitting at users request."
+			 FAILED="CANCELLED interactively in: $FUNCNAME"
+			 exit 0
+			fi
+		  fi
+		  
+		elif [[ $USER_CANCELLED ]] ; then
+		  echo $RED"STOPPED! "$NORMAL"Operation cancelled during configuration!"
+		  FAILED="CANCELLED in: $FUNCNAME"
+		else
+		  FAILED="CONFIGURE_SOURCE in: $FUNCNAME"
+		  echo $RED"ERROR! "$NORMAL"Configuring sources has failed!"$NORMAL
+		  echo "This may be because of some missing libraries, or you may"
+		  echo "need to pass extra options to configure using EXTRA_CONFIGS."
+			if [[ $REPLAY_ERRORS = "YES" ]] && [[ $QUIET = "YES" ]] ; then
+				if [[ $DISPLAY ]] ; then
+					cd "$CONFIG_DIR" ;
+					if [[ -x $(which xterm) ]] ; then
+						echo $CYAN"   Notice - "$NORMAL"Replaying failed configuration in a separate xterm:"
+						export CFLAGS="$STD_FLAGS$EXTRA_FLAGS"
+						( xterm -hold -e "$CONFIG_COMMAND" "$CONFIG_ARGS" & )
+					else
+						echo $CYAN"   Notice - "$NORMAL"Skipping replay of failed configuration - no xterm found"
+					fi
+				else
+					cd "$CONFIG_DIR" ;
+					echo $CYAN"   Notice - "$NORMAL"Replaying failed configuration:"
+					export CFLAGS="$STD_FLAGS$EXTRA_FLAGS"
+					"$CONFIG_COMMAND" "$CONFIG_ARGS"
+				fi
+			else
+				show_requires
+				show_config_help
+			fi
+		fi
+	# sources are not autoconf - look for: imake, scons, jam, python, cmake, perl(Makefile.PL, Build.PL, make.pl), tcl, qmake, simple
+	elif [[ -f "$CONFIG_DIR"/Imakefile ]] || [[ -f "$CONFIG_DIR"/imakefile ]] ; then
+		if ! [[ $USE_DEFAULT_MAKEFILES = "YES" ]] ; then
+		  echo -n $BLUE"Found Imakefile - "$NORMAL"Configuring using: 'xmkmf -a' - "
+		  cd "$CONFIG_DIR" ;
+		  xmkmf -a 2> /dev/null 1> /dev/null
+		  MAKEFILE="Makefile"
+		  echo $GREEN"Done"$NORMAL
+		fi
+	elif [[ -f "$CONFIG_DIR"/SConstruct ]] ; then
+		echo -n $BLUE"Found SConstruct file - "$NORMAL"Configuring using: 'scons configure prefix=/$PRE_FIX' "
+		cd "$CONFIG_DIR" ;
+		rm -Rf stampdir
+		rm -Rf .sconf_temp
+		find . -name *.pyc -exec rm -f {} \;
+		find . -type d -name cache -exec rm -Rf {} \;
+		rm -f config.log
+		if [[ $QUIET = "YES" ]] ; then
+		    scons --cache-disable configure prefix=/$PRE_FIX confdir=$sysconfdir/ 2> /dev/null 1> /dev/null
+		else
+		    scons --cache-disable configure prefix=/$PRE_FIX confdir=$sysconfdir/
+		fi
+		MAKEFILE="SConstruct"
+		echo $GREEN"Done"$NORMAL
+	elif [[ -x "$CONFIG_DIR"/waf ]] ; then
+		if [[ $QUIET = "YES" ]] ; then
+		    #./waf configure prefix=/$PRE_FIX confdir=$sysconfdir/ 2> /dev/null 1> /dev/null
+			./waf configure --prefix=/$PRE_FIX 2> /dev/null 1> /dev/null
+		else
+		    #./waf configure prefix=/$PRE_FIX confdir=$sysconfdir/
+			./waf configure --prefix=/$PRE_FIX
+		fi
+		[[ -z $NUMJOBS ]] && NUMJOBS=0
+		MAKE_COMMAND="./waf build -j $NUMJOBS"
+		INSTALL_LINE="./waf install"
+		echo $GREEN"Done"$NORMAL
+	elif [[ -f "$CONFIG_DIR"/Jamfile ]] ; then
+		if [[ -f "$CONFIG_DIR"/configure ]] ; then
+			cd "$CONFIG_DIR" ;
+			[[ $QUIET = "NO" ]] && ./configure $EXTRA_CONFIGS || ./configure $EXTRA_CONFIGS &> /dev/null
+		fi
+		! [[ $MAKE_COMMAND ]] && MAKE_COMMAND="jam"
+		! [[ $INSTALL_LINE ]] && INSTALL_LINE="jam install"
+	elif [[ -f "$CONFIG_DIR"/setup.py ]] ; then
+		#MAKEFILE="setup.py"
+		# avoid using DESTDIR to avoid Makefile failures
+		[[ $INSTALL_TYPE = "DESTDIR" ]] && INSTALL_TYPE=JAIL
+		#INSTALL_TYPE=JAIL
+		[[ "$QUIET" = "YES" ]] && RESTORE_QUIET=1
+		QUIET="NO"
+		! [[ $MAKE_COMMAND ]] && MAKE_COMMAND="/usr/bin/env python ./setup.py build"
+		# What about this: setup.py install --root=$PKG_DIR (see debian patch for file-5.00 for example)
+		# ! [[ $INSTALL_LINE ]] && INSTALL_LINE="/usr/bin/env python ./setup.py install --root=$PKG_DIR"
+		# No, the above doesn't play well with DESTDIR, JAIL or others
+		#if [[ $(grep 'import setup' "$CONFIG_DIR"/setup.py 2> /dev/null) ]] ; then
+		#	! [[ $INSTALL_LINE ]] && INSTALL_LINE="/usr/bin/env python ./setup.py --root=$PKG_DIR install"
+		#	USE_PY_SETUP=1
+		#else
+			! [[ $INSTALL_LINE ]] && INSTALL_LINE="/usr/bin/env python ./setup.py install"
+		#fi
+		#[[ $INSTALL_TYPE = JAIL ]] && INSTALL_TYPE=DESTDIR
+	elif [[ -f "$CONFIG_DIR"/CMakeLists.txt ]] ; then
+		if [[ $(echo $EXTRA_CONFIGS |grep LOCALSTATE) = "" ]] ; then
+			EXTRA_CMAKE_OPTIONS="$EXTRA_CMAKE_OPTIONS -DLOCALSTATE_INSTALL_DIR=$localstatedir"
+		fi
+		if [[ $(echo $EXTRA_CONFIGS |grep SYSCONF) = "" ]] ; then
+			EXTRA_CMAKE_OPTIONS="$EXTRA_CMAKE_OPTIONS -DSYSCONF_INSTALL_DIR=$sysconfdir"
+		fi
+		
+		CMAKE_OPTIONS=$(echo -DCMAKE_INSTALL_PREFIX:PATH="/${PRE_FIX}" \
+				-DLIB_SUFFIX=${LIBDIRSUFFIX} \
+				 ${EXTRA_CMAKE_OPTIONS} ${EXTRA_CONFIGS} |white_out )
+				 
+		if ! [[ $(which cmake) ]] ; then
+			echo $RED"FAILED! "$NORMAL"No cmake found in path. "$RED"Exiting..."$NORMAL
+			FAILED="CONFIGURATION - Missing cmake  in: $FUNCNAME"
+		else
+			
+			if [[ "$EUID" = 0 ]] ; then
+				INSTALL_TYPE=SAFE
+				echo $BLUE"Found 'cmake' configuration - "$NORMAL"Configuring using:"
+				echo "   cmake $CMAKE_OPTIONS"
+			else
+				echo $RED"Failed! "$NORMAL"This package uses cmake for configuration and must be built as 'root'."
+				FAILED="cmake Requires root"
+				post_process
+				exit
+			fi
+			
+			if [[ ! $USE_TOP_DIR ]] ; then
+				mkdir -p "$CONFIG_DIR"/build
+				# Delete the normal OBJ_DIR if it got created in 03-make_dirs
+				if [[ $OBJ_DIR_NAME != "" ]] && [[ -d "$SRC_BUILDS_DIR/$OBJ_DIR_NAME" ]] ; then
+					[[ "$QUIET" = "NO" ]] && echo $BLUE"Removing existing object build directory - "$NORMAL
+					( cd "$SRC_BUILDS_DIR" && rm -rf $OBJ_DIR_NAME 2> /dev/null 1> /dev/null )
+				fi
+				# now reset the OBJ_DIR for cmake
+				OBJ_DIR="$CONFIG_DIR"/build
+			
+				cd "$OBJ_DIR"
+				if [[ $QUIET = "YES" ]] ; then
+					cmake .. $CMAKE_OPTIONS &> /dev/null
+				else
+					cmake .. $CMAKE_OPTIONS
+				fi
+			else
+				OBJ_DIR="$CONFIG_DIR"
+				cd "$OBJ_DIR"
+				if [[ $QUIET = "YES" ]] ; then
+					cmake . $CMAKE_OPTIONS &> /dev/null
+				else
+					cmake . $CMAKE_OPTIONS
+				fi
+			fi
+		fi
+		
+	elif [[ -f "$CONFIG_DIR"/Makefile.PL ]] || [[ -f "$CONFIG_DIR"/Build.PL ]] || [[ -f "$CONFIG_DIR"/make.pl ]] ; then
+		cd "$CONFIG_DIR" ;
+		# Use JAIL instead of DESTDIR -REAL, SAFE and UNION work fine
+		# echo "y" | perl Makefile.PL INSTALLDIRS=vendor
+		if [[ -f "$CONFIG_DIR"/Build.PL ]] ; then
+			# add --automated as a default to avoid interactive routines?? -maybe not...
+			# [[ -z $EXTRA_CONFIGS ]] && EXTRA_CONFIGS='--automated'
+			echo $BLUE"Found perl $MAKEFILE_PL - "$NORMAL"Creating perl 'Build' script using: $(echo perl Build.PL $EXTRA_CONFIGS)"
+			perl Build.PL $EXTRA_CONFIGS
+			# we could set an error if this fails, but src2pkg will exit anyway in compile_source
+			# a Makefile doesn't get created
+			MAKEFILE="Build"
+			! [[ $MAKE_COMMAND ]] && MAKE_COMMAND='perl Build'
+			#! [[ $MAKE_COMMAND ]] && MAKE_COMMAND='./Build'
+			# for some reason, create_packlist=0 bombs with JAIL
+			# ./Build install --destdir $PKG_DIR
+			if [[ $INSTALL_TYPE != "JAIL" ]] ; then
+				! [[ $INSTALL_LINE ]] && INSTALL_LINE='perl Build install create_packlist=0'
+			else
+				! [[ $INSTALL_LINE ]] && INSTALL_LINE='perl Build install'
+			fi
+		elif [[ -f "$CONFIG_DIR"/Makefile.PL ]] ; then
+			echo $BLUE"Found perl Makefile.PL - "$NORMAL
+			case $EXTRA_CONFIGS in
+				*INSTALLDIRS*)	: ;;
+				*)	export INSTALLDIRS=vendor ;;
+			esac
+			echo $BLUE"Creating Makefile using:"$NORMAL" CFLAGS=$STD_FLAGS perl Makefile.PL $EXTRA_CONFIGS"
+			echo "y" | CFLAGS=$STD_FLAGS perl Makefile.PL "$EXTRA_CONFIGS"
+			# INSTALLVENDORMAN3DIR=$MAN_DIR/man3
+			MAKEFILE="Makefile"
+		elif [[ -f "$CONFIG_DIR"/make.pl ]] ; then
+			MAKEFILE_PL=make.pl
+			! [[ $MAKE_COMMAND ]] && MAKE_COMMAND='perl make.pl build'
+			# for some reason, create_packlist=0 bombs with JAIL
+			if [[ $INSTALL_TYPE != "JAIL" ]] ; then
+				! [[ $INSTALL_LINE ]] && INSTALL_LINE='perl make.pl install'
+			else
+				! [[ $INSTALL_LINE ]] && INSTALL_LINE='perl make.pl install'
+			fi
+			echo $BLUE"Found perl make.pl - "$NORMAL"No configuration needed"
+		fi
+	elif [[ -f "$CONFIG_DIR"/install.tcl ]] ; then
+		[[ $INSTALL_TYPE = "DESTDIR" ]] && INSTALL_TYPE=JAIL
+		chmod 755 "$CONFIG_DIR"/install.tcl
+		cd "$CONFIG_DIR" ;
+		[[ $INSTALL_LINE ]] && INSTALL_LINE="./install.tcl --prefix=/$PRE_FIX $EXTRA_CONFIGS"
+	elif [[ -f "$CONFIG_DIR"/$NAME.pro ]] ; then
+		if ! [[ $QMAKE_COMMAND ]] ; then
+			for QMAKE in qmake-qt4 qmake4 qmake-qt3 qmake3 qmake-qt2 qmake2 qmake ; do
+				if [[ $(which $QMAKE 2> /dev/null) ]] ; then
+					QMAKE_COMMAND="$QMAKE $NAME.pro"
+					break ;
+				fi
+			done
+		fi
+		cd "$CONFIG_DIR" ;
+		echo $BLUE"Configuring using: "$NORMAL"$QMAKE_COMMAND"
+		if [[ $QUIET = "YES" ]] ; then
+			$QMAKE_COMMAND &> /dev/null
+		else
+			$QMAKE_COMMAND
+		fi
+	#elif [[ $CONFIG_COMMAND != "" ]] ; then
+	# this has been moved to the top
+	#	echo $BLUE"Running user-specified CONFIG_COMMAND: "$NORMAL"./$CONFIG_COMMAND"
+	#	cd "$SRC_DIR"
+	#	./$CONFIG_COMMAND
+	elif [[ $(find "$CONFIG_DIR" -name "$MAKEFILE" |wc -l) -ge 1 ]] ; then
+		# We have at least one Makefile so we continue
+		echo $BLUE"Skipping configuration: "$NORMAL"Nothing to be done"
+		echo $BLUE"Continuing - "$NORMAL"We found at least one "$BLUE"$MAKEFILE"$NORMAL
+	else
+	  echo $BLUE"Skipping configure_source - "$NORMAL
+	fi
+	# Some Makefiles have hard-coded installation paths to /usr/local and some configure routines
+	# also fail to set prefix properly because the variable is called PREFIX, DEST or INSTALLROOT
+	# We try to correct these here unless the user is using PRE_FIX under /usr/local or /opt in which
+	# case CORRECT_MAKEFILES will have been set to NO in pre_process
+	if [[ $FAILED = "" ]] && [[ "$MAKEFILE" != "" ]] ; then
+	   if [[ "$CORRECT_MAKEFILES" != "NO" ]] && [[ "${PRE_FIX:0:9}" != "usr/local" ]] ; then
+		for MAKE_FILE in $(find . -name "$MAKEFILE" -o -name "$MAKEFILE".top -o -name "$MAKEFILE".subdirs  -o -name macros.mk -o -name rules.mk -o -name config.mk) ; do
+		   if grep 'usr/local' ${MAKE_FILE} &> /dev/null ; then
+			HAVE_BAD_PATHS=1
+		   fi
+		done
+		if [[ $HAVE_BAD_PATHS = 1 ]] ; then
+			[[ $DEBUG ]] && echo $CYAN"   Notice - "$NORMAL"Correcting $MAKEFILE(s) with conflicting hard-coded prefix."
+			for MAKE_FILE in $(find . -name "$MAKEFILE" -o -name "$MAKEFILE".top -o -name "$MAKEFILE".subdirs -o -name macros.mk -o -name rules.mk -o -name config.mk) ; do
+				sed -i -e s:"usr/local":"$PRE_FIX":g $MAKE_FILE
+			done
+		fi
+	   fi
+	fi
+  fi
+  if [[ $PAUSE = "AFTER" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+    echo $MAGENTA"Notice - "$BLUE"Pausing after: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+    read
+  fi
+ fi
+fi
+
+if [[ $ALLOW_USER_EXTENSIONS = "YES" ]] ; then
+ # check if the user has any post-execution extensions to this file and run them, if so.
+ [[ -f "$HOME"/.src2pkg/extensions/06.post ]] && . "$HOME"/.src2pkg/extensions/06.post
+fi
+
+}
+# end configure_source
+get_rpm_config() {
+INPUT=$1
+RPM_OPT_FLAGS=""
+RPM_BUILD_ROOT=""
+
+FOUND_FIRST_LINE=""
+FOUND_LAST_LINE=""
+BUILT_LINE=""
+while read LINE ; do
+	(( LINE_COUNT++ )) 
+	CHUNK=${LINE}
+	# whittle off any leading spaces until we have FOUND_FIRST_LINE
+	if ! [[ $FOUND_FIRST_LINE ]] ; then
+		while [[ ${CHUNK:0:1} = " " ]] ; do
+			CHUNK=${CHUNK:1}
+		done
+	fi
+	# Then, check for leading string matches and skip over them
+	if [[ ${CHUNK:0:10} = "%configure" ]] ; then
+		CHUNK=${CHUNK#* }
+		FOUND_FIRST_LINE=1
+	elif [[ ${CHUNK:0:11} = "./configure" ]] ; then
+		CHUNK=${CHUNK:12}
+		FOUND_FIRST_LINE=1
+	elif [[ ${CHUNK:0:17} = "sh -c ./configure" ]] ; then
+		CHUNK=${CHUNK:17}
+		FOUND_FIRST_LINE=1
+	elif [[ ${CHUNK:0:7} = "CFLAGS=" ]] ; then
+		CHUNK=${CHUNK#* }
+		FOUND_FIRST_LINE=1
+		if [[ ${CHUNK:0:11} = "./configure" ]] ; then
+			CHUNK=${CHUNK:11}
+		fi
+	fi
+	#
+	if [[ $FOUND_FIRST_LINE ]] && ! [[ $FOUND_LAST_LINE ]] ; then # && ! [[ $FOUND_LAST_LINE ]] ; then
+		# strip leading spaces
+		while [[ ${CHUNK:0:1} = " " ]] ; do
+			CHUNK=${CHUNK:1}
+		done
+		if [[ "${CHUNK:0:1}" = "%" ]] || [[ "$CHUNK" = "" ]] ; then
+			! [[ $FOUND_LAST_LINE ]] && FOUND_LAST_LINE=1
+		elif ! [[ $FOUND_LAST_LINE ]] ; then
+			BUILT_LINE="$BUILT_LINE $CHUNK"
+			#BUILT_LINE=$CHUNK
+			FOUND_LAST_LINE=1
+		fi
+	fi
+done <$INPUT
+
+for CHUNK in $BUILT_LINE ; do
+	while [[ ${CHUNK:0:1} = " " ]] ; do
+			CHUNK=${CHUNK:1}
+	done
+	
+	if [[ ${CHUNK:0:9} = "--prefix=" ]] ; then
+		CHUNK=${CHUNK#* }
+	fi
+	# get rid of prefix -the above should skip over it
+	CHUNK=${CHUNK/--prefix=/}
+	CHUNK=${CHUNK/\%\{_prefix\}/}
+	CHUNK=${CHUNK/\%\{prefix\}/}
+	CHUNK=${CHUNK/\%\{/} ; CHUNK=${CHUNK/\}/}
+	
+	# this should also be better
+	if [[ ${CHUNK:0:13} = "RPM_OPT_FLAGS" ]] ; then
+		CHUNK=${CHUNK#* }
+	fi
+	# get rid of RPM_OPT_FLAGS
+	CHUNK=${CHUNK/RPM_OPT_FLAGS=/}
+	# Change LSB compliance to Slackware compliance
+	CHUNK=${CHUNK/usr\/share\/man/usr\/man}
+	CHUNK=${CHUNK/usr\/share\/info/usr\/info}
+	
+	CHUNK=${CHUNK/_bindir/$bindir}
+	CHUNK=${CHUNK/_sbindir/$sbindir}
+	CHUNK=${CHUNK/_libexecdir/$libexecdir}
+	CHUNK=${CHUNK/_sysconfdir/$sysconfdir}
+	CHUNK=${CHUNK/_sharedstatedir/$sharedstatedir}
+	CHUNK=${CHUNK/_localstatedir/$localstatedir}
+	CHUNK=${CHUNK/_libdir/$libdir}
+	CHUNK=${CHUNK/_includedir/$includedir}
+	CHUNK=${CHUNK/_oldincludedir/$oldincludedir}
+	CHUNK=${CHUNK/_datarootdir/$datarootdir}
+	CHUNK=${CHUNK/_datadir/$datadir}
+	CHUNK=${CHUNK/_infodir/$infodir}
+	CHUNK=${CHUNK/_localedir/$localedir}
+	CHUNK=${CHUNK/_mandir/$mandir}
+	CHUNK=${CHUNK/_docdir/$docdir}
+	CHUNK=${CHUNK/_htmldir/$htmldir}
+	CHUNK=${CHUNK/_dvidir/$dvidir}
+	CHUNK=${CHUNK/_pdfdir/$pdfdir}
+	CHUNK=${CHUNK/_psidir/$psidir}
+	
+	CHUNK=${CHUNK/_gamesbindir/$gamesbindir}
+	CHUNK=${CHUNK/_gamesdatadir/$gamesdatadir}
+	if [[ "$REBUILT_LINE" = "" ]] ; then 
+		REBUILT_LINE="$CHUNK"
+	else
+		REBUILT_LINE="$REBUILT_LINE $CHUNK"
+	fi
+done
+[[ ${REBUILT_LINE:0:1} = " " ]] && REBUILT_LINE=${REBUILT_LINE:1}
+echo "$REBUILT_LINE"
+
+}
+
+
+get_deb_config() {
+INPUT=$1
+FOUND_LINE=0
+while read LINE ; do
+	(( LINE_COUNT++ )) 
+	CHUNK="$LINE"
+	#get rid of leading
+	while [[ ${CHUNK:0:1} = " " ]] ; do
+			CHUNK=${CHUNK:1}
+	done
+	#if [[ ${CHUNK:0:11} = "./configure" ]] ; then
+	if [[ $(echo $CHUNK |grep './configure') ]] ; then
+		FOUND_FIRST_LINE=1
+		BUILT_LINE=$CHUNK
+	elif [[ ${CHUNK:0:1} = "#" ]] ; then
+		continue
+	elif ! [[ $FOUND_LAST_LINE ]] ; then
+			if [[ "$CHUNK" = "" ]] ; then
+				FOUND_LAST_LINE=1
+			else
+				BUILT_LINE="$BUILT_LINE$CHUNK"
+			fi
+	fi
+done <$INPUT
+
+for CHUNK in $BUILT_LINE ; do
+	[[ ${CHUNK:0:1} = " " ]] && CHUNK=${CHUNK:1}
+	# we want to skip over all of these:
+	if [[ ${CHUNK:0:11} = "./configure" ]] ; then
+		CHUNK_SIZE=${#CHUNK} && CHUNK=${CHUNK:$CHUNK_SIZE}
+	elif [[ ${CHUNK:0:6} = "--host" ]] ; then
+		CHUNK_SIZE=${#CHUNK} && CHUNK=${CHUNK:$CHUNK_SIZE}
+	elif [[ ${CHUNK:0:7} = "--build" ]] ; then
+		CHUNK_SIZE=${#CHUNK} && CHUNK=${CHUNK:$CHUNK_SIZE}
+	elif [[ ${CHUNK:0:8} = "--target" ]] ; then
+		CHUNK_SIZE=${#CHUNK} && CHUNK=${CHUNK:$CHUNK_SIZE}
+	elif [[ ${CHUNK:0:8} = "--prefix" ]] ; then
+		CHUNK_SIZE=${#CHUNK} && CHUNK=${CHUNK:$CHUNK_SIZE}
+	elif [[ ${CHUNK:0:6} = "CFLAGS" ]] ; then
+		CHUNK_SIZE=${#CHUNK} && CHUNK=${CHUNK:$CHUNK_SIZE}
+	elif [[ ${CHUNK:0:1} = "$" ]] ; then
+		CHUNK_SIZE=${#CHUNK} && CHUNK=${CHUNK:$CHUNK_SIZE}
+	fi
+	# change all the occurences of "$${prefix}" to our $PRE_FIX
+	CHUNK=$(echo ${CHUNK/\$\$\{prefix\}/$PRE_FIX})
+	# Change the debian standard /usr/share/man and /usr/share/info
+	CHUNK=$(echo ${CHUNK/usr\/share\/man/$mandir})
+	CHUNK=$(echo ${CHUNK/usr\/share\/info/$infodir})
+	# if the CHUNK is not NULL add it to the rebuilt line
+	[[ "$CHUNK" != "" ]] && REBUILT_LINE="$REBUILT_LINE $CHUNK"
+done
+[[ ${REBUILT_LINE:0:1} = " " ]] && REBUILT_LINE=${REBUILT_LINE:1}
+echo "$REBUILT_LINE" 
+}
+
+show_config_help() {
+if [[ $DISPLAY ]] ; then
+	if [[ $HAVE_PREFIX_OPTION != 1 ]] || [[ $QUERY_FOR_EXTRA_CONFIGS = "YES" ]] ; then
+		if [[ -x $(which xterm) ]] ; then
+			echo $CYAN"   Notice - "$NORMAL"Showing long options in a separate xterm."
+			( xterm -hold -e cat "$HELPFILE" & )
+		else
+			echo $CYAN"   Notice - "$NORMAL"Can't show long options - no xterm found."
+		fi
+	elif [[ $SHORTHELPFILE ]] ; then
+		if [[ -x $(which xterm) ]] ; then
+			echo $CYAN"   Notice - "$NORMAL"Showing short options in a separate xterm."
+			( xterm -hold -e cat "$SHORTHELPFILE" & )
+		else
+			echo $CYAN"   Notice - "$NORMAL"Can't show short options - no xterm found."
+		fi
+	elif [[ $HELPFILE ]] ; then
+		if [[ -x $(which xterm) ]] ; then
+			echo $CYAN"   Notice - "$NORMAL"Showing all available options in a separate xterm."
+			( xterm -hold -e cat "$HELPFILE" & )
+		else
+			echo $CYAN"   Notice - "$NORMAL"Can't show available options - no xterm found."
+		fi
+	fi
+	
+else
+	if [[ $HAVE_PREFIX_OPTION != 1 ]] || [[ $QUERY_FOR_EXTRA_CONFIGS = "YES" ]] ; then
+		echo $CYAN"   Notice - "$NORMAL"Showing long configure options:"
+		cat "$HELPFILE"
+	elif [[ $SHORTHELPFILE ]] ; then
+		echo $CYAN"   Notice - "$NORMAL"Showing short package-specific options:"
+		cat "$SHORTHELPFILE"
+	elif [[ $HELPFILE ]] ; then
+		echo $CYAN"   Notice - "$NORMAL"Showing all available configure options:"
+		cat "$HELPFILE"
+	fi
+fi
+}

@@ -1,0 +1,141 @@
+#!/bin/bash
+## src2pkg script for: 	src2pkg-helpers
+## src2pkg Copyright 2005-2014 Gilbert Ashley <amigo@ibilio.org>
+
+SOURCE_NAME='src2pkg-helpers-1.6.tar.bz2'
+NAME='src2pkg-helpers'
+VERSION=1.6
+# ARCH='i486'
+BUILD='1'
+# PRE_FIX='usr'
+# Any extra options go here
+# EXTRA_CONFIGS=''
+# STD_FLAGS='-O2 -march=i486 -mtune=i686'
+
+TAR_VERSION=1.13c
+LIBSENTRY_VERSION=0.7.2
+COREUTILS_VERSION=5.2.1b
+UNIONFS_FUSE_VERSION=0.26
+
+# don't apply patches automatically
+AUTO_PATCH=NO
+
+# Get the functions and configs
+. /usr/libexec/src2pkg/FUNCTIONS ;
+
+# do_all_processes can substitute these 16 steps:
+
+pre_process
+find_source
+make_dirs
+unpack_source
+fix_source_perms
+
+#configure_source
+#compile_source
+#fake_install
+
+if [[ $ARCH = "x86_64" ]] ; then
+	CFLAGS="-m64 -O2 -fPIC -pipe"
+	LIBDIRSUFFIX="64"
+else
+	CFLAGS='-O2 -pipe'
+	LIBDIRSUFFIX=""
+fi
+
+export CFLAGS="$CFLAGS"
+export LDFLAGS="-Wl,-L/lib$LIBDIRSUFFIX,-L/usr/lib$LIBDIRSUFFIX"
+
+# make the libs
+echo "Creating libsentry"
+mkdir -p $PKG_DIR/usr/libexec/src2pkg/lib
+cd $SRC_DIR/libsentry-$LIBSENTRY_VERSION ;
+make
+if [[ $? = 0 ]] ; then
+	mkdir -p $PKG_DIR/usr/libexec/src2pkg/bin
+	echo ${VERSION} > $PKG_DIR/usr/libexec/src2pkg/bin/version
+    cp libsentry.so $PKG_DIR/usr/libexec/src2pkg/lib
+    chmod 755 $PKG_DIR/usr/libexec/src2pkg/lib/libsentry.so
+else
+	echo $RED"Ooops! "$NORMAL"Can't live without it..."
+	exit 1
+fi
+
+# make tar
+echo "Creating tar-1.13"
+mkdir -p $PKG_DIR/usr/libexec/src2pkg/bin
+( cd $SRC_DIR/tar-$TAR_VERSION ;
+  touch *
+  CFLAGS="$CFLAGS" ./configure --disable-nls --with-ncursesw --enable-widec
+  make
+  if [[ $? = 0 ]] ; then
+	cp src/tar $PKG_DIR/usr/libexec/src2pkg/bin/tar-1.13
+	chmod 755 $PKG_DIR/usr/libexec/src2pkg/bin/tar-1.13
+  else
+	echo "Ooops! Building tar-1.13 has failed."
+	echo "Error is non-fatal. Continuing..."
+  fi
+)
+# make the coreutils
+echo "Creating coreutils"
+( cd $SRC_DIR/coreutils-$COREUTILS_VERSION ;
+  CFLAGS="$CFLAGS" ./configure --disable-nls
+  touch *
+  #patch -p1 < $SRC_DIR/coreutils-5.2.1a-mktime.diff &> /dev/null
+  # patch -p1 < $SRC_DIR/coreutils-disable-mktime-stat-touch.diff &> /dev/null
+  make
+  if [[ $? = 0 ]] ; then
+	( cd $SRC_DIR/coreutils-$COREUTILS_VERSION/src
+		for PROG in cat chmod chown cp ginstall link ln mkdir \
+			mknod mv readlink rm rmdir unlink ; do
+			cp $PROG $PKG_DIR/usr/libexec/src2pkg/bin
+			chmod 755 $PKG_DIR/usr/libexec/src2pkg/bin/$PROG
+		done
+		( cd $PKG_DIR/usr/libexec/src2pkg/bin ; ln -sf ginstall install )
+	)
+  else
+	echo "Ooops! Building coreutils-5.2.1 has failed."
+	echo "Error is non-fatal. Continuing..."
+  fi
+)
+
+if [[ -f /usr/include/fuse.h ]] ; then
+	if [[ -L /lib/libfuse.so ]] || [[ -L /usr/lib/libfuse.so ]] \
+		|| [[ -L /lib64/libfuse.so ]] || [[ -L /usr/lib64/libfuse.so ]] ; then
+		echo "Creating unionfs-fuse"
+		( cd $SRC_DIR/unionfs-fuse-$UNIONFS_FUSE_VERSION
+			make
+			if [[ $? = 0 ]] ; then
+				cp $SRC_DIR/unionfs-fuse-$UNIONFS_FUSE_VERSION/src/unionfs $PKG_DIR/usr/libexec/src2pkg/bin/unionfs-fuse
+				chmod 755 $PKG_DIR/usr/libexec/src2pkg/bin/unionfs
+			else
+				echo "Ooops! Building unionfs-fuse-$UNIONFS_FUSE_VERSION has failed."
+				echo "Error is non-fatal. Continuing..."
+			fi
+		)
+	fi
+else
+	echo "Skipping creation of unionfs-fuse -you don't have fuse installed."
+fi
+
+mkdir -p $DOC_DIR
+cp $SRC_DIR/README $DOC_DIR
+
+fix_pkg_perms
+strip_bins
+create_docs
+compress_man_pages
+make_description
+make_doinst
+make_package
+post_process
+
+# src2pkg - Copyright 2005-2010  Gilbert Ashley <amigo@ibiblio.org>
+## See the documentation for more help and examples. Below are some of
+# the most common Extras and Options for easy cut-and-paste use.
+# EXTRA_CONFIGS='' PRE_FIX='' DOCLIST=''
+# MAKE_COMMAND='' INSTALL_LINE='' 
+# SHELL_INSTALL='YES' CORRECT_PERMS='NO'
+# When editing src2pkg scripts to add custom code, use these variables
+# to refer to the current directory, the sources or the package tree:
+# $CWD (current directory), $SRC_DIR (sources), $PKG_DIR (package tree)

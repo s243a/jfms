@@ -1,0 +1,342 @@
+# This file is part of the src2pkg program:
+# Copyright 2005-2013 Gilbert Ashley <amigo@ibilio.org>
+# src2pkg is released under the GNU General Public License Version 2
+
+### compile_source
+compile_source() {
+if [[ $ALLOW_USER_EXTENSIONS = "YES" ]] ; then
+ # check if the user has any pre-execution extensions to this file and run them, if so.
+ [[ -f "$HOME"/.src2pkg/extensions/07.pre ]] && . "$HOME"/.src2pkg/extensions/07.pre
+fi
+
+if [[ "$FAILED" = "" ]] && [[ ! $USER_CANCELLED ]] ; then
+ if [[ ! $RESUME ]] || [[ $RESUME = $FUNCNAME ]] || [[ $HAVE_RESUMED ]] ; then
+  [[ $RESUME = $FUNCNAME ]] && HAVE_RESUMED=1 && echo $CYAN"Notice - "$BLUE"Resuming build at: "$NORMAL "$FUNCNAME"
+  if [[ $PAUSE = "BEFORE" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+    echo $MAGENTA"Notice - "$BLUE"Pausing before: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+    read
+  fi
+  
+  ! [[ $CONFIG_DIR ]] && CONFIG_DIR=$SRC_DIR
+  if [[ "$MAKE_COMMAND" = "skip" ]] ; then
+	if [[ $HAVE_BUILD_FUNCTION = 1 ]] ; then
+		echo $BLUE"Using custom 'build' function:"$NORMAL
+		# [[ $DEBUG ]] && echo "instead of configure_source, compile_source and fake_install"$NORMAL
+		cd "$SRC_DIR"
+		! [[ $OBJ_DIR ]] && OBJ_DIR="$SRC_DIR"
+		if ! [[ $LOG_DIR ]] ; then
+			LOG_DIR="$OBJ_DIR"
+		elif [[ "$LOG_DIR" != "$CWD" ]] ; then
+			if [[ "${LOG_DIR:0:1}" != "/" ]] ; then
+				echo $YELLOW"Warning! "$NORMAL"LOG_DIR is set to an invalid path."
+				echo "         It must be set to \$CWD or an absolute path."
+			else
+				[[ ! -d "$LOG_DIR" ]] && mkdir -p "$LOG_DIR"
+			fi
+		fi
+		
+		trap safe_user_cancel 2
+		# if FLAG_LINE is not already set from src2pkg command line, set it and remove white space
+		if ! [[ $FLAG_LINE  ]] ; then
+			#FLAG_LINE="$(echo $STD_FLAGS $EXTRA_FLAGS |white_out)"
+			#FLAG_LINE="$(echo $EXTRA_FLAGS $STD_FLAGS |white_out)"
+			FLAG_LINE="$(echo $STD_FLAGS |white_out)"
+		fi
+		[[ $LOG_COMMANDS = "YES" ]] && echo $BLUE"Logging output to: "$NORMAL"LOG_DIR/$NAME-build.log"
+		[[ $LDFLAGS ]] && export LDFLAGS && echo -n " LDFLAGS=\"$LDFLAGS\""
+		#echo " CFLAGS=$FLAG_LINE ${CONFIG_COMMAND##*/} $CONFIG_ARGS"
+		echo " CFLAGS=\"$FLAG_LINE\""
+		
+		if [[ $LOG_COMMANDS = "YES" ]] ; then
+			CFLAGS=$FLAG_LINE CXXFLAGS=$FLAG_LINE build &> "$LOG_DIR"/$NAME-build.log
+		elif [[ $QUIET = "YES" ]] ; then
+			CFLAGS=$FLAG_LINE CXXFLAGS=$FLAG_LINE build &> /dev/null
+		else
+			CFLAGS=$FLAG_LINE CXXFLAGS=$FLAG_LINE build
+		fi
+		if [[ "$FAILED" = "CANCELLED" ]] || [[ "$USER_CANCELLED" = 1 ]] ; then
+			echo $RED"STOPPED! "$NORMAL"Operation cancelled during 'build' function! "$NORMAL
+			post_process
+			exit 1
+		elif [[ $? -eq 0 ]] ; then
+			echo $BLUE"'build' function - "$GREEN"Successful!"$NORMAL
+			# Let's put a check on DESTDIR for errors
+			if [[ -f "$SRC_DIR"/tracklist-files ]] ; then
+			  [[ $DEBUG ]] && echo -n $CYAN"   Notice - "$NORMAL"Checking for DESTDIR errors - "
+			  while read line ; do
+				case $line in
+					"$SRC_DIR"*|"$PKG_DIR"*) true ;;
+					"") true ;;
+					*) STRAY_FILES=1 ; echo ${line} >> "$SRC_DIR"/stray-files ;;
+				esac
+			  done < "$SRC_DIR"/tracklist-files
+			  if [[ $STRAY_FILES = 1 ]] ; then
+				echo echo $YELLOW"Warning! "$NORMAL
+				echo $YELLOW"Warning! "$NORMAL"These sources have broken DESTDIR support!"
+				echo $YELLOW"Warning! "$NORMAL"These files were installed outside of DESTDIR:"
+				cat "$SRC_DIR"/stray-files
+				echo $CYAN"   Notice - "$NORMAL"The above-listed files will be added to the package content."
+				echo "   But, the originals will not be removed as they may have already existed."
+				echo -n $BLUE"Correcting $DEST_DIR errors - "$NORMAL
+				cd "$PKG_DIR"
+				for FILE in $(cat "$SRC_DIR"/stray-files) ; do
+					cp -a --parents $FILE .
+				done
+				echo $GREEN"Done!"$NORMAL
+			  else
+				[[ $DEBUG ]] && echo $GREEN"OK"$NORMAL
+			  fi
+			fi
+		fi
+		
+	else
+		echo  $BLUE"Skipping compile_source - "$NORMAL
+	fi
+  elif [[ "$MAKE_COMMAND" = "copyall" ]] ; then
+	# examine_source sets MAKE_COMMAND to copyall for sources with binary content. We copy it here directly to PKG_DIR
+	SHOW_DEPS=YES
+	cd "$SRC_DIR" ;
+	if [[ -f control ]] ; then
+	  echo $BLUE"Found Debian binary content - "$NORMAL
+	elif [[ -d install ]] ; then
+	  echo $BLUE"Found Slackware package content - "$NORMAL"Contents of the install directory are"
+	  echo "copied into the CWD. Be sure to correct if needed and rebuild package."
+	elif [[ $EXT = "rpm" ]] ; then
+	 echo $BLUE"Found RPM binary content - "$NORMAL
+	else
+	  echo $BLUE"Found generic binary package content - "$NORMAL
+	fi
+	DOCPATH=$(find . -type d -name doc)
+	if [[ -d $DOCPATH ]] ; then
+	  cd $DOCPATH ;
+	  DOCDIR=$(ls)
+	else
+	  mkdir -p "$DOC_DIR"
+	  DOCPATH="$GOOD_DOC_PATH"
+	  DOCDIR="$NAME-$VERSION"
+	fi
+	echo -n $BLUE"Checking contents - "$NORMAL ; [[ $DEBUG ]] && echo ""
+	cd "$SRC_DIR"
+	for item in $(ls) ; do
+	  if [[ -d $item ]] ; then
+	   case $item in
+		# looks like some kind of installable directory structure.
+		usr|etc|var|lib|bin|opt|sbin|boot|dev|tmp)  [[ $DEBUG ]] && echo "Found directory: $item" ; shift ;;
+		install)
+			cp -a "$SRC_DIR"/install/* "$CWD" ; shift ;;
+	   esac
+	  elif [[ -f $item ]] ; then
+	   case $item in
+		preinst|prerm|postinst|md5sums|control) [[ $DEBUG ]] && echo "Moving file: $item into docs" ;
+		mkdir -p "$DOC_DIR"
+		cp -a $item "$DOC_DIR" 
+		# cp -a $item "$DOCPATH"/"$DOCDIR"/ ;
+		rm -f $item ;
+		;;
+		# What's this? maybe some sort of installer or other debian file?
+		*) [[ $DEBUG ]] && echo "Removing unrecognized file: $item " ; rm -f $item ;;
+	   esac
+	  else
+	   [[ $DEBUG ]] && echo "Removing unrecognized item: $item " ; rm -f $item 
+	  fi
+	done
+	! [[ $DEBUG ]] && echo $GREEN"Done!"$NORMAL
+	
+	if [[ $(ls "$DOCPATH"/"$DOCDIR" 2> /dev/null) = "" ]] ; then
+	 mkdir -p "$DOC_DIR"
+	 echo $CYAN"Notice - "$NORMAL"No documents were found in the content. Creating default README"
+	 echo "Notice - This package was created by src2pkg from:" > "$DOC_DIR"/README
+	 echo "$SOURCE_NAME" >> "$DOC_DIR"/README
+	 echo "No documents were installed for the package." >> "$DOC_DIR"/README
+	fi
+	
+	! [[ -d "$PKG_DIR" ]] && mkdir -p "$PKG_DIR"
+	echo -n $BLUE"Copying contents to PKG_DIR - "$NORMAL
+	cp -a * "$PKG_DIR" &> /dev/null
+	echo $GREEN"Done!"$NORMAL
+  else
+	# this is the routine for compiling sources
+	! [[ $OBJ_DIR ]] && OBJ_DIR="$CONFIG_DIR"
+	#
+	if ! [[ $LOG_DIR ]] ; then
+		LOG_DIR="$OBJ_DIR"
+	elif [[ "$LOG_DIR" != "$CWD" ]] ; then
+		if	[[ "${LOG_DIR:0:1}" != "/" ]] ; then
+			echo $YELLOW"Warning! "$NORMAL"LOG_DIR is set to an invalid path."
+			echo "         It must be set to \$CWD or an absolute path."
+		else
+			[[ ! -d "$LOG_DIR" ]] && mkdir -p "$LOG_DIR"
+		fi
+	fi
+	
+	find_makefile
+	#if [[ $MAKEFILE ]] && [[ $MAKE_COMMAND ]] ; then
+	if [[ $MAKE_COMMAND ]] ; then
+		trap safe_user_cancel 2
+		CFLAGS="$(echo $STD_FLAGS $EXTRA_FLAGS |white_out)"
+		echo $BLUE"Compiling sources - "$NORMAL"Using: '$MAKE_COMMAND'"
+		export CFLAGS
+		if [[ $LOG_COMMANDS = "YES" ]] ; then
+			cd "$OBJ_DIR" ;
+			echo $BLUE"Logging compiler messages to: "$NORMAL"LOG_DIR/$NAME-make.log"
+			$MAKE_COMMAND &> "$LOG_DIR"/$NAME-make.log
+		elif [[ $QUIET = "YES" ]] ; then
+			cd "$OBJ_DIR" ;
+			$MAKE_COMMAND &> /dev/null
+		else
+			cd "$OBJ_DIR" ;
+			echo $BLUE"Compiler Messages:"$NORMAL
+			$MAKE_COMMAND
+		fi
+		if [[ $? -eq 0 ]] ; then
+			echo $BLUE"Compiling has been - "$GREEN"Successful!"$NORMAL
+			if [[ $CHECK_BUILD = "YES" ]]; then
+				[[ $CHECK_COMMAND ]] || CHECK_COMMAND="$DEFAULT_MAKE_COMMAND check"
+				# echo $BLUE"Checking build - "$NORMAL"Using: '$CHECK_COMMAND'"
+				check_build
+			fi
+		elif [[ $USER_CANCELLED ]] ; then
+			echo $RED"STOPPED! "$NORMAL"Operation cancelled during compilation! "$NORMAL
+			FAILED="CANCELLED in: $FUNCNAME"
+		else
+			FAILED="COMPILING in: $FUNCNAME"
+			echo "$RED""ERROR! "$NORMAL"Compiling source code has failed."
+			echo "This usually happens because of missing libraries, or"
+			echo "badly written Makefiles or configure scripts."
+			show_requires
+			if [[ $REPLAY_ERRORS = "YES" ]] && [[ $QUIET = "YES" ]] ; then
+				cd "$OBJ_DIR" ;
+				export CFLAGS="$STD_FLAGS$EXTRA_FLAGS"
+				if [[ $DISPLAY ]] ; then
+					if [[ -x $(which xterm) ]] ; then
+						echo $CYAN"NOTICE-"$NORMAL"Replaying failed compilation in a separate xterm."
+						( xterm -hold -e "$MAKE_COMMAND" & )
+					else
+						echo $CYAN"NOTICE-"$NORMAL"Skipping replay of failed compilation - no xterm found."
+					fi
+				else
+					echo $CYAN"NOTICE-"$NORMAL"Replaying failed compilation:"
+					"$MAKE_COMMAND"
+				fi
+			fi
+		fi
+	else
+	  echo $BLUE"Skipping compile_source - "$NORMAL
+	fi
+  fi
+  if [[ $PAUSE = "AFTER" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+    echo $MAGENTA"Notice - "$BLUE"Pausing after: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+    read
+  fi
+ fi
+fi
+
+if [[ $ALLOW_USER_EXTENSIONS = "YES" ]] ; then
+ # check if the user has any post-execution extensions to this file and run them, if so.
+ [[ -f "$HOME"/.src2pkg/extensions/07.post ]] && . "$HOME"/.src2pkg/extensions/07.post
+fi
+
+}
+# end compile_source
+
+# 
+show_requires() {
+if [[ -e "$CONFIG_DIR"/$NAME.spec ]] ; then 
+  if grep "Requires:" "$CONFIG_DIR"/$NAME.spec 1> /dev/null ; then
+   echo $BLUE"Found an RPM .spec file which shows this:"$NORMAL
+   grep "Requires:" "$CONFIG_DIR"/$NAME.spec |uniq
+  else
+   echo "No Requires information found in $NAME.spec."
+  fi
+elif [[ -e "$CONFIG_DIR"/$NAME.spec.in ]] ; then
+  if grep "Requires:" "$CONFIG_DIR"/$NAME.spec.in 1> /dev/null ; then
+   echo $BLUE"Searching the RPM .spec.in file turns up this:"$NORMAL
+   grep "Requires:" "$CONFIG_DIR"/$NAME.spec.in |uniq
+  else
+   echo "No Requires information found in $NAME.spec.in."
+  fi
+elif [[ -e "$CONFIG_DIR"/debian/control ]] ; then
+  if grep "Depends:" "$CONFIG_DIR"/debian/control 1> /dev/null ; then
+   echo $BLUE"Searching the Debian control file turns up this:"$NORMAL
+   grep "Depends:" "$CONFIG_DIR"/debian/control |uniq
+  else
+   echo $BLUE"Sorry! "$NORMAL"No Depends: information found in Debian control file.."
+  fi
+else
+   echo $BLUE"Sorry! ""$NORMAL""No Dependency or Requirements information found."
+fi
+echo ""
+}
+
+check_build() {
+echo -n $BLUE"Checking for $MAKEFILE rule: "$NORMAL"'$CHECK_COMMAND' "$NORMAL
+cd "$OBJ_DIR"
+STATUS=FAILED
+# run the check command, backgrounding the process...
+$CHECK_COMMAND &> /dev/null &
+# so we can get the process pid
+PID=$!
+# sleep a trivial amount of time
+sleep 1
+# if the directory /proc/$PID exists, then the process is still running
+if [[ -d /proc/$PID ]] ; then
+	# we are in a 'race' condition anyway, so silence any error output
+	# interrupt the process first to avoid nasty error output |
+	(kill -INT $PID) &> /dev/null
+	# (kill -KILL $PID) &> /dev/null
+	STATUS=SUCCESS
+else
+	# otherwise, the process either failed or succeeded very quickly
+	# so run it again and check the exit status directly
+	$CHECK_COMMAND &> "$LOG_DIR"/$NAME-checkbuild.log
+	ERR=$?
+	case $ERR in
+		0) STATUS=SUCCESS ;;
+		*) 
+			if [[ $(grep 'No rule to make target' "$LOG_DIR"/$NAME-checkbuild.log 2> /dev/null) ]] ; then
+				STATUS=FAILED
+			else
+				STATUS=SUCCESS
+			fi
+		;;
+	esac
+fi
+if [[ "$STATUS" = "SUCCESS" ]] ; then
+	echo $GREEN"Okay"$NORMAL
+else
+	echo "None found"
+fi
+# SUCCESS means that we have a Makefile rule for $CHECK_COMMAND
+if [[ "$STATUS" = "SUCCESS" ]] ; then
+  if [[ $LOG_COMMANDS = "YES" ]] ; then
+	cd "$OBJ_DIR" ;
+	echo $BLUE"Logging build check messages to: "$NORMAL"LOG_DIR/$NAME-checkbuild.log"
+	$CHECK_COMMAND &> "$LOG_DIR"/$NAME-checkbuild.log
+  elif [[ $QUIET = "YES" ]] ; then
+	cd "$OBJ_DIR" ;
+	$CHECK_COMMAND &> /dev/null
+  else
+	cd "$OBJ_DIR" ;
+	echo $BLUE"Build-check Messages:"$NORMAL
+	$CHECK_COMMAND
+  fi
+  if [[ $? -eq 0 ]] ; then
+	echo $BLUE"Build checking has been - "$GREEN"Successful!"$NORMAL
+  elif [[ $USER_CANCELLED ]] ; then
+	echo $RED"STOPPED! "$NORMAL"Operation cancelled during build checking! "$NORMAL
+	FAILED="CANCELLED in: $FUNCNAME"
+  else
+	if [[ $EXIT_ON_CHECK_FAILURE = "YES" ]]; then
+		FAILED="BUILD CHECKING in: $FUNCNAME"
+		echo "$RED""ERROR! "$NORMAL"Build checking has failed."
+		echo "This may be due to broken code, compilation errors, or other"
+		echo "factors, e.g. too much CPU load."
+	else
+		echo $YELLOW"WARNING! "$NORMAL"Build checking has failed."
+		echo "This may be due to broken code, compilation errors, or other"
+		echo "factors, e.g. too much CPU load."
+		echo "This may not be fatal, so we'll proceed anyway."
+	fi
+  fi
+fi
+}

@@ -1,0 +1,11 @@
+src2pkg-helpers: src2pkg-helpers Binaries and Libs used by src2pkg
+src2pkg-helpers: 
+src2pkg-helpers: This package contains the libraries and binary programs used
+src2pkg-helpers: by src2pkg for building packages. This package is built and
+src2pkg-helpers: installed by src2pkg itself when it is run the first time or
+src2pkg-helpers: when run with the command 'src2pkg --setup'. These programs are
+src2pkg-helpers: compiled on your system to insure compatibility with your
+src2pkg-helpers: kernel and glibc versions and machine architecture. The sources
+src2pkg-helpers: for src2pkg-helpers are part of the src2pkg package itself.
+src2pkg-helpers: 
+src2pkg-helpers: Packaged by Gilbert Ashley <amigo@ibiblio.org>

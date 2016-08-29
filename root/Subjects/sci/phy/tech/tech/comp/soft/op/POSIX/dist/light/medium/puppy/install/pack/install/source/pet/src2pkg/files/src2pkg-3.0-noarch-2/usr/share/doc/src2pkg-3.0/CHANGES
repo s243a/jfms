@@ -1,0 +1,598 @@
+
+	CHANGES file for the src2pkg and trackinstall programs
+		by Gilbert Ashley <amigo@ibiblio.org>
+	
+	This file is meant to briefly summarize the changes to
+	src2pkg from one version to the next -concentrating on
+	changes which are visible to the average user or that
+	affect the usability in some way. For a more complete
+	and detailed listing of changes between versions, see
+	the ChangeLog file.
+
+== Version 3.0 == 04 Apr 2014
+	This version fixes three minor bugs.
+	The last version (2.91) was never formally announced so
+	most users will be upgrading from version 2.9. Either way,
+	no upgrading of src2pkg-helpers should be necessary for most users.
+	This version also introduces the new 'tpm' package format,
+	although the implementation is not complete.
+	
+== Version 2.91 == 26 Nov 2013
+	This version fixes a couple of minor bugs. The 
+	src2pkg-helpers remain at version 1.6, so no upgrading
+	of that is necessary (through the 'src2pkg --setup' command).
+	Simply upgrading to src2pkg-2.91 is all that is needed.
+
+== Version 2.9 == 26 Aug 2013
+	This version mostly fixes a few minor bugs. It also adds
+	a new configuration option and variable, PKG_EXCLUDES,
+	which lets you specify a comma-separated list of items to
+	exclude from a package or packages. For individual packages,
+	the variable PKG_EXCLUDES can be passed as an environmental 
+	variable or placed in a src2pkg build script. It can also
+	be specified as a command-line optionfor both src2pkg
+	and trackinstall using: '--excludes=??'
+	
+== Version 2.8 == 19 Feb 2013
+	
+	This version mostly adds some advanced AUTO* switches
+	and updates to newer versions of libsentry and unionfs-fuse.
+	A couple of minor bugs were also fixed mostly having to do
+	with advanced functionalities. A new section has been added
+	to the file 'Usage' in the documents, which explains the
+	use of all the available AUTO* switches.
+	
+	
+== Version 2.7 == 15 Feb 2012
+	
+	This version fixes a couple of minor bugs and adds many 
+	enhancements for the KISS-linux 'tpkg' package format.
+	Some of that code was separated from routines for
+	Slackware packages, so the Slackware routines are cleaner.
+	
+	Notes on upgrading:
+		As user root, run 'src2pkg --setup' after upgrading
+		from any earlier version.
+	
+	Some new configuration options have been implemented,
+	so check the new version against any existing one.
+	
+== Version 2.6 ==
+	This version fixes a couple of minor bugs, adds some 
+	enhancements and implement s support for the new
+	KISS-linux 'tpkg' package format.
+	
+	Notes on upgrading:
+		As user root, run 'src2pkg --setup' after upgrading
+		from any earlier Version
+	
+	Changed back to using INSTALL_TYPE=DESTDIR as it seems
+	to be more reliable these days, than JAIL
+	
+	The installable package for Slackware is now in *.txz format
+	
+== Version 2.5 ==
+	This version fixes a few minor bugs and adds some features
+	to the database-generation routines. It also fixes the
+	failure to compile on some systesm due to incompatibility
+	with 'mktime'. Compilation of mktime and the touch and stat
+	programs which depend on it has been disabled.
+	Notes on upgrading:
+		Advised, but not essential -anyone who got the last
+		version working even with mktime broken, can keep
+		using the last version of src2pkg-helpers. To
+		upgrade, run the usual 'src2pkg --setup' after upgrading
+		the src2pkg package on your system.
+
+== Version 2.4 ==
+	This version mostly fixes debian and rpm package creation
+	Notes on upgrading:
+		As user root, run 'src2pkg --setup' after upgrading
+		from Version 2.2 or 2.3
+	
+== Version 2.3 ==
+	This version fixes a small number of bugs and upgrades
+	to a later version of unionfs-fuse
+	
+	Notes on upgrading:
+	The included sources for the src2pkg-helpers has been
+	upgraded, so you'll be prompted with a reminder to run
+	'src2pkg --setup' when upgrading the src2pkg package.
+	
+== Version 2.2 ==
+	Version 2.2 only has a few minor changes. Just after the
+	initial release of the last version, Slackware updated
+	the glibc libraries which caused the building of the
+	src2pkg-helpers package to fail. So, a couple of quick
+	bug-fix releases were required to get everything working
+	again.
+	
+	Notes on upgrading:
+	The included sources for the src2pkg-helpers has been
+	upgraded, so you'll be prompted with a reminder to run
+	'src2pkg --setup' when upgrading the src2pkg package.
+	
+	This version adds a couple of new routines for making
+	corrections to the package content:
+	
+	* A function was added which corrects libtool '*.la' and
+	pkg-config '*.pc' files to make sure that any library
+	paths are correct. These are often not handled correctly
+	for 64-bit packages, so this routine makes sure that all
+	library paths match the library paths in the package.
+	
+	* A routine was added which removes static libraries
+	(*.ar archives) and libtool '*.la' files from the
+	package, if --disable-static or --enable-static=no was
+	included in the EXTRA_CONFIGS variable. Many packages
+	handle these badly even when the options are specified,
+	so this routine takes care of them. It can be disabled
+	with the ENFORCE_DISABLE_STATIC="NO" switch, which can
+	be used from the command-line, placed in an individual
+	NAME.src2pkg script, or placed in the src2pkg.conf
+	file to always disable it.
+	
+	* A switch has been added to disable the search for and
+	installation of image files in the package. Some sources
+	contain images which are part of a web-page or are logos
+	which should not be installed in the package. This is not
+	very common, but using AUTO_ICON=NO from the command-line,
+	or placing it in a NAME.src2pkg script will disable the
+	routine for an individual package. or, it can be put in
+	the src2pkg.conf file to always disable the search and
+	installation of images.
+	
+	* A switch has also been added to allow the user to disable
+	the automatic addition of code to the doinst.sh script for
+	the integration of rc.NAME in the rc.local init script.
+	Ordinarily, when src2pkg finds an rc.NAME file for the
+	package, it will add code to the doinst.sh script which,
+	when the package is installed, adds code to the rc.local
+	init script which will enable the 'service' if the rc.NAME
+	file is executable. However, this is not appropriate for
+	building standard packages which already have code to
+	enable them in the normal init scripts. Using the switch:
+	AUTO_RC_LOCAL=NO will disable the creation of the code
+	in the doinst.sh for the package
+	
+	* A routine has been added to correct the location of fonts
+	in a package. Any fonts found under /usr/lib/X11/fonts will
+	be moved to /usr/share/fonts. Thoís routine is part of the
+	larger routine which corrects the location of files under
+	/usr/X11 and other legacy-locations of X-related files. The
+	whole routine can be disabled with the switch:
+	CORRECT_USRX11R6=NO
+	
+	* cmake builds have been fixed -again. cmake builds are very
+	problematic because cmake itself has changed significantly
+	over the last few versions, regarding the support for and
+	usage of the DESTDIR variable. src2pkg would need to check
+	the version of cmake, and check for support of the running
+	version of cmake in the sources conf files and use one of
+	several different methods of package content-creation to
+	ensure that the final binaries are properly linked. And,
+	some of src2pkg's content-creation (INSTALL_TYPE) routines
+	do not work at all for cmake builds. So, the best overall
+	solution is to make sure that all cmake builds are done
+	using the INSTALL_TYPE=SAFE. That means that the content-
+	creation is done in the real final location of the files
+	using no DESTDIR(or other methods) at all. The bad part
+	is that using the '-SAFE' option requires you to be running
+	as 'root'. Still, since cmake builds are pretty rare, it is
+	a small sacrifice to require building as root, in order to
+	ensure package correctness.
+	
+	A couple of new options have been added for building sources
+	which use cmake for configuration:
+	* Usually, cmake sources should be built in a subdir of the
+	main top-level of the sources. However, some older sources
+	will only build from the toplevel. The default behaviour of
+	src2pkg is to build from a subdir. But for those rare cases
+	which require building from the main directory, a switch:
+	USE_TOP_DIR=YES has been added to allow building from the
+	toplevel of the sources. The switch can be used from the
+	command-line or place in individual NAME.src2pkg scripts.
+	It should *not* be used as a default setting in the
+	src2pkg.conf file as it will break most builds.
+	* A configuration option has been added which allows you
+	to pass extra options to cmake for individual sources
+	or for all sources which use cmake.
+	EXTRA_CMAKE_OPTIONS='options here' should be used to pass
+	generic options to cmake. The default setting is:
+	EXTRA_CMAKE_OPTIONS="-DCMAKE_BUILD_TYPE=Release"
+	The cmake routine in src2pkg will automatically add these:
+	-DSYSCONF_INSTALL_DIR=$sysconfdir
+	-DLOCALSTATE_INSTALL_DIR=$localstatedir
+	-DCMAKE_INSTALL_PREFIX:PATH="$PRE_FIX"
+	using the default settings, unless you override the defaults
+	using EXTRA_CONFIGS. The EXTRA_CONFIGS variable should be used
+	for passing package-specific options to cmake. At configuration-
+	time, src2pkg will combine all three groups of options to pass
+	to cmake: the defaults for sysconfdir, localstatedir and prefix;
+	the EXTRA_CMAKE_OPTIONS and EXTRA_CONFIGS if given.
+	
+	A new option '-CHECK' was added which will run 'make check' (or
+	another command specified using --test_command='??') after
+	running the normal MAKE_COMMAND.
+	
+== Version 2.1 ==
+	Version 2.1 contains only minor changes -none of which should
+	be visible to the user. And it contains several fixes for
+	the build of src2pkg-helpers on 64-bit systems and/or those
+	which use glibc>=2.10 and/or gcc-4.4.x
+	Shortly after the release of src2pkg-2.0, Slackware-current 
+	upgraded to glibc-2.11.1 and gcc-4.4.2 which caused the
+	building of src2pkg-helpers to break. This meant that a new
+	src2pkg version with fixes had to be released soon to fix
+	those problems.
+	
+== Version 2.0 ==
+	Notes on upgrading:
+		* Some new functionality has been added which makes it
+		possible to create new kinds of packages. A couple of 
+		new options have been added to the src2pkg configuration
+		file in: /etc/src2pkg/src2pkg.conf
+		to accomodate the creation of these new package
+		formats. Unless you are going to use src2pkg to create
+		these new types of packages, you can ignore or remove
+		the file /etc/src2pkg/src2pkg.conf.new which gets
+		installed when you upgrade src2pkg from a previously-
+		installed version.
+		
+	* The src2pkg documentation has been completely rewritten
+	  to reflect the many changes that have been made to src2pkg
+	  over the last couple of years. Hopefully, the new docs
+	  are more clearly written and useful, while being smaller
+	  than the former documents. Documentation for some of the 
+	  advanced features still needs to be added, though.
+	  
+	* src2pkg now uses the -JAIL option by default for creating
+	  package content. Up till now, we have used DESTDIR as the
+	  default INSTALL_TYPE, but even though DESTDIR is well known,
+	  it has some serious drawbacks. Even though the JAIL method
+	  will sometimes fail, it will fail less than DESTDIR, and
+	  will not do the damage that DESTDIR can do when used while
+	  running src2pkg as the 'root' user.
+	  
+	* src2pkg can now create installable debian-type packages
+	  which use the '.deb' suffix, '.pet' packages as used by
+	  Puppy Linux and its' derivatives, '.rpm' packages as used
+	  by fedora and other distros, and '.tazpkg' packages as
+	  used by the slitaz distro. 
+	  Providing the functionality for creating these other types
+	  of packages didn't require major changes in the existing
+	  src2pkg code, but adds about 700-80 lines of new code which
+	  is still being improved.
+	 
+	* The usage of the '-Z?' option has been slightly changed. A quick
+	  look at the man-page or the advanced help page shown when running
+	  'src2pkg -hh'
+	  will show the new 'order' of the -Z1 to -Z4 options.
+	  
+	* A new command-line option '-CWD' has been added which makes
+	  it easy to override the default SRC_DIR and PKG_DIR locations
+	  under /tmp, so that everything gets doen in the same directory
+	  where src2pkg is run from.
+	  
+	* A new command-line '-BUMP' option has been added which will
+	  automatically increment the BUILD (release) number for the
+	  package and update the src2pkg script to reflect the change.
+	  
+	* New functionality has been added which allows packages to be
+	  split into several smaller packages. Packages can be split into
+	  'devel' (or 'dev'), 'i18n' (or 'nls'), 'docs' (or 'doc') and
+	  'solibs' (or 'libs') packages along with the main package. In
+	  all cases except for the 'solibs' package, files which should
+	  go into a separate package are *moved* into the split package.
+	  In the case of 'solibs', the files (shared libraries) are
+	  *copied* into the split package as the main package will, most
+	  likely, need the libraries to be functional. There are a few
+	  cases where one might want or need just the libraries without
+	  the main program and this is where a separate solibs package
+	  can be useful. An example is the blackbox Window Manager, which
+	  includes libbbt which is used by several programs which are not
+	  part of blackbox. If you want to use these programs, but don't
+	  want to install the full blackbox, a 'solibs' package of the
+	  blackbox libs makes this possible.
+	  
+	  Split packages can be created for all the package formats
+	  supported by src2pkg, so we have gone from creating just one
+	  type of package, to being able to produce 25 package types -
+	  5 types for each of 5 package formats.
+	  
+	  Creating separate packages can be done with the command-line
+	  option '--splitpkg=??' where '??' is a single, or comma-separated
+	  list of the split package types. Example:
+	  src2pkg --splitpkg=devel,solibs,i18n,docs name-of-tarball
+	  The example shows all the possible options, which can be given
+	  in any order
+	  
+	* src2pkg itself now comes packaged in each of the five package
+	  formats it supports and the 'src2pkg --setup' routine creates
+	  and installs the src2pkg-helpers in the native package format,
+	  or you can tell it which type of package to create and install,
+	  if you are using a system which supports multiple packaging tools.
+	  'src2pkg --setup' also supports generic systems which have
+	  no package manager at all.
+	  
+	  
+== Version 1.9.9 ==
+	Notes on upgrading:
+		* One new option (COMPAT_NAME_SUFFIX) has been added to the 
+		/etc/src2pkg/src2pkg.conf(.new) file, but most users will
+		not need to worry about it. COMPAT_NAME_SUFFIX controls
+		the suffix which is added to a package name when building
+		32-bit packages for a 64-bit system.
+	
+	* src2pkg now supports multi-lib and cross-compile environments.
+	  The new command-line options -M32, -M64 or --machine= can be used
+	  to specify the '-m??' option to gcc. For instance, when using
+	  src2pkg to create a 32-bit program for use on a Slackware64 multi-lib
+	  system, passing -M32 causes gcc to build for the proper machine.
+	  The -L32, -L64 and --libdirsuffix= options control the library
+	  paths used for compiling and packaging. Use the -L options to
+	  set the proper options if the src2pkg defaults are not correct
+	  for your system. With Slackware64, you should only need to use
+	  the -M32 option in order to build 32-bit programs or libraries,
+	  provided you have installed the necessary 32-bit environment.
+	  The options --cc=?? and --cxx= can be used to specify which
+	  compiler to use when using src2pkg with cross-compilers or
+	  any other non-standard compiler.
+	  
+	* A change has been made in the src2pkg API, but without breaking
+	  backward-compatibility. A new, optional instruction named 'build' has been
+	  added. src2pkg build scripts which contain a function named 'build' will
+	  use that instead of running the configure_source, compile_source and
+	  fake_install functions. This makes it much easier to copy and paste
+	  code from other build scripts, including SlackBuild scripts or
+	  'port'-style scripts.
+	  
+	* A new tool named sb2sp has been added. sb2sp 'translates' SlackBuild
+	  scripts into the src2pkg format. Translating code from other scripts
+	  is tricky, but this tool usually gets it right for most commonly-found
+	  SLackBuild formats, including the official build scripts and those found
+	  on slackbuilds.org. Most scripts can be translated in either a short or
+	  long form. The short form simply uses the options to the configure script
+	  which are found in the SlackBuild. The long form copies and translates all
+	  the useful middle parts of the SlackBuild, as well as the Copyright info.
+	  Many users will wonder what advantages there are to translating an already
+	  good SlackBuild, but using src2pkg can help to ensure complete and correct
+	  package creation, while keeping the build system cleaner. This is especially
+	  true for sources which do not respect the DESTDIR variable, or those which
+	  do not properly install all the needed files. By using src2pkg you can avoid
+	  ever having to 'spam' your system to create a package or having 'orphaned'
+	  files left behind after creating a package.
+	  
+	* Commands for stripping executables and libraries are now fully configurable.
+	* drag-n-drop support has been added to the standard installation. src2pkg-dnd
+	  has been added to the files installed under /usr/bin and a src2pkg-dnd.desktop
+	  file has been added to the installation. This has only been tested with
+	  XFCE, but should be working for KDE desktops also.
+	* Added the ability to pause the execution of a build at a named function.
+	* Added 'instroot', 'DIST_ROOT' and 'BUILDROOT' to the list of supported
+	  DESTDIR types.
+	
+== Version 1.9.8 ==
+	Notes on upgrading:
+		* New options have been added to the 
+		/etc/src2pkg/src2pkg.conf file, so you may
+		want to have a look and see if you want to
+		use them. If you have customized your src2pkg.conf
+		file, the new one will be installed as:
+		/etc/src2pkg/src2pkg.conf.new without
+		over-writing your changes
+		* The src2pkg-helpers version has been updated,
+		so if you upgrade src2pkg from an earlier version
+		you'll be prompted about needing to run 'src2pkg --setup'
+		so that the src2pkg-helpers package gets updated.
+		
+	* Added a method for packaging tcl script programs
+	* Added a routine which can automatically create *.desktop files
+	* Added support for AUDIO_NOTIFICATION. src2pkg can now
+	  notify you when package-building succeeds, fails or is cancelled.
+	  Notification can be done using a 'beep' sound from the PC speaker,
+	  by playing a recorded sound, or by speaking an error text.
+	  Text-to-Speech can use either the 'flite' or 'festival' programs
+	* Added a routine which creates a *.desktop file when applicable and possible
+	  This option is off by default, but can be enabled by putting AUTO_DESKTOP=YES
+	  in your srcpkg.conf file. A routine has also been added which checks and
+	  corrects any installed *.desktop files if possible.
+	* Added support for *.zip source files
+	* Added support for *.lzma patches
+	* Added the ability to include --build=??, --host=?? flags in the configure
+	  options. host can also be added as a stand-alone option after all other
+	  options. When used, these options are not added directly to EXTRA_CONFIGS
+	  but are treated separately so that build scripts remain arch-agnostic.
+	  These options are off by default. To enable the latter style, uncomment
+	  the line for ADD_HOST=YES in your conf file. To enable the former style,
+	  uncomment the line ADD_EXPLICIT_HOST=YES in your conf file. When using
+	  the ADD_EXPLICIT_HOST option, the options are only added if the configure
+	  script appears to support them. See the ChangeLog for more about these options.
+	* Added the ability to resume package creation. See man-pages for more info.
+	* Added the ability to pause the build before or after each package-creation step.
+	* Added many more package sanity checks and informative checks just before 
+	  compressing the package.
+	* Added a new INSTALL_TYPE called UNION, which uses a unionfs/chroot environment
+	  for package content creation. This method makes content creation extremely safe
+	  while running as root. The new option can be specified from the command-line
+	  with the '-UNION' option or by setting the INSTALL_TYPE option to UNION in
+	  your src2pkg.conf file
+	* Added support for creating 'txz' packages using the xz file compression tools.
+	* Added support for a configurable LOG_DIR location. By default, logs are written
+	  to the OBJ_DIR(usually the same as SRC_DIR) if logging is requested.
+	* Upgraded libsentry in src2pkg-helpers to support glibc 2.8 to 2.10
+	* Support Slackware64
+	* Many other small improvements and  bug-fixes
+	
+== Version 1.9.7 ==
+	This version includes many fixes and improvements.
+	
+	Notes on upgrading:
+		* The syntax in the /etc/src2pkg.conf file has
+		  changed. If you already have a previous version
+		  of src2pkg installed, you should remove or change
+		  the name of the old src2okg.conf file before
+		  upgrading the src2pkg package.
+		* The src2pkg-helpers version has been upgraded,
+		  so if you have a previous version of src2pkg
+		  installed, you'll need to run the command:
+		  'src2pkg --setup' as user root after upgrading
+		  to this version of src2pkg
+		  
+	Notes for first installation of src2pkg:
+		* If you are installing src2pkg for the first time,
+		  simply use 'installpkg' to install the src2pkg
+		  package (src2pkg-X.X.X-noarch-X.tgz). Then,
+		  while still logged in as user 'root', run the
+		  command: 'src2pkg --setup' to setup src2pkg
+		  for use on your system.
+		  
+	
+	* The version of the libsentry program and library has been
+	  upgraded. This requires the src2pkg-helpers package to
+	  be upgraded for use with src2pkg. src2pkg now includes
+	  code which detects the version of any installed package
+	  of src2pkg-helpers and notifies the user of the need
+	  to upgrade when the new src2pkg version is unstalled.
+	  The old src2pkg-helpers does not have to be manually
+	  removed. Simply running 'src2pkg --setup' after src2pkg
+	  os installed will build and package the new src2pkg-helper
+	  and install the package.
+	
+	* Added the ability to copy the src2pkg script used to build
+	  a package into the package itself. The default behaviour
+	  is to not do this. But it can be configured to do so, and
+	  include the src2pkg script in a configurable location.
+	
+	* Added new src2pkg variables which can be used in src2pkg
+	  scripts. The most useful of these variables are BIN_DIR
+	  and DOC_DIR, but the set includes all the common locations:
+	  BIN_DIR, SBIN_DIR, LIBEXEC_DIR, SYCONF_DIR, SHAREDSTATE_DIR,
+	  LOCALSTATE_DIR, etc. See the lines beginning at 733 of
+	  the file /usr/libexec/src2pkg/01-pre_process for the full
+	  list and syntax.
+	
+	* Added a new directory of example src2pkg scripts for
+	  building and packaging the kernel and/or kernel-modules.
+	  There is also an interesting example for building a very
+	  small 2.6 kernel which could fit on a floppy.
+	
+	* automatic configuration using cmake now handles EXTRA_CONFIGS
+	
+	* Some extra files have been removed from the src2pkg-helpers
+	  archive so about 3MB is saved when installing the src2pkg package.
+	
+	* Made a lot of changes to the 'tracklist' program to improve
+	  usability. command-line parsing was added with options for
+	  showing usage and help. Plus, options were added for turning
+	  on the debugging function and to optionally quieten the normal
+	  output from the tracked commands. Functionality was extended
+	  to include the tracking of these programs:
+	  link, ln, chown, chmod, rm, rmdir, mv
+	  A man-page has also been added for the tracklist program.
+	  
+	* Added a new variable called FHS_POLICY which allows the user
+	  to choose a directory layout compatibility style. This allows
+	  for creating packages which conform to the slack, lsb or a custom
+	  directory layout.
+	
+	* Added a mechanism for authorizing users. AUTHORIZE_USERS allows
+	  a sysadmin to control who can run src2pkg on a multi-user system.
+	  AUTHORIZE_USER_CONF allows the administrator to control which
+	  users can use personal src2pkg.conf files in the HOME directory.
+	
+	* The command 'src2pkg -N -Q tarball-name' shows the NAME and VERSION
+	  guessed by src2pkg and allows them to be changed before writing
+	  a new src2pkg script.
+	
+	* added routines which detect the installed version of src2pkg-helpers
+	  and prompt the user if the package needs to be upgraded. This version
+	  of src2pkg will prompt you to upgrade src2pkg-helpers when you install
+	  the package.
+	  
+	* Compilation of perl modules now accepts passing options to the Makefile.
+	  This can be done using either the '-m=?' (MAKE_COMMAND) or '-e=?'
+	  (EXTRA_CONFIGS) options.
+	  
+	* Added new command-line options for controlling the use of configuration
+	  options found in configure scripts or in RPM *.spec files or debian
+	  'rules' files. -ACF looks for rules or spec files and tries to parse
+	  useful options from them. -ACN checks for standard options inside the
+	  configuration script itself and fills in (usually) sane default values.
+	  The list of possible options to search for can be confiured using the
+	  AUTO_CONFIG_OPTIONS variable. The default values match those of whichever
+	  FHS_POLICY is being used. Both of these options are off by default, which
+	  makes it possible to use the -A option without having the configuration
+	  options searched for automatically. This was done because sometimes src2pkg
+	  cannot correctly parse the rules or *.spec file and would try to configure
+	  using 'garbage' values which would cause configuration to fail. The new
+	  code is more powerful, more flexible and more controllable.
+	  
+	* Added the ability to use 'extensions' to src2pkg. When enabled with the
+	  configuration option ALLOW_USER_EXTENSIONS=YES, the user can create the
+	  directory $HOME/src2pkg/extensions and place files there which contain
+	  extra code which can be run before or after each named instruction function
+	  during the build. See the full ChangeLog for further explanation of this feature.
+	  
+	* The 'help' messages for both src2pkg and trackinstall ahve been split into two
+	  separate pages of help, with the advanmced options hsown on the second page.
+	  Viewing the extended options is done by calling the program with the '-hh' switch.
+	  
+	* When DESTDIR is used, src2pkg now verifies the list of installed files using
+	  the program 'tracklist' which comes with src2pkg. This allows src2pkg to alert
+	  the user when DESTDIR is only partially supported and installs some files to the
+	  real root file system instead of inside the DESTDIR. src2pkg copies these
+	  'misplaced' files into the package content but does not remove the originals.
+	  
+	* A routine was added which lists all files and directories in the package which
+	  have 'unusual' permissions or ownership. The routine is part of improved routines
+	  for handling package permissions and ownerships. Directories which are not set
+	  with chmod 755 are reported, as are files which are not either chmod 644 or 755.
+	  The exceptions to these are several common system dirs which use known perms
+	  other than 755 -like /var/run and var/lock. Files and dirs with unusual ownership
+	  are also reported. The fact that files or dirs are listed does not necessarily
+	  mean that they are wrong and need to be fixed. But, the extra information is
+	  handy to have as it allows the user to quickly verify the correctness of package
+	  content.
+	  
+	* Handling of compression of binary files has been improved with support for exepak
+	  as well as upx or upx-ucl. Also, when file compression is used, the compressed files
+	  are listed in a file which gets included with the documents.
+	  
+	* Support has been added for using aria2c as the DOWNLOADER program. You can also now
+	  use the variable DOWNLOADER_OPTIONS to set the command-line options for aria2c or wget
+	
+	* Support has been added for creating 'tbz' or 'tlz' packages which use bzip2 or lzma
+	  as the archive compression method.
+	  
+	* Added a file named src2pkg-special-files.txt to the documents which explains
+	  about the various extra files which src2pkg may create or use when creating
+	  packages.
+	  
+	* A new routine has also been aded that warns you when application of a patch has failed.
+	  By setting EXIT_ON_PATCH_FAILURE=YES in the src2pkg.conf file, the default behaviour
+	  of only warning can be changed so that src2pkg exits when patch failures are encountered.
+	  The default is to only warn because patch doesn't always 'tell the truth' and sometimes
+	  reports failures (rejects) when, in fact, the patch has been correctly applied.
+	 
+	* Added an option to log the output of the 'configure', 'make' and 'make install' commands
+	  each to a separate file inside the SRC_DIR. This option is available always by uncommenting
+	  the LOG_COMMANDS line in the src2pkg.conf file, or can be activated with the src2pkg
+	  command-line option '-LOG'
+	  
+	* Re-introduced a feature to src2pkg which used to be the default. The -SAFE switch causes
+	  src2pkg to use INSTALL_TYPE=REAL and activates the backup feature of libsentry so that
+	  if running 'make install' is going to overwrite a file which is already on your system,
+	  it will first be backed up and then restored before package creation finishes. Although
+	  you must be logged in as user 'root' to use this feature, it provides the most accurate
+	  method of creating package content while providing excellent safety for your system at
+	  the same time. This method of creating package content was the only way that src2pkg
+	  worked for a very long time, so the routines are well developed and debugged.
+	  
+	* A routine has been added which warns the user if the package contains the /usr/etc or /usr/var
+	  directories. Slackware compliant packages normally use sysconfdir=/etc and localstatedir=/var
+	  so the presence of these dirs under /usr is considered bad practice. src2pkg now warns you
+	  when it detects these dirs in the package and suggests that you add --sysconfdir=/etc and/or
+	  --localstatedir=/var to the configuration settings. These paths become hard-coded into the
+	  programs that use them, so the directories can't simply be moved. Instead, you must add the
+	  options to EXTRA_CONFIGS (with the -e='??' option) and rebuild the package.

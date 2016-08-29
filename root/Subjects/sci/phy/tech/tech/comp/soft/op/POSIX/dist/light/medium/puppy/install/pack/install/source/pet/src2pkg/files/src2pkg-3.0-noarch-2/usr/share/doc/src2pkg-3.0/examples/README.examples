@@ -1,0 +1,180 @@
+This directory contains many examples of how to make src2pkg useful
+for unusual builds which require extra or special code to be
+added to the src2pkg script. These examples are mostly meant for
+advanced users who are already familiar with normal usage of
+src2pkg. If you are a beginner with src2pkg, you should instead
+read the document called 'Tutorial' and try the example builds
+shown there.
+
+###################
+The directory 'GroupBuild' contains some scripts which show how to
+set up src2pkg for managing multiple builds at once.
+script.GroupBuild and tarball.GroupBuild are examples of how you can
+use src2pkg to build batches of programs by using a small script to
+drive the process.
+
+To use the script.GroupBuild, place it in a directory which contains
+subdirectories of already-debugged builds. Each source tarball should
+be in a separate directory and have a $NAME.src2pkg or 
+$NAME.src2pkg.auto script to go with it.
+Then you can build all the sources with just the command:
+'bash script.GroupBuild'
+or './script.GroupBuild' (if you've made the file executable)
+
+The tarball.GroupBuild works the same way, except that each 
+subdirectory can contain just the tarball. Of course this assumes
+that they each can be built successfully without any src2pkg script.
+
+The scripts contain a few notes and extra lines which show some of the
+other ways they can be used.
+Using a slightly more elaborate script, you could, in theory,
+download, build and install(if needed) dozens or hundreds of
+sources with just one command. Use your imagination!
+
+##################
+The directory RepoBuild has a more elaborate example for creating
+and/or maintaining a complete repo of sources and packages. The script
+src2pkg.RepoBuild has lots of notes on how to edit or change it
+to suit your needs. As it is, it contains a complete example build
+which downloads 3 archives from the amigolinux.org site, sets up
+a directory structure for packages and build dirs and compiles
+them. The whole thing takes less than 5 minutes. To see how the
+example works, simply create a new empty directory where you have
+write privileges. Then copy the src2pkg.RepoBuild into the new
+directory. Make it executable with the command 'chmod 755 src2pkg.RepoBuild'
+Then, copy the file URL-list.txt into the same directory also.
+Then, after making sure that your internet connection is up,
+cd into the directory, open up a terminal there and give the command:
+./src2pkg.RepoBuild
+After a few minutes you should have all the sources in the top directory,
+each package will have its' build directory under BUILDS and the three
+packages will all be in the PKGS directory.
+Read the comments in the script for hints on how to use it in
+many different ways. If you just want to build a bunch of
+archives which are in the current directory just run the
+script without a URL-list.tx file.
+
+##################
+The directory 'gcc-cmake' contains two examples -for building
+a second compiler for your system which doesn't interfere with
+you rpesent version and for building cmake which uses the new
+compiler. This example shows how src2pkg can be used to create
+even complicated builds with a minimal number of lines of code.
+
+
+##################
+The directory 'webmin' shows an example of how to create a src2pkg
+build repository-style. That is, when the src2pkg script is run
+it will download the sources and extra needed files before building
+the package. Of course the files are only downloaded once. Once
+they are on your system they will not be downloaded again if you
+run the script again. This example also shows how to use src2pkg
+to create packahes from 'noarch' content. That is, webmin is not
+a compiled program but contains many plain-text files.
+
+##################
+The mtpaint.src2pkg script is a good example of a fairly typical
+build which needs a few extra lines of code for operations which
+are not always done automatically by src2pkg.
+It shows typical code for installing an icon or pixmap, a *.desktop
+file, extra documents and a manpage. Note that src2pkg can usually
+do some of these things without any extra code, but not for mtpaint
+because of the directory layout of the sources.
+
+#################
+impress.src2pkg shows a typical example of using src2pkg to
+automatically apply patches to the sources. It also shows how
+decompress a second tarball into the package tree. Note that
+src2pkg can automatically write the lines for the source patches
+just by placing the patches in the same directory with the sources.
+Using the '-A' or '-N' option of src2pkg will write the patch lines
+for you. Patches can also be place in a subdirectory of the build
+directory named 'patches'.
+
+#################
+lilypond.src2pkg is a really different example which shows how to
+use src2pkg to create a package from a 'shar archive'. The shar
+archive is first decompressed to create the tarball archive and then
+is processed. This example also shows how to  write lines in the
+src2pkg script to create script 'wrappers' for binary programs.
+
+#################
+faekroot.src2pkg shows how to have src2pkg re-configure sources for
+a second build and installation routine. The build creates two
+versions of fakeroot by first configuring, compiling and installing
+one version, then changing the configure options, re-configuring,
+re-compiling and re-installing the result, so that both versions
+are included in PKG_DIR.
+
+#################
+The mysql directory shows a pretty complicated build with many
+extra options passed to the configure script. It shows how to
+use the srcpkg DOCLIST variable and how to create extra directories
+in the package tree and set their permissions.
+It also shows how to properly create 'conf' or 'rc' files which
+install under /etc.
+And it shows how to create a doinst.sh script for a package which
+contains both hard-coded lines and lines which are added dynamically.
+The file doinst.prepend contains lines which we want to always add
+to the doinst.sh post-installation script. But the src2pkg script
+contains lines which create links in the package tree. Before making
+the fnal package, src2pkg replaces these links with line which are
+add to those in the doinst.prepend file -see the new.doinst.sh for
+the result. Note that src2pkg can also add lines *after* the
+link-creation lines by placing the code in a doinst.append file.
+This feature allows you to mix hard-coded and dynamically created
+line in the doinst.sh file. (Many packages would not require you to
+manually create the links in the src2pkg script)
+
+##################
+The directory 'squid' shows another advanced example which demonstrates
+a couple of things.
+First, it shows how to use the BASE_URL variable for downloading
+multiple source files for use with the script. By giving a single
+BASE_URL address, the SOURCE_NAME and EXTRA_SOURCES which are to be
+downloaded can be given in the script without writing the full URL.
+This build also shows anothe example of how conf files are handled,
+plus it shows how to create an extra directory in the package-tree
+and set the ownership to a different group. Not that scripts which
+use the 'chown' command must be run as root for them to work. Or,
+you can write the chopwn commands into the doinst.sh file so that
+they will be run when the package is installed. For this example
+we do it both ways, which may be a good idea anyway.
+This build alos demonstrates how to add line to the /etc/rc.d/rc.local
+file which will be run at boot time. The lines check to see if
+the /etc/rc.d/rc.squid file is executable and start the squid 'service'
+if it is. This shows the proper way to set up a package that provides
+boot-time services.
+It also shows how to add text prompts to the doinst.sh script.
+
+##################
+The directory 'kernel' shows how to use src2pkg to build and package
+the Linux kernel and modules. Inside it are separate directories
+with srcpkg scripts for building the kernel-modules package and
+for building and packaging the kernel itself. The scripts must be
+slightly modified before using them, to reflect the version of
+the kernel you are building and to give the packages a unique name.
+By giving the packages a unique name, they will not overwrite your
+exisiting kernel or modules when you install the packages. The main
+'kernel' directory contains a HOWTO which explains, in detail, how
+to safely create packages of your custom kernel and modules.
+
+##################
+src2pkg-dnd.sh is a small wrapper script which adds drag-and-drop
+functionality to src2pkg. To use it, place a copy in your $HOME
+directory. Then edit it so that it runs src2pkg with your favorite
+preference options. Then, make it executable and place an icon on
+your desktop which points to it. Probably the best use of this wrapper
+is to avoid possible errors when typing in long file names from the
+command line. By default, the wrapper is configured so that dropping
+an archive on it will cause src2pkg to run using the -N and -V options.
+This means that a new script gets written but not run and the -V option
+will make it show the NAME and VERSION so you can be sure they have
+been correctly guessed. Dropping a src2pkg script on the icon will
+cause src2pkg to run the script with full verbosity.
+Read the top of the file for further details and possible configuration
+options.
+
+src2pkg-dnd.tbz is an AppDir with the src2pkg-dnd wrapper in it. It is
+best used with the ROX-Filer but can be used with any desktop environment.
+

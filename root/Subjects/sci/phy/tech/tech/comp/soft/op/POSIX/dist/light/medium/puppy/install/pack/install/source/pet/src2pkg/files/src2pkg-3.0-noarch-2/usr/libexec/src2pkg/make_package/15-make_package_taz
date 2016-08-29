@@ -1,0 +1,287 @@
+# tazpkg-specific packaging functions
+### This routine for creation of tazpkg-type archives uses
+#  some code from the 'tazpkg' program:
+# (C) 2007-2008 SliTaz - GNU General Public License v3.
+#
+# Authors : Christophe Lincoln <pankso@slitaz.org>
+#           Pascal Bellard <pascal.bellard@slitaz.org>
+#           Eric Joseph-Alexandre <erjo@slitaz.org>
+#           Paul Issott <paul@slitaz.org>
+#
+
+make_taz_pkg() {
+# create any split packages, if needed
+if [[ -d "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME ]] ; then
+	( cd "$PKG_BUILDS_DIR" ; mini_create_taz $DEVEL_PKG_NAME )
+	! [[ $DEBUG ]] && (cd "$PKG_BUILDS_DIR" && rm -rf $DEVEL_PKG_NAME)
+fi
+if [[ -d "$PKG_BUILDS_DIR"/$I18N_PKG_NAME ]] ; then
+	( cd "$PKG_BUILDS_DIR" ; mini_create_taz $I18N_PKG_NAME )
+	! [[ $DEBUG ]] && (cd "$PKG_BUILDS_DIR" && rm -rf $I18N_PKG_NAME)
+fi
+if [[ -d "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME ]] ; then
+	( cd "$PKG_BUILDS_DIR" ; mini_create_taz $SOLIBS_PKG_NAME )
+	! [[ $DEBUG ]] && (cd "$PKG_BUILDS_DIR" && rm -rf $SOLIBS_PKG_NAME)
+fi
+if [[ -d "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME ]] ; then
+	( cd "$PKG_BUILDS_DIR" ; mini_create_taz $DOCS_PKG_NAME )
+	! [[ $DEBUG ]] && (cd "$PKG_BUILDS_DIR" && rm -rf $DOCS_PKG_NAME)
+fi
+# create the main package
+( cd "$PKG_BUILDS_DIR" ; mini_create_taz $PKG_DIR_NAME )
+# taz packages don't use ARCH in the name AFAIK
+if [[ -f "$PKG_DEST_DIR"/${NAME}${TAG}-${VERSION}.tazpkg ]] ; then
+	echo $BLUE"Package Creation - "$GREEN"Successful!"$NORMAL" Package location:"
+	echo "$PKG_DEST_DIR/${NAME}${TAG}-${VERSION}.tazpkg"
+else
+	FAILED="Package creation in $FUNCNAME"
+fi
+}
+
+mini_create_taz() {
+THIS_TAZ="$1"
+# tag the NAME unless we are the main package
+case $THIS_TAZ in
+	$DEVEL_PKG_NAME) TAG="-devel" ;;
+	$I18N_PKG_NAME) TAG="-i18n" ;;
+	$SOLIBS_PKG_NAME) TAG="-solibs" ;;
+	$DOCS_PKG_NAME) TAG="-docs" ;;
+	$PKG_DIR_NAME) TAG="" ;;
+esac
+
+rm -f "$PKG_DEST_DIR"/${NAME}${TAG}-${VERSION}.tazpkg
+
+cd "$PKG_BUILDS_DIR"
+echo -n $BLUE"Creating package: "$NORMAL"'${NAME}${TAG}-${VERSION}.tazpkg' - "
+
+( cd $THIS_TAZ ;
+
+# create this fragment, fi needed, before moving stuff around
+if [[ $THIS_TAZ = $SOLIBS_PKG_NAME ]] && [[ -f $PKG_DIR/install/doinst.sh ]] ; then
+	# check for needed links
+	duplicate_pkg_dir_links
+	( make_doinst_links "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME ) 1> /dev/null
+	if [[ -s "$CWD"/doinst.links ]] ; then
+		#cat "$CWD"/doinst.links >> doinst.sh
+		find * -type l -exec rm -f {} \;
+	else
+		rm -f "$CWD"/doinst.links
+	fi
+fi
+
+# move existing content into a subdir named 'fs'
+mkdir -p fs
+find * -maxdepth 1 \( -type d ! -name install -a ! -name fs \) -exec mv {} fs/ \; &> /dev/null
+
+if [[ -f install/$PKG_DESC ]] ; then
+	SUMMARY=$(grep -m1 "^$NAME:" install/$PKG_DESC)
+	SUMMARY=${SUMMARY#*:}
+	pkg_desc_to_text install/$PKG_DESC > description.txt
+else
+	case $TAG in
+		"-devel") SUMMARY="Development headers and libraries for $NAME" ;
+				echo "$NAME-devel: This package contains the development files for $NAME" > description.txt
+				echo "$SIGNATURE" >> description.txt ;;
+		"-i18n") SUMMARY="Language files for $NAME" ;
+				echo "$NAME-i18n: This package contains the language files for $NAME" > description.txt
+				echo "$SIGNATURE" >> description.txt ;;
+		"-solibs") SUMMARY="Runtime shared-libraries for $NAME" ;
+				echo "$NAME-solibs: This package contains the runtime shared libraries for $NAME" > description.txt
+				echo "$SIGNATURE" >> description.txt ;;
+		"-docs") SUMMARY="Documents for $NAME" ;
+				echo "$NAME-solibs: This package contains the documents for $NAME" > description.txt
+				echo "$SIGNATURE" >> description.txt ;;
+	esac
+
+fi
+
+case $TAG in
+	"-devel") DEPENDS="$NAME" TAZ_CATEGORY="development" ;;
+	"-i18n") DEPENDS="$NAME" ;;
+	"-solibs") DEPENDS="$NAME" ;;
+	"-docs") DEPENDS="$NAME" ;;
+	"") 
+	if [[ -f /var/lib/tazpkg/files.list.lzma ]] ; then
+		DEPENDS="$(find_taz_depends)"
+	elif [[ -f install/$PKG_REQUIRED ]] ; then
+		while read LINE ; do
+			case $LINE in
+				\#*|" "|"")  true ;;
+				*) 
+					case "$DEPENDS" in
+						'') DEPENDS="${LINE%% \|*} ";;
+						*) DEPENDS="$DEPENDS ${LINE%% \|*}";;
+					esac
+					;;
+			esac
+		done < install/$PKG_REQUIRED
+	else
+		DEPENDS=unknown
+	fi
+	DEPENDS=$(echo $DEPENDS)
+	;;
+esac
+
+! [[ $TAZ_CATEGORY ]] && TAZ_CATEGORY=misc
+
+cat > receipt <<EOT
+PACKAGE="${NAME}${TAG}"
+VERSION="$VERSION"
+CATEGORY="$TAZ_CATEGORY"
+SHORT_DESC="$SUMMARY"
+WEB_SITE="$HOMEPAGE"
+MAINTAINER="$PACKAGER"
+DEPENDS="$DEPENDS"
+EOT
+
+if [[ -f install/doinst.sh ]] ; then
+cat >> receipt <<EOM
+
+post_install()
+{
+chroot \$1/ sh - << EOT
+cd /
+EOM
+cat install/doinst.sh | sed -e 's/\\/\\\\/g' | sed -e 's/\$/\\$/g' >> receipt
+cat >> receipt <<EOM2
+EOT
+}
+EOM2
+fi
+
+# If needed, links-creation code was duplicated above into "$CWD"/doinst.links
+if [[ $THIS_TAZ = $SOLIBS_PKG_NAME ]] && [[ -s "$CWD"/doinst.links ]] ; then
+
+	cat >> receipt <<EOM
+
+post_install()
+{
+chroot \$1/ sh - << EOT
+cd /
+EOM
+		cat "$CWD"/doinst.links | sed -e 's/\\/\\\\/g' | sed -e 's/\$/\\$/g' >> receipt
+		cat >> receipt <<EOM2
+EOT
+}
+EOM2
+	rm -f "$CWD"/doinst.links
+	rm -f doinst.sh $CWD/new.doinst.sh
+fi
+rm -f "$CWD"/doinst.links
+# rm -f doinst.sh $CWD/new.doinst.sh
+
+# now get rid of the install dir completely (if it exists)
+rm -rf install
+
+# Create files.list with redirecting find output.
+( cd fs ;
+	find * -type f -print > ../files.list
+	find * -type l -print >> ../files.list
+)
+# make relative paths absolute
+while read LINE ; do
+	echo "/${LINE}" >> files.list.tmp
+done < files.list
+mv -f files.list.tmp files.list
+
+#Creating md5sum of files.
+while read file; do
+	[ -L "fs/$file" ] && continue
+	[ -f "fs/$file" ] || continue
+	case "$file" in
+	/lib/modules/*/modules.*|*.pyc) continue;;
+	esac
+	# md5sum "fs/$file" | sed 's/  fs/  /'
+	MD5SUM=$(md5sum "fs/$file")
+	#MD5SUM=${MD5SUM#* }
+	MD5SUM="${MD5SUM/ fs\// }"
+	echo $MD5SUM
+done < files.list > md5sum
+
+# The output from 'du' is weird to deal with so get just one line
+DISK_USAGE_OUTPUT=$(du -cks --apparent-size fs receipt files.list md5sum description.txt 2> /dev/null |tail -n1)
+# and read it char-by-char until we reach a non-digit character
+offset=0 UNPACKED_SIZE=
+while [[ ${DISK_USAGE_OUTPUT:$offset:1} = [0-9] ]] ; do
+	CHAR=${DISK_USAGE_OUTPUT:$offset:1}
+	UNPACKED_SIZE=${UNPACKED_SIZE}${CHAR}
+	(( offset++ ))
+done
+
+# Build internal cpio archive
+find fs -print | cpio --quiet -o -H newc | gzip > fs.cpio.gz
+rm -rf fs
+
+# The output from 'du' is *still* weird...
+DISK_USAGE_OUTPUT=$(du -cks --apparent-size fs.cpio.gz receipt files.list md5sum description.txt 2> /dev/null |tail -n1)
+# and read it char-by-char until we reach a non-digit character
+offset=0 PACKED_SIZE=
+while [[ ${DISK_USAGE_OUTPUT:$offset:1} = [0-9] ]] ; do
+	CHAR=${DISK_USAGE_OUTPUT:$offset:1}
+	PACKED_SIZE=${PACKED_SIZE}${CHAR}
+	(( offset++ ))
+done
+
+#Update receipt sizes
+echo "# SliTaz package receipt." > receipt.tmp
+echo "# generated by src2pkg" >> receipt.tmp
+echo "PACKED_SIZE=${PACKED_SIZE}K" >> receipt.tmp
+echo "UNPACKED_SIZE=${UNPACKED_SIZE}K" >> receipt.tmp
+cat receipt >> receipt.tmp
+mv -f receipt.tmp receipt
+
+# Creating final cpio package
+find . -print | cpio --quiet -o -H newc > "$PKG_DEST_DIR"/${NAME}${TAG}-${VERSION}.tazpkg
+
+if [[ -f "$PKG_DEST_DIR"/${NAME}${TAG}-${VERSION}.tazpkg ]] ; then
+	echo $GREEN"Done"$NORMAL
+else
+	echo $RED"Failed!"$NORMAL
+fi
+
+# [[ $DEBUG ]] && echo "Restoring original package tree... "
+if [[ $DEBUG ]] ; then
+	zcat fs.cpio.gz | cpio --quiet -idm
+	rm fs.cpio.gz
+fi
+
+)
+}
+
+taz_ldd()
+{
+	LD_TRACE_LOADED_OBJECTS=1 /lib/ld*.so $1 2> /dev/null
+}
+
+find_taz_depends() {
+DEFAULT_DEPENDS="glibc-base gcc-lib-base"
+if [[ -f /var/lib/tazpkg/files.list.lzma ]] ; then
+	for i in /var/lib/tazpkg/files.list.lzma \
+ 		/var/lib/tazpkg/undigest/*/files.list.lzma ; do
+ 		[ -f $i ] && lzma d $i -so >> files.list
+	done
+fi
+find fs -type f | while read FILE ; do
+		is_elf $file || continue
+		case "$FILE" in
+		*.o|*.ko|*.ko.gz) continue;;
+		esac
+		taz_ldd $FILE | while read lib rem ; do
+			case "$lib" in
+			statically|linux-gate.so*|ld-*.so|*/ld-*.so)
+				continue;;
+			esac
+			for dep in $(grep $lib files.list 2> /dev/null| cut -d: -f1); do
+				case " $DEFAULT_DEPENDS $ALL_DEPENDS " in
+				*\ $dep\ *) continue 2;;
+				esac
+			done
+			ALL_DEPENDS="$ALL_DEPENDS $dep"
+			if [ -n "$dep" ]; then
+				echo -n " $dep"
+			else
+				echo "$lib" >> unresolved
+			fi
+		done
+	done
+}

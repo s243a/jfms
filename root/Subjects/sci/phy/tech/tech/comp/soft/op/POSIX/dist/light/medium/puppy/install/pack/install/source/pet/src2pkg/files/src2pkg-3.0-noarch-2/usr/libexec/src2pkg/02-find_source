@@ -1,0 +1,151 @@
+# This file is part of the src2pkg program:
+# Copyright 2005-2013 Gilbert Ashley <amigo@ibilio.org>
+# src2pkg is released under the GNU General Public License Version 2
+
+### find_source
+find_source() {
+if [[ $ALLOW_USER_EXTENSIONS = "YES" ]] ; then
+ # check if the user has any pre-execution extensions to this file and run them, if so.
+ [[ -f "$HOME"/.src2pkg/extensions/02.pre ]] && . "$HOME"/.src2pkg/extensions/02.pre
+fi
+
+if [[ ! $RESUME ]] || [[ $RESUME = $FUNCNAME ]] || [[ $HAVE_RESUMED ]] ; then
+  [[ $RESUME = $FUNCNAME ]] && HAVE_RESUMED=1 && echo $CYAN"Notice - "$BLUE"Resuming build at: "$NORMAL "$FUNCNAME"
+  if [[ $PAUSE = "BEFORE" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+    echo $MAGENTA"Notice - "$BLUE"Pausing before: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+    read
+  fi
+  
+  if [[ "$EXTRA_SOURCES" != "" ]] ; then
+	for URL in $EXTRA_SOURCES ; do
+	  if ! [[ -e "$CWD"/$(basename "${URL}") ]] ; then
+		if [ ! -w "$CWD" ] ; then
+			echo $RED"FAILED! "$NORMAL"CWD is not writable... exiting."
+			FAILED="READONLY CWD in: $FUNCNAME"
+		else
+			if [[ "$BASE_URL" != "" ]] ; then
+				URL_ADDRESS="${BASE_URL}"/"${URL}"
+			else
+				URL_ADDRESS="${URL}"
+			fi
+			URL_DEST="${CWD}"/$(basename "$URL")
+			URL_TYPE="extra sources"
+			download_url
+			if [ $? -ne 0 ] ; then
+			 mv -f "${CWD}"/$(basename "$URL") "${CWD}"/$(basename "$URL").FAIL
+			 echo $RED"FAILED! "$NORMAL"Downloading '$(basename ${URL})' failed or cancelled."
+			 FAILED="EXTRA_SOURCES DOWNLOAD in: $FUNCNAME"
+			else
+				if [ "$DOWNLOAD_ONLY" ]; then
+				 echo $BLUE"Download completed to: "$NORMAL"${CWD}"/$(basename "$URL")
+				 exit 0
+				else
+				 echo $BLUE"Extra sources downloaded to: "$NORMAL"${CWD}"/$(basename "$URL")
+				fi
+			fi
+		fi
+	  fi
+	done
+  fi
+
+  if [[ "$SOURCE" != "" ]] || [[ "$SOURCE_NAME" != "" ]] ; then
+	if [[ -L $SOURCE ]] ; then
+	  echo $BLUE"Found source archive: "$NORMAL"$(basename $SOURCE)"
+	  echo "It's really a symlink to: "$(readlink -f "$SOURCE")
+	  SOURCE=$(readlink -f "$SOURCE")
+	elif [[ -f "$SOURCE" ]] ; then
+	  echo $BLUE"Found source archive:"$NORMAL $(basename "$SOURCE")
+	  SOURCE="$SOURCE"
+	elif [[ -f "$SOURCES_DIR"/"$SOURCE_NAME" ]] ; then
+	  echo $BLUE"Found source archive in SOURCES_DIR:"$NORMAL $(basename "$SOURCE_NAME")
+	  SOURCE="$SOURCES_DIR"/"$SOURCE_NAME"
+	elif [[ -f "$CWD"/"$SOURCE_NAME" ]] ; then
+	  echo $BLUE"Found source archive in CWD:"$NORMAL $(basename "$SOURCE_NAME")
+	  SOURCE="$CWD"/"$SOURCE_NAME"
+	elif [ "${SOURCE_URL}" != "" ]; then
+		if [ ! -w "$SOURCES_DIR" ] ; then
+			echo $RED"FAILED! "$NORMAL"SOURCES_DIR is not writable... exiting."
+			FAILED="READONLY SOURCES_DIR in: $FUNCNAME"
+		else
+			if [[ "$BASE_URL" != "" ]] ; then
+				URL_ADDRESS="${BASE_URL}"/"${SOURCE_URL}"
+			else
+				URL_ADDRESS="${SOURCE_URL}"
+			fi
+			URL_DEST="${SOURCE}"
+			URL_TYPE="sources"
+			download_url
+			if [ $? -ne 0 ]; then
+				mv -f "${SOURCE}" "${SOURCE}".FAIL
+				echo $RED"FAILED! "$NORMAL"Downloading '$(basename ${SOURCE})' failed or cancelled."
+				FAILED="SOURCE DOWNLOAD in: $FUNCNAME"
+			else
+				if [ "$DOWNLOAD_ONLY" ]; then
+				 echo $BLUE"Download completed to: "$NORMAL"$SOURCE"
+				 exit 0
+				else
+				 echo $BLUE"Sources downloaded to: "$NORMAL"$SOURCE"
+				fi
+			fi
+		fi
+	else
+	  echo $RED"FAILED! "$NORMAL"File: $(basename $SOURCE) not found!"
+	  echo "Check for errors in the NAME, VERSION or SRC_SUFFIX. "
+	  FAILED="SOURCE LOCATION in: $FUNCNAME"
+	fi
+  fi
+  if [[ $PAUSE = "AFTER" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+    echo $MAGENTA"Notice - "$BLUE"Pausing after: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+    read
+  fi
+fi
+###
+
+if [[ $ALLOW_USER_EXTENSIONS = "YES" ]] ; then
+ # check if the user has any post-execution extensions to this file and run them, if so.
+ [[ -f "$HOME"/.src2pkg/extensions/02.post ]] && . "$HOME"/.src2pkg/extensions/02.post
+fi
+
+}
+
+# this function gets used for downloading build scripts, sources and extra sources
+# by passing a URL to either an archive or *src2pkg script or as a member of EXTRA_SOURCES
+download_url() {
+	if ! [[ $DOWNLOADER ]] ; then
+		if [[ $(which wget) ]] ; then
+			DOWNLOADER=wget
+		elif [[ $(which rsync) ]] ; then
+			DOWNLOADER=rsync
+		elif [[ $(which curl) ]] ; then
+			DOWNLOADER=curl
+		elif [[ $(which lynx) ]] ; then
+			DOWNLOADER=lynx
+		elif [[ $(which aria2c) ]] ; then
+			DOWNLOADER=aria2c
+		else
+			DOWNLOADER=""
+		fi
+	elif ! [[ $(which $DOWNLOADER) ]] ; then
+		echo $READ"Failed! "$NORMAL"Your chosen downloader is not available on this system. Exiting..."
+		FAILED="NO_DOWNLOADER in: $FUNCNAME"
+		post_process
+	fi
+
+	case $DOWNLOADER in
+		wget)	echo $BLUE"Downloading ${URL_TYPE} with wget from: "$NORMAL"$URL_ADDRESS" ;
+			# wget --tries=3 --timeout=15 -O "${URL_DEST}" "${URL_ADDRESS}" &> /dev/null ;;
+			wget $DOWNLOADER_OPTIONS "${URL_DEST}" "${URL_ADDRESS}" &> /dev/null ;;
+		rsync)	echo $BLUE"Downloading ${URL_TYPE} with rsync from: "$NORMAL"$URL_ADDRESS"
+			rsync "${URL_ADDRESS}" >"${URL_DEST}" &> /dev/null ;;
+		curl)	echo $BLUE"Downloading ${URL_TYPE} with curl from: "$NORMAL"$URL_ADDRESS" ;
+			curl -s "${URL_ADDRESS}" >"${URL_DEST}" &> /dev/null ;;
+		lynx)	echo $BLUE"Downloading ${URL_TYPE} with lynx from: "$NORMAL"$URL_ADDRESS" ;
+			lynx -source "${URL_ADDRESS}" >"${URL_DEST}" &> /dev/null ;;
+		aria2c)  echo $BLUE"Downloading ${URL_TYPE} with aria2c from: "$NORMAL"$URL_ADDRESS" ;
+			#aria2c $DOWNLOADER_OPTIONS "${URL_ADDRESS}" >"${URL_DEST}" &> /dev/null ;;
+			# for some reason redirecting aria2c doesn't work here -it *does* work from the command line :-(
+			( cd $SOURCES_DIR ; aria2c $DOWNLOADER_OPTIONS "${URL_ADDRESS}" &> /dev/null ) ;;
+		*)	echo "No downloader available." ;
+			exit ;;
+	esac
+}

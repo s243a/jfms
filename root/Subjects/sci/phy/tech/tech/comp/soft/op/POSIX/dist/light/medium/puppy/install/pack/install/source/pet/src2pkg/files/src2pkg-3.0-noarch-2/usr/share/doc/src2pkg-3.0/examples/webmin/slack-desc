@@ -1,0 +1,11 @@
+webmin-minimal: webmin Web-based System Administration Suite
+webmin-minimal: 
+webmin-minimal: Webmin is a web-based interface for system administration 
+webmin-minimal: for Unix. Using any browser that supports tables, forms
+webmin-minimal: and cookies, you can setup user accounts, Apache,
+webmin-minimal: internet services, DNS, file sharing and so on. This
+webmin-minimal: package installs the minimal version of webmin. Additional
+webmin-minimal: webmin modules can be added using webmin itself.
+webmin-minimal: 
+webmin-minimal: 
+webmin-minimal: Packaged by src2pkg

@@ -1,0 +1,292 @@
+
+
+1. Notes on the use of INSTALL_TYPE
+
+2. Passing options to the 'configure' script
+
+3. Building packages as a normal (non-root) user
+
+4. Controlling execution using the --pause or --resume options
+
+5. Building packages for multi-lib systems
+
+6. Building packages with a prefix besides '/usr'
+
+7. Controlling automatic actions with AUTO* 'switches'
+
+=====================================================================================
+
+1. Notes on the use of INSTALL_TYPE
+	One very important variable used by src2pkg is called INSTALL_TYPE. This
+	refers to the way in which package content gets created using the
+	'fake_install' instruction or function. fake_install is a 'front-end'
+	to whatever command is normally used to install software to your system
+	-usually the command 'make install'. fake_install provides 5 distinct
+	methods to run the installation commands -usually without installing
+	the items at all. fake_install tries to run the commands while re-directing
+	them so that software gets installed into an alternate location -the PKG_DIR.
+	Two of the INSTALL_TYPES are available to non-root users: '-DESTDIR' (or '-DEST')
+	and '-JAIL'. Three more types can only be used while running src2pkg as
+	root: '-REAL', '-SAFE' and '-UNION'. The '-UNION' option sets up a small
+	chroot environment using unionfs-fuse or unionfs. Software is installed into
+	the chroot environment so it can be isolated from the real system
+	directories. As implied, the REAL option actually installs the software
+	to your system, but creates a log of all files created or modified, then
+	copies them into the PKG_DIR and finally removes them from the main
+	filesystem. However, this can overwrite files which are already on your
+	system. Using the '-SAFE' option avoids changes to your system, by creating
+	backups of any files which would be overwritten, and then restoring them
+	once the new files are copied into the PKG_DIR.
+	
+	The REAL and SAFE methods are the most accurate and dependable methods,
+	but unfortunately they are the most intrusive as they don't even try
+	to re-direct the output of the installation commands. For that reason,
+	we recommend them only when none of the other methods work.
+	
+	By default, src2pkg will use the JAIL method for content creation. For
+	a long time, the DESTDIR method was the default as many people are familiar
+	with it and trust it. However, DESTDIR is not very dependable and will often
+	write some files correctly to the DESTDIR(PGK_DIR), but will try to write
+	other files to the main system directories. This means that, if running
+	as root, you will have 'orphaned' files on your system which are not
+	included in the package, or if running as a normal user, then the commands
+	will fail. Failing is better than creating orphaned files, but since the
+	failure stops the src2pkg build process, the user is left without a 
+	package. Usually, the JAIL method will succeed in these cases. The JAIL
+	method will also fail sometimes, for reasons which are difficult to
+	discover or explain. But it makes a safer default than DESTDIR and will
+	not fail more often than DESTDIR.
+	
+	One of the most common failures when trying to create a package is when
+	INSTALL_TYPE is not usable for that package. If your package build fails
+	with an error like: "Running 'make install' has failed with error:"
+	or you see this: "Possible error running 'make install'"
+	the first thing to do is to try building the package using one of the other
+	INSTALL_TYPE options. This will usually allow for the package to be
+	properly built. You should also try this if you notice that some files
+	are not being included in the package which you are sure should be in it.
+	
+2. Passing options to the configure script
+	For compiling some sources, you'll want or need to pass extra options
+	to the configure script to enable or disable program features. Of course,
+	src2pkg provides a way to easily do this, either using command-line
+	options or by including the extra options in a src2pkg script. Let's
+	take an example where you want to build and package a certain program,
+	but need to pass some extra options like: --disable-gnome --with-x
+	When normally configuring such sources you'd use a command like this:
+	./configure --prefix=/usr --disable-gnome --with-x
+	When using src2pkg, the prefix option is separate and defaults to /usr,
+	so normally you shouldn't have to worry about it. The command-line
+	for doing the above using src2pkg would look like this:
+	src2pkg -e='--disable-gnome --with-x' tarball-name
+	If you really wanted to use a prefix besides /usr, supply it separately:
+	src2pkg -p='/usr/local' -e='--disable-gnome --with-x' tarball-name
+	You can also use the "long form" of the src2pkg syntax, like this:
+	src2pkg --pre_fix='/usr/local' --extra_configs='--disable-gnome --with-x' tarball-name
+	
+	If you are using a src2pkg script to build the sources with, you should
+	use the same syntax that src2pkg uses for its' internal API:
+	PRE_FIX=/usr/local
+	EXTRA_CONFIGS="--disable-gnome --with-x"
+	(Be sure to use quotes if the options contain spaces).
+	
+	You don't have to learn all the internal syntax in order to be able to use
+	a src2pkg script, as src2pkg will write the script for you with the correct
+	syntax for any options you give on the command-line. This command:
+	src2pkg -p='/usr/local' -e='--disable-gnome --with-x' -N tarball-name
+	The '-N' option tells src2pkg to create a new src2pkg script for you,
+	and the extra options you passed will be written into the script with
+	the correct internal syntax as shown above.
+	
+	The '-e=??' (or EXTRA_CONFIGS) option can also be used to pass options
+	to other configuration methods, including those used for compiling
+	perl-modules or sources which use 'cmake' for configuration.
+	
+3. Building packages as a normal (non-root) user		               ####
+	Most software can be built with src2pkg while running as a non-root,
+	non-privileged user. In these cases, src2pkg uses the owner/group commands
+	of 'tar' to set the ownership and group of all files to 'root', so
+	the package can be installed normally to your system. However, there
+	are cases where this is not the desired result. For instance, some software
+	installs files or directories which belong to a specific non-root user,
+	particularly server or daemon software which may run at boot-time. In
+	these cases you have two options: build the package as root so that
+	the correct onership and permissions are preserved, or include lines
+	in a doinst.sh script which set the owner/group/perms when the package
+	gets installed.
+	
+	Also, there are a few cases where neither the JAIL or DESTDIR options
+	(described above) will work to create the package content. In such cases,
+	the package must be built as root, using one of the other INSTALL_TYPE
+	options.
+	
+	rpm packages should usually not be built as a non-root user as rpmbuild
+	will set the 'owner' and 'group' of all files to the normal user.
+
+4. Controlling execution using the --pause or --resume options		####
+	You can control the flow of execution of src2pkg using the options
+	'--resume=??' and/or '--pause=??'. These options are not meant to
+	be used so that you can do things manually inside the sources or
+	in the package-tree content while execution is paused. When resuming,
+	src2pkg will automatically clear out any previously-created content
+	in the package tree.
+	
+	The 'resume' is especially useful when working with sources which
+	take a long time to compile. You may want to interrupt a build which
+	is taking more time than you have. It is also useful if you are
+	creating more than one type of finished package. To use the resume
+	option, simply give the name of the src2pkg function or build
+	instruction where you want src2pkg to resume at -for example:
+	src2pkg --resume=compile_source
+	will resume the build at the compile_source function. You can see
+	a list of the functions where builds can be resumed, by running 
+	'src2pkg --list'
+	
+	Usage of the 'pause' option is similar. By using 'pause', you can
+	have src2pkg pause before or after each step of the build. Or you
+	can have it pause at just one build step. To pause before or after
+	every step, use the pause option like this:
+	src2pkg --pause=after (or --pause=before)
+	Or, to have src2pkg pause at a single step, use the name of the
+	function or build instruction, as above:
+	src2pkg --pause=fake_install
+	As above, the command 'src2pkg list' will show you the list of
+	functions available for pausing. When used this way, the 'pause'
+	option will both before and after the named function.
+
+5. Building packages for multi-lib systems
+	src2pkg makes it very easy to build packages for multi-lib systems.
+	The most common case for this is with 64-bit systems which also
+	have some 32-bit libraries and programs installed. src2pkg provides
+	command-line options for easily controlling multi-lib builds. The
+	two main ones are the '-M??' and '-L??' options. The -M?? option
+	is used to tell src2pkg which 'Machine Option' to pass to the compiler,
+	and the -L?? option is used, when needed, to tell src2pkg the library
+	path-names to use for configuration and installation of the package.
+	The most common case would be something like this: You have a 64-bit
+	system with some 32-bit compatibility libraries already installed.
+	For most systems, the 64-bit libraries are installed under /lib64
+	and /usr/lib64, and the 32-bit libraries are installed under /lib
+	and /usr/lib.
+	To compile and package a program which uses the 32-bit libraries,
+	simply add the option '-M32' to whatever src2pkg options you are
+	using. If you are using a system which uses a different directory
+	structure, you can use the -L?? option to control the path-name
+	to use. The most common options are avilable as simple 'switches':
+	-M32, -M64, -L32, -L64 (and -L0 or -LNULL). But there is also a
+	long-form syntax which can be used for creating packages using
+	a cross-compiler. Instead of the -M?? option as shown above,
+	you can use: --machine=??; and for the -L?? option: --libdirsuffix=??
+	Using the long-form syntax lets you specify any sort of directory
+	name and/or gcc 'Machine Option' needed.
+	
+6. Building packages with a prefix besides '/usr'
+	Ordinarily src2pkg configures sources using the default --prefix=/usr
+	Many of the sanity checks and corrections done to the package content
+	assume that the prefix is '/usr', unless special steps are taken.
+	src2pkg has an option setting called FHS_POLICY that is used to tell
+	it where certain files should be located on the system -like man-pages
+	info pages, documents and others. The default setting is:
+	FHS_POLICY=SLACK
+	The other standard option is: FHS_POLICY=LSB
+	They are similar except for minor differences where Slackware uses
+	paths which are different than what the Linux Standards Board recommends.
+	But, if you usually build packages which are meant to install under
+	/usr/local or other non-standard paths, you may find that some of
+	the src2plg correction routines make it hard to get all the files
+	installed under the prefix you have specified. If that is the case,
+	then you should use FHS_POLICY=NONE so that src2pkg doesn't force
+	items to be installed to the 'standard' locations. You can change
+	the FHS_POLICY from the command line by running src2pkg like this:
+	FHS_POLICY=NONE src2pkg ....
+	Or, you can change the default setting by editing your src2pkg.conf
+	file. Look for the line with the FHS_POLICY variable and uncomment
+	it by removing the leading '#' character and editing it to this:
+	[[ $FHS_POLICY  ]] || FHS_POLICY=NONE
+	This will still let you override that setting from the command-line
+	as shown above:
+	FHS_POLICY=?? src2pkg ....
+	Otherwise, the new default FHS_POLICY=NONE will be used.
+	
+7. Controlling automatic actions with AUTO* 'switches'
+	src2pkg performs many actions automatically, in such a way that
+	most builds will succeed. But, sometimes these automatic actions
+	actually break a build or simply don't do what you need or
+	want for that package. Many of these actions are performed after
+	the sources are built and add, modify or remove files from the
+	package tree before creating the final package.
+	
+	Many of these automatic actions can be controlled by using
+	variable 'switches' with names that begin with 'AUTO'. Here's
+	a list of the available switches and what actions they affect.
+	
+	AUTO_SCRIPT=YES - this is only used from the command-line as option
+	  '-A'. It should be used mostly for first-time builds to help
+	  generate a build script and description file for a package.
+	
+	AUTO_CONFIG=FOREIGN
+	
+	AUTO_CONFIG=NATIVE
+	AUTO_CONFIG_OPTIONS
+	
+	AUTO_PATCH=NO -turns off the search for and application of
+	  patches to the sources. This option can be placed near the
+	  top a *.src2pkg build script, or is available from the command-
+	  line with the '-D' option (D for diff).
+	  
+	The next few options control the use of the so-called 'autools',
+	that is, aclocal, autoheader, autoconf, automake and other
+	related tools:
+	
+	AUTORECONF=NO or AUTO_RECONF=NO -turns off use of the command:
+	  'autoreconf -if' -even when src2pkg judges it should be run.
+	
+	AUTOCONF=NO - turns of execution of the 'autoconf' command,
+	  when src2pkg has judged that it should be run.
+	
+	AUTOGEN=YES - Run 'autogen.sh' instead of 'autoreconf -if' when
+	  automatically re-generating source configuration files.
+	  
+	AUTOMAKE=NO -disable execution of the 'automake' command.
+	
+	AUTO_SUB_GUESS=NO -src2pkg usually replaces the files config.sub
+	  and config.guess in the sources, with up-to-date copies from
+	  /usr/share/automake. This usually helps to achieve successful
+	  builds when the sources are rather old, or you are using very
+	  new hardware or building on non-ix86 systems. But, sometimes
+	  replacing these files causes build failure. Placing this option
+	  in your *.srcpkg build script will disable the file replacement.
+	
+	AUTO_MAKE_CLEAN=NO -disables the running of 'make clean' inside
+	  the sources -which is usally done *before* running the 
+	  configure script. In rare cases, running 'make clean' will
+	  destroy files needed for configuration to succeed. In most
+	  cases, running 'make clean' first is good thing, but this
+	  option allows for turning it off.
+	
+	
+	# The following options control the inclusion of extra files
+	# in the package
+	AUTO_PC=NO -disable the search for and automatic inclusion of
+	  and pkg-config '*.pc' files.
+	  
+	AUTO_ICON=NO -do not search for and automatically include icon images.
+	
+	AUTO_DESKTOP=NO -do not search for and automatically include
+	  any '*.desktop' files.
+	
+	
+	AUTO_DOT_NEW=NO -disable the search for and inclusion of any
+	  *.new files and their handling routines in the post-installation
+	  doinst.sh scripts. Various types of *.new files are handled by
+	  src2pkg: xinitrc.NAME.new, NAME.rc.new, NAME.conf.new (or
+	  NAMErc.new. 
+	
+	AUTO_RC_LOCAL=NO -when src2pkg detects that a new package includes
+	  an rc.NAME(.new) file, it automatically generates code in the
+	  doinst.sh script which adds an execution routine for the package
+	  to the /etc/rc.d/rc.local file when the package is first installed.
+	  This option turns off the automatic code generation. This is 
+	  needed for building basic system packages, whose execution
+	  routines are already found in the standard init scripts
+	  /etc/rc.d/rc.S, /etc/rc.d/rc.M or other.

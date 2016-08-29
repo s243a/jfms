@@ -1,0 +1,250 @@
+# debian-specific packaging functions
+
+make_debian_pkg() {
+	# create a control file if one is not found
+	if [[ ! -f "$CWD"/control ]] ; then
+	  for SEARCH_PATH in "$PATCHES_DIR"/$NAME-patches "$CWD"/patches "$CWD"/Resources "$CWD"/debian ; do
+		if [[ -f "$SEARCH_PATH"/control ]] ; then
+			cp -f "$SEARCH_PATH"/control "$CWD"/control
+			break
+		fi
+	  done
+	fi
+	
+	# create any split packages, if needed
+	if [[ -d "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME ]] ; then
+		rm -f "$DEVEL_PACKAGE"
+		( cd "$PKG_BUILDS_DIR" ; mini_create_deb $DEVEL_PKG_NAME )
+		! [[ $DEBUG ]] && (cd "$PKG_BUILDS_DIR" && rm -rf $DEVEL_PKG_NAME)
+	fi
+	if [[ -d "$PKG_BUILDS_DIR"/$I18N_PKG_NAME ]] ; then
+		rm -f "$I18N_PACKAGE"
+		( cd "$PKG_BUILDS_DIR" ; mini_create_deb $I18N_PKG_NAME )
+		! [[ $DEBUG ]] && (cd "$PKG_BUILDS_DIR" && rm -rf $I18N_PKG_NAME)
+	fi
+	if [[ -d "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME ]] ; then
+		rm -f "$SOLIBS_PACKAGE"
+		( cd "$PKG_BUILDS_DIR" ; mini_create_deb $SOLIBS_PKG_NAME )
+		! [[ $DEBUG ]] && (cd "$PKG_BUILDS_DIR" && rm -rf $SOLIBS_PKG_NAME)
+	fi
+	if [[ -d "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME ]] ; then
+		rm -f "$DOCS_PACKAGE"
+		( cd "$PKG_BUILDS_DIR" ; mini_create_deb $DOCS_PKG_NAME )
+		! [[ $DEBUG ]] && (cd "$PKG_BUILDS_DIR" && rm -rf $DOCS_PKG_NAME)
+	fi
+	# create the main package
+	rm -f "$PACKAGE"
+	( cd "$PKG_BUILDS_DIR" ; mini_create_deb $PKG_DIR_NAME )
+	#( cd "$PKG_BUILDS_DIR" ; mini_create_deb $PKG_NAME )
+	if [[ -f "$PACKAGE" ]] ; then
+		echo $BLUE"Package Creation - "$GREEN"Successful!"$NORMAL" Package location:"
+		echo "$PACKAGE"
+	fi
+}
+
+mini_create_deb() {
+	THIS_DEB="$1"
+	cd "$PKG_BUILDS_DIR"
+	
+	# tag the NAME unless we are the main package
+	case $THIS_DEB in
+		$DEVEL_PKG_NAME) TAG="-devel" ARCH="$ARCH" ;;
+		$I18N_PKG_NAME) TAG="-i18n" ARCH="all" ;;
+		$SOLIBS_PKG_NAME) TAG="-solibs" ARCH="$ARCH" ;;
+		$DOCS_PKG_NAME) TAG="-docs" ARCH="all" ;;
+		*) TAG= ARCH="$ARCH" ;;
+	esac
+	
+	# reset this
+	# PKG_NAME="${NAME}${TAG}_$VERSION-${BUILD}_$ARCH.deb" \
+	#PACKAGE="$PKG_DEST_DIR/$PKG_NAME"
+	echo $BLUE"Creating package: "$NORMAL"'${THIS_DEB}.deb'"
+	
+	# The output from 'du' is wierd to deal with so get just one line
+	DISK_USAGE_OUTPUT=$(du -sk --apparent-size $THIS_DEB)
+	# and read it char-by-char until we reach a non-digit character
+	offset=0 INSTALLED_SIZE=
+	while [[ ${DISK_USAGE_OUTPUT:$offset:1} = [0-9] ]] ; do
+		CHAR=${DISK_USAGE_OUTPUT:$offset:1}
+		INSTALLED_SIZE=${INSTALLED_SIZE}${CHAR}
+		(( offset++ ))
+	done
+	
+	# move any generated install scripts or database files out of the way
+	( cd $SRC_DIR && rm -rf src2pkg-install-scripts )
+	( cd $SRC_DIR && mkdir src2pkg-install-scripts )
+	# move any install scripts into the sources temporarily 
+	mv --force $THIS_DEB/install/* $SRC_DIR/src2pkg-install-scripts/
+	
+	if [[ ! -f "$CWD"/control ]] || [[ "$THIS_DEB" != "$PKG_NAME" ]] ; then
+		echo "Package: ${NAME}${TAG}" > "$SRC_DIR"/src2pkg-install-scripts/control.tmp
+		echo "Version: $VERSION-$BUILD" >> "$SRC_DIR"/src2pkg-install-scripts/control.tmp
+		echo "Architecture: $ARCH" >> "$SRC_DIR"/src2pkg-install-scripts/control.tmp
+		echo "Installed-Size: ${INSTALLED_SIZE}K" >> "$SRC_DIR"/src2pkg-install-scripts/control.tmp
+		#echo "Installed-Size: ${INSTALLED_SIZE%% *}" >> "$SRC_DIR"/src2pkg-install-scripts/control.tmp
+		echo "Maintainer: $PACKAGER" >> "$SRC_DIR"/src2pkg-install-scripts/control.tmp
+		
+		if [[ "$DESC" != "" ]] ; then
+			echo "Description: $BLURB_1" >> "$SRC_DIR"/src2pkg-install-scripts/control.tmp
+			while [[ "$DESC" != "" ]] ; do
+				CHUNK=${DESC:0:79}
+				CHUNK=${CHUNK%$" "*}
+				echo " $CHUNK" >> "$SRC_DIR"/src2pkg-install-scripts/control.tmp
+				DESC=${DESC:${#CHUNK}}
+				DESC=${DESC#$" "*}
+			done
+		else
+			case $THIS_DEB in
+				$DEVEL_PKG_NAME) echo "Description: Development files for $NAME" >> "$SRC_DIR"/src2pkg-install-scripts/control.tmp ;;
+				$I18N_PKG_NAME) echo "Description: Language files for $NAME" >> "$SRC_DIR"/src2pkg-install-scripts/control.tmp ;;
+				$SOLIBS_PKG_NAME) echo "Description: Runtime shared-libraries for $NAME" >> "$SRC_DIR"/src2pkg-install-scripts/control.tmp ;;
+				$DOCS_PKG_NAME) echo "Description: Document files for $NAME" >> "$SRC_DIR"/src2pkg-install-scripts/control.tmp ;;
+				*)	if [[ -f "$THIS_DEB"/$NAME.dsc ]] ; then
+						echo -n "Description:" >> "$SRC_DIR"/src2pkg-install-scripts/control.tmp
+						pkg_desc_to_text "$THIS_DEB"/$NAME.dsc >> "$SRC_DIR"/src2pkg-install-scripts/control.tmp
+						rm -f "$THIS_DEB"/$NAME.dsc
+					else
+						echo "Description: No description available for $NAME" >> "$SRC_DIR"/src2pkg-install-scripts/control.tmp
+					fi
+				;;
+			esac
+		fi
+		if [[ "$HOMEPAGE" != "" ]] ; then
+			echo "Homepage: $HOMEPAGE" >> "$SRC_DIR"/src2pkg-install-scripts/control.tmp
+		fi
+	fi
+	
+	# Create a fresh md5sums file -but outside the package for now
+	( cd "$THIS_DEB" && find * -type f -exec md5sum {} \; > "$SRC_DIR"/src2pkg-install-scripts/md5sums )
+	
+	# generate a conffiles file
+	( cd "$THIS_DEB"
+		if [[ -d etc ]] || [[ -d $PRE_FIX/etc ]] ; then
+			echo $BLUE"Adding configuration files to conffiles: "$NORMAL
+			if [[ -d etc ]] ; then
+				for CONFFILE in etc/* ; do
+					echo "   $CONFFILE"
+					echo /"$CONFFILE" >> "$SRC_DIR"/src2pkg-install-scripts/conffiles
+				done
+			fi
+		
+			if [[ -d $PRE_FIX/etc ]] ; then
+				for CONFFILE in $PRE_FIX/etc/* ; do
+					echo "   $CONFFILE "
+					echo /"$CONFFILE" >> "$SRC_DIR"/src2pkg-install-scripts/conffiles
+				done
+			fi
+		fi
+	)
+	
+	# now we have a clean dir with only the installed files, so create the data.tar.$COMP_EXT
+	(cd "$THIS_DEB" ;
+		# use SRC_DIR as a temporary location for data.tar.xxx archive
+		rm -f "$SRC_DIR"/data.tar.$COMP_EXT 
+		if [[ "$EUID" = "0" ]] ; then
+			tar -c --use-compress-program "$PKG_COMPRESSOR" -f "$SRC_DIR"/data.tar.$COMP_EXT .
+		else
+			tar --owner=root --group=root -c --use-compress-program "$PKG_COMPRESSOR" -f "$SRC_DIR"/data.tar.$COMP_EXT . 
+		fi
+		if [[ $? != 0 ]] ; then
+			echo $RED"FAILED!"$NORMAL
+			echo "Error creating Debian data tarball"
+			FAILED="Package creation in $FUNCNAME"
+		fi
+	)
+	
+	# remove the main dirs and files
+	( cd "$THIS_DEB" && rm -rf * )
+	
+	# move the data archive into the empty package tree
+	mv "$SRC_DIR"/data.tar.$COMP_EXT "$THIS_DEB"/data.tar.$COMP_EXT
+	
+	# now add the extra debian installer files
+	echo "$DEB_COMPAT" > "$THIS_DEB/debian-binary"
+	
+	if [[ -f "$SRC_DIR"/src2pkg-install-scripts/control.tmp ]] ; then
+		cat "$SRC_DIR"/src2pkg-install-scripts/control.tmp > "$THIS_DEB/control"
+	# later add a routine which can edit an existing control file in the sources
+	fi
+	rm -f "$SRC_DIR"/src2pkg-install-scripts/control.tmp
+	cat "$SRC_DIR"/src2pkg-install-scripts/md5sums > "$THIS_DEB"/md5sums
+	rm -f "$SRC_DIR"/src2pkg-install-scripts/md5sums
+	
+	if [[ -f "$SRC_DIR"/src2pkg-install-scripts/conffiles ]] ; then
+		cat "$SRC_DIR"/src2pkg-install-scripts/conffiles > "$THIS_DEB/conffiles"
+		rm -f "$SRC_DIR"/src2pkg-install-scripts/conffiles
+	# later add a routine which can edit an existing control file in the sources
+	fi
+	
+	# install any existing preinst, postinst, prerm or postrm files
+	# or use generated ones  from $SRC_DIR/src2pkg-install-scripts
+	make_deb_install_scripts "$THIS_DEB"
+	
+	#create the control archive
+	(cd "$THIS_DEB" \
+		&& tar --exclude=data.tar.$COMP_EXT --owner=root --group=root -c -z -f control.tar.gz .
+	)
+	if [[ $? != 0 ]] ; then
+		echo $RED"FAILED! "$NORMAL
+		echo "Error creating Debian control tarball"
+		FAILED="Package creation in $FUNCNAME"
+	fi
+
+	( cd "$THIS_DEB" \
+		&& find * ! -name control.tar.gz -a ! -name data.tar.$COMP_EXT -a ! -name debian-binary -exec rm -rf {} \; &> /dev/null
+	)
+	
+	# create the package
+	ar rc "$PKG_DEST_DIR/$THIS_DEB.deb" "$THIS_DEB/debian-binary" "$THIS_DEB/control.tar.gz" "$THIS_DEB/data.tar.$COMP_EXT"
+	#ar rc "$PKG_DEST_DIR/$PKG_NAME" "$THIS_DEB/debian-binary" "$THIS_DEB/control.tar.gz" "$THIS_DEB/data.tar.$COMP_EXT"
+	
+	if [[ -f "$PKG_DEST_DIR/$THIS_DEB.deb" ]] ; then
+		# echo $BLUE"Package creation: "$GREEN"Done"$NORMAL
+		true
+	else
+		echo $RED"Failed!"$NORMAL
+		FAILED="Package creation in $FUNCNAME"
+	fi
+}
+
+# routine for handling debian package scripts
+make_deb_install_scripts() {
+	THIS_DEB=$1
+	# search for and install pre-existing scripts
+	for FILENAME in preinst postinst prerm postrm ; do
+		for SEARCH_PATH in "$CWD" "$CWD"/Resources "$PATCHES_DIR"/$NAME-patches "$CWD"/patches "$SRC_DIR"/debian ; do
+			if [[ -f "$SEARCH_PATH"/"${NAME}${TAG}"."$FILENAME" ]] ; then
+				echo $BLUE"Found ${NAME}${TAG}.$FILENAME - "$NORMAL"Copying to: $THIS_DEB/$FILENAME"
+				install -m0755 --owner=root "$SEARCH_PATH"/"${NAME}${TAG}"."$FILENAME" "$THIS_DEB"/"$FILENAME"
+				break ;
+			elif [[ -f "$SEARCH_PATH"/"$FILENAME" ]] ; then
+				echo $BLUE"Found $FILENAME - "$NORMAL"Copying to: $THIS_DEB/$FILENAME"
+				install -m0755 --owner=root "$SEARCH_PATH"/$FILENAME "$THIS_DEB"/"$FILENAME"
+				break ;
+			fi
+		done
+	done
+	# check if there are any generated scripts and use them unless a dedicated one has been installed above
+	if [[ -f "$SRC_DIR"/src2pkg-install-scripts/doinst.sh ]] && [[ ! -f "$THIS_DEB"/postinst ]] ; then
+		mv "$SRC_DIR"/src2pkg-install-scripts/doinst.sh "$THIS_DEB"/postinst
+		chmod 755 "$THIS_DEB"/postinst
+	fi
+	if [[ -f "$SRC_DIR"/src2pkg-install-scripts/$PKG_POSTINST ]] && [[ ! -f "$THIS_DEB"/postinst ]] ; then
+		mv "$SRC_DIR"/src2pkg-install-scripts/$PKG_POSTINST "$THIS_DEB"/postinst
+		chmod 755 "$THIS_DEB"/postinst
+	fi
+	if [[ -f "$SRC_DIR"/src2pkg-install-scripts/$PKG_POSTRM ]] && [[ ! -f "$THIS_DEB"/postrm ]] ; then
+		mv "$SRC_DIR"/src2pkg-install-scripts/$PKG_POSTRM  "$THIS_DEB"/postrm
+		chmod 755 "$THIS_DEB"/postrm
+	fi
+	if [[ -f "$SRC_DIR"/src2pkg-install-scripts/$PKG_PREINST ]] && [[ ! -f "$THIS_DEB"/preinst ]] ; then
+		mv "$SRC_DIR"/src2pkg-install-scripts/$PKG_PREINST "$THIS_DEB"/preinst
+		chmod 755 "$THIS_DEB"/preinst
+	fi
+	if [[ -f "$SRC_DIR"/src2pkg-install-scripts/$PKG_PRERM ]] && [[ ! -f "$THIS_DEB"/prerm ]] ; then
+		mv "$SRC_DIR"/src2pkg-install-scripts/$PKG_PRERM "$THIS_DEB"/prerm
+		chmod 755 "$THIS_DEB"/prerm
+	fi
+	# get rid of the install scripts which were moved to the sources
+	( cd $SRC_DIR && rm -rf src2pkg-install-scripts )
+}

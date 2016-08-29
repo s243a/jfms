@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<AppInfo>
+  <Summary>Manage sharing of Internet connection</Summary>
+  <About>
+    <Purpose>Manage sharing of Internet connection</Purpose>
+    <License>GPL: http://www.gnu.org/licenses/gpl.txt</License>
+    <Version>2.0 - Alan Agnew - 2009</Version>
+  </About>
+  <AppMenu>
+    <Item label="View ShareInternet 'readme' file" option="txt"/>
+    <Item label="Share Internet connection" option="start"/>
+    <Item label="Stop sharing Internet connection" option="stop"/>
+  </AppMenu>
+</AppInfo>

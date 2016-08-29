@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=src2pkg
+Exec=xterm -title "%c" -e 'echo Running src2pkg %U;/usr/bin/src2pkg-dnd %U;echo "Press <enter> to quit ...";read;'
+Icon=src2pkg
+Type=Application
+# Encoding=UTF-8
+Terminal=False

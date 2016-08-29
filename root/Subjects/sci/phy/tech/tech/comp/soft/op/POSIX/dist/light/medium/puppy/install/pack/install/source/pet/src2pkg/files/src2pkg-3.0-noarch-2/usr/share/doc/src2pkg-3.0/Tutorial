@@ -1,0 +1,341 @@
+
+	This file provides a quick tutorial which shows the
+	basic functionality of src2pkg, and methods for making
+	excellent packages -even if you know nothing about
+	compiling software, packaging 'standards' or scripting.
+	
+	
+	src2pkg can be used in one of two ways -either as a
+	command-line only tool, or to create and run 'build
+	scripts' for each package you want to create. Since
+	the use of src2pkg build scripts is a little more
+	in-depth, we'll first discuss using src2pkg as a
+	command-line-only tool.
+	
+	For this Tutorial, it is convenient to use an example
+	source archive -something which should compile on
+	any system, that doesn't take long to compile, doesn't
+	create many files in the package, and uses the most
+	common method of configuration and compiling. This
+	is summed up by the oft-repeated 'recipe' of unpacking
+	sources and then running './configure', 'make' and
+	'make install' in the toplevel of the sources. Such an
+	example can be found here:
+	http://distro.ibiblio.org/pub/linux/distributions/amigolinux/examples/which/which-2.20.tar.gz
+	
+	The program 'which' is a small command-line utility for
+	finding programs in your PATH.If you already
+	have some small source code you'd like to use
+	as an example, use that instead and substitute any
+	references below to the NAME 'which' with the name of
+	your chosen program, and any references to the VERSION '3.11'
+	with the version number of your chosen program.
+	
+	Note: By default, src2pkg unpacks sources and creates
+	a package tree as sub-directories under /tmp.
+	There are good reasons for doing, so, but it makes it
+	a little harder to keep an eye on what is happening
+	in the sources and to inspect the contents of the
+	finished package tree. For that reason, I suggest
+	using the src2pkg option '-CWD' so that these dirs
+	get created in the current working directory where
+	you run src2pkg from. That way you can easily check
+	the final package content, or look in the sources
+	without having to navigate all over the system. If
+	you want src2pkg to always create these directories
+	in the current working directory, open the file
+	/etc/src2pkg/src2pkg.conf with your favorite text
+	editor, scroll down to lines ~203-207 and uncomment
+	them -that is remove the '#' character at the beginning
+	of each line. If you do this, then you don't need
+	to use the '-CWD' option as shown below.
+	
+#####		Command-line usage of src2pkg		#####
+
+Step 1 ###
+	Create a new empty directory anywhere on your system
+	where you have read and write permissions. This can
+	be in your HOME directory or nearly anywhere else
+	except you shouldn't do this inside regular 'system'
+	directories. src2pkg will refuse to run if you are
+	trying to use it from some place it considers 'wrong'
+	or dangerous.
+	
+	In the case of this example we'll work in our $HOME
+	directory, so create the directory 'which' with such a
+	command:
+		'mkdir -p $HOME/which'
+
+Step 2 ###
+	Download the which-2.20.tar.gz source archive from the link
+	above and copy it into the directory $HOME/di. (Or use
+	the source code archive of your choice)
+	
+	cd into the subdirectory where the sources are located:
+		'cd $HOME/which'
+	or navigate to that location with your file manager if using
+	a GUI interface. If using a GUI, open a terminal-emulator
+	program there -usually this is done by right clicking on the
+	filer-manager window and choosing an option named something
+	like 'Open a terminal here' or 'xterm here'.
+	
+Step 3 ###
+	Create your first package by running the command (from the terminal):
+		'src2pkg -CWD which-2.20.tar.gz'
+	After a short time you should have a Slackware-type package
+	created there, named which-2.20-ARCH-1.tgz, where ARCH is your 
+	machine's architecture. src2pkg will show the full path to the
+	package when it finishes.
+	
+	If you want to create some other type of package -for
+	example a debian *.deb package, then tell src2pkg this by
+	adding this to the command-line: -DEB
+		'src2pkg -CWD -DEB which-2.20.tar.gz'
+	This will re-initiate the configuration and compilation of the
+	sources and now create a package named:
+	di_3.11-1_ARCH.deb
+	For other package types and the options needed to create them,
+	see the 'Technical' file in the documents, or run the command:
+		'src2pkg -hh'
+	which shows the advanced command-line options for src2pkg.
+	
+Step 4 ###
+	Use the SHIFT + PGUP/PGDN keys to scroll through the output
+	from src2pkg. It is colorized by default, which should make
+	it easier to read. Find the line which reads:
+	'Configuring sources using:'
+	followed by a line which shows the configuration options used
+	to compile the program. Notice that the --prefix option has
+	been automatically filled-in for you. By default, src2pkg
+	will use --prefix=/usr as we believe that 'best practices'
+	almost always install *packaged* software under /usr. But,
+	you can change this by passing the -p=?? or --pre_fix option
+	to src2pkg:
+	'src2pkg -CWD -p='/usr/local' which-2.20.tar.gz'
+	When finished, again scroll through the output from src2pkg
+	to see how the prefix option has changed.
+	
+	By far, the most commonly used command-line option with src2pkg
+	is the one used to pass extra options to the configure script.
+	This is usually something like '--disable-something' or similar.
+	
+	Notice that the option for the 'prefix' is kept separate from the
+	other configuration options by src2pkg. This is done to simplify
+	things -normally you shouldn't change the default prefix location
+	of '/usr' except in special cases. This means that 'prefix' can
+	be set for system-wide use -although it can still be set to
+	something else for individual packages. The so-called 'extra configs'
+	are used to pass other configuration options which are specific
+	to the package being built.
+	
+Step 5 (optional) ###
+	If you'd like to see how src2pkg can be used to directly download
+	sources and compile them for you, follow this step.
+	* Remove the example source archive we have been using.
+	* Make sure you are connected to the internet.
+	* Run src2pkg with the following command:
+	 src2pkg -CWD http://distro.ibiblio.org/pub/linux/distributions/amigolinux/examples/which/which-2.20.tar.gz
+	This will download the same archive from the same location, or you can
+	substitute the URL to any archive you wish to build.
+	Once downloaded, the file remains unless you remove it -they are
+	not downloaded each time -even if you run src2pkg using the full
+	URL as above. It will look to see if the file is already present
+	before trying to download it.
+	
+	
+#####		Using src2pkg build scripts	#####
+
+	src2pkg started out as a script-driven API, and still, many of the advanced
+	features or options of src2pkg are only available by using a src2pkg
+	build script. src2pkg can generate these build scripts for you, so
+	you don't have to be bothered with knowing all the API syntax or with
+	running a scripts many times just to debug them.
+	
+	There are three basic command-line options specifically for use with
+	src2pkg build scripts:
+	a. When run with the '-N' option, src2pkg will simply produce a basic
+	  build script with the name NAME.src2pkg.auto, where NAME is the name
+	  of the software package to be built. The command:
+	  
+	  src2pkg -CWD -N which-2.20.tar.gz
+	  
+	  will produce a src2pkg build script named 'di.src2pkg.auto'
+	  (see explanation of '*.src2pkg.auto' files below)
+	  It will also produce a generic description file for the package,
+	  name 'new.slack-desc'. (see explanation of 'new.*' files below)
+	  
+	b. When run with the '-A' option, src2pkg tries to compile the sources
+	  and build the package first -and then writes the build script just
+	  before finishing the package. In some cases this will produce a more
+	  complete build script than using the '-N' option because src2pkg
+	  has a chance to find out more about the sources since it de-compresses
+	  and *tries* to build them. But, no script will be written if the
+	  build fails. Actually, you can use the '-A' option after starting with
+	  the '-N' option and src2pkg will update the script if needed.
+	  Using the -A (AUTO_SCRIPT) option also turns on various internal
+	  functions which create any extra files needed for the package, and
+	  then copies these files to the current directory -with the same
+	  name as the 'real' file inside the package, but with a 'new.' prefix.
+	  
+	  * Note: Explanation of 'new.*' and '*.src2pkg.auto' files
+	  If you repeatedly run src2pkg using the -N and/or -A options, files
+	  with the 'new.' prefix and/or src2pkg build scripts with the name:
+	  NAME.src2pkg.auto will be generated each time, overwriting existing ones.
+	  The 'new.*' files have the same name as the file which was included inside
+	  the package -except for the 'new.' prefix. The -A option causes these
+	  files to be copied to the current directory so you can edit them if
+	  needed or wanted. But, to make them be used and to be permanent
+	  you must change the name of the file to remove the
+	  'new.' prefix. This tells src2pkg to use that file without changes and
+	  to not generate a new one. The main 'new.*' files which may be created
+	  by the -N option are the new.slack-desc and new.doinst.sh files (when
+	  creating Slackware-type packages).
+	  
+	  Similarly, the file NAME.src2pkg.auto will be re-created each time until
+	  you change the name of it to drop the '.auto' suffix. Again, this tells
+	  src2pkg to not 'clobber' it any more and not change it. Be sure to change
+	  the name before you start editing it if needed or wanted.
+	  Still, remember that src2pkg will *edit* the file, if needed, if you
+	  first generated it with -N and then have src2pkg execute it with the
+	  -A option added.
+	  
+	c. Once you have a build script, you can easily execute it as many times
+	  as needed with the simple command:
+	  src2pkg -CWD -X
+	  Using the '-X' option causes src2pkg to search the current directory
+	  and execute the first *.src2pkg or *.src2pkg.auto script it finds. This makes
+	  it handy to use without having to always type in the long name of the
+	  source archive, and you can still use most of the src2pkg command-line
+	  options in combination with '-X' -especially the options which use
+	  CAPITAL letters. For instance, the command:
+	  src2pkg -CWD -X -DEB -W
+	  tells src2pkg to run the first src2pkg script found in the current directory,
+	  to create a debian-type *.deb package, and to remove the temporary build
+	  files when finished( -W stands for Wipe Up).
+	  
+	You can also use src2pkg to create more complex build scripts which include
+	other options. For instance, if you want to build a source archive which
+	needs to have extra options passed to the configure script, you can pass the
+	options on the command-line and src2pkg will translate them into its' own
+	internal script syntax: You can demonstrate this with the following command:
+	src2pkg -N -e='--disable-cruft' which-2.20.tar.gz
+	Afterwards, open the file di.src2pkg.auto and you'll see this line near the top:
+	EXTRA_CONFIGS="--disable-cruft"
+	All the lowercase options available from the command-line can be easily written
+	into your scripts this way. This makes it really easy to keep a record of what
+	options were used to create the package. And the 'record' is also a brief
+	'recipe' for re-creating the package as many times as needed or wanted, simply
+	by running 'src2pkg -CWD -X'
+	
+	Even though src2pkg provides a large number of command-line options, they
+	are not nearly all the options available. Any of the other internal options
+	can be easily used in your scripts. The syntax is similar to that of EXTRA_CONFIGS.
+	That is, most internal options or features use CAPITAL letters which describe
+	what the option does. There are many such options available -so many that
+	I won't try to outline them in this short tutorial. You can find out about
+	many of them by looking through the file /usr/libexec/src2pkg/DEFINES. This
+	file is used to set up default behaviours when they are not already given
+	elsewhere (as in your *.src2pkg script). It is worth mentioning, that all
+	of these options can also be passed to src2pkg as 'environmental variables':
+	EXTRA_CONFIGS="--disable-cruft" src2pkg which-2.20.tar.gz
+	will do the same as this:
+	src2pkg -e='--disable-cruft' which-2.20.tar.gz
+	This means that it is easy to get src2pkg to 'play nice' with other scripts. For
+	instance a very short script can be written which will build a whole 'tree'
+	full of subdirectories with sources and build scripts with code like this
+	for dir in $(ls -1) , do
+		cd $dir && src2pkg -X
+		cd ..
+	done
+	
+	Even with all the things src2pkg 'knows' how to do, there will always be cases
+	where src2pkg doesn't know how to build certain sources, or you simply want it
+	to do something different than what it 'knows' to do -maybe you want to add
+	extra files to the package, remove files or even build extra sources and install
+	them in the same package 'tree'. For these cases, src2pkg still provides an
+	easy and reliable method for creating such build scripts. Nearly all the build
+	'instructions' which are part of the src2pkg API can be skipped by simply
+	commenting them out in the script. The only one you should never skip is the
+	first step 'pre_process'.
+	
+	To get a better idea of what we are talking about, open the example script which
+	you created above using src2pkg -or create one now with this command:
+	src2pkg -N which-2.20.tar.gz
+	Any basic src2pkg such as the script di.src2pkg.auto has only about 50 lines
+	and half of those are comments. The format is very clean and simple so that you
+	can easily see, at a glance, any changes that you make to the script.
+	At first, the only thing different between this example script and any other
+	is in the lines which begin with SOURCE_NAME, NAME and VERSION. Lines which begin
+	with the '#' character are comments and are ignored when the script is run. There
+	are a couple of other lines near the top which are commented and contain defaults
+	- like '# BUILD=1' and '# PRE_FIX=/usr'. Scroll down further to see the real 'meat'
+	of the script. At about line 20 there is an essential line like this:
+	. /usr/libexec/src2pkg/FUNCTIONS
+	This line 'sources' or 'reads in' the main code of src2pkg. In effect, it is just
+	like copying and pasting all the src2pkg code into your script. But, since there
+	are over 10,000 lines of that code, I think you'll agree that 'sourcing' it makes
+	for a much more readable script!
+	Just after that line you'll see this:
+	'# Execute the named packaging steps:'
+	What follows is the list of 16 instructions which are the basis of the src2pkg 'API'.
+	Each instruction is actually a shell 'function'. A function is simply a block of
+	code with a name. When the file /usr/libexec/src2pkg/FUNCTIONS gets 'sourced', all
+	the functions are read into memory, but are only executed when they are called
+	by name -as in the list inside the script.
+	
+	Customizing a script is really simple. If one of the functions doesn't do what
+	you need it to, you can simply comment it out by placing a '#' character at the
+	beginning of the line. And, if you need to carry out extra steps, like adding
+	an extra file to the package, you simply insert a line or two of code between
+	the regular functions at the correct spot. src2pkg makes this so easy that
+	even people who don't know a thing about coding bash scripts can easily learn
+	to customize the scripts. The syntax used is nearly exactly the same as what
+	you'd use to perform the operation from the command-line -following what you
+	already know how to do, or following the directions someone might give you on a
+	forum, for instance.
+	
+	Internally, src2pkg uses variables for all locations, so you don't even have
+	to code (or know) where the sources have been unpacked or where the package
+	'tree' is. Let's clarify these terms a little. Normally, there are really only
+	three locations you need to be aware of.
+	1. The first is the 'current working directory' 
+	-that is the location where you are running src2pkg from -the same place
+	where the NAME.src2pkg script is located. This is abbreviated in the
+	scripts like this: "$CWD"
+	2. The second location to be aware of is the location where the sources have
+	been unpacked before configuring and compiling them. This is called "$SRC_DIR"
+	which means 'source directory'. The actual location where sources get unpacked
+	is configurable by editing the file /etc/src2pkg/src2pkg.conf. By default,
+	sources get unpacked under the /tmp directory, but $SRC_DIR includes the full
+	path to the sources for *just these sources*. So, in the case of our example,
+	if you write this line in your script (anywhere below the pre_process function):
+	echo "Sources are in $SRC_DIR"
+	when the script is run it will show this:
+	"Sources are in /tmp/which-2.20-src-1" (or "Sources are in /path/to/SRC_DIR"). The
+	name is composed of the main path /tmp (or CWD), plus the NAME and VERSION
+	of the sources. The 'src' part is to distinguish the name from any other
+	directories found there -including the package tree. The last part '1' is
+	the BUILD (release) number for the package.
+	3. The third location to be aware of is the 'package tree' which has been
+	mentioned several times. This is a temporary location where the various
+	files which will be included in the final package get assembled. Once all
+	the package content is in the 'package tree', the contents are compressed
+	into the final installable package. Again, the package tree is represented
+	by a variable, called $PKG_DIR. And again this location can be configured.
+	
+	But from within your scripts you never have to refer to the absolute (real)
+	location of these directories -you simply use the variable names and bash
+	substitutes the real location -wherever that is at the time. This is handy
+	beacuse it means you don't have to edit your script in order to use it
+	from anywhere on your system -even after changing the default locations
+	where sources get unpacked or packages get assembled. It also means you
+	can share your scripts with others and they will also be able to use them
+	without having to edit all the paths.
+	
+	Several example build scripts are included in the src2pkg documentation.
+	Study them to get more ideas of how to accomplish any task needed for
+	whatever package you want to build. Some of the examples are quite complex,
+	but the README.examples file in the examples directory contains some notes
+	about each example, making to easier to find any specific information
+	you might be needing.
+	

@@ -1,0 +1,1634 @@
+## /usr/libexec/src2pkg/FUNCTIONS
+## src2pkg - Copyright 2005-2013 Gilbert Ashley <amigo@ibilio.org>
+## src2pkg is free software released under the GNU General Public License Version 2
+
+# How were we called?
+EXEC_NAME="${0##*/}"
+EXEC_PATH=${0}
+
+# Where were we called from? CWD
+! [[ "$CWD" ]] && CWD="$(pwd)" #&& export CWD
+
+# Setting AUTORIZE_USERS to YES only allows users who are members
+# of the src2pkg group to run src2pkg. root user is not authorized
+if [[ $AUTHORIZE_USERS = "YES" ]] && [[ $EUID -ne 0 ]] ; then
+	if grep src2pkg /etc/group |grep $USER &> /dev/null ; then
+		echo $RED"FAILURE!"$NORMAL" Sorry, you are not allowed to use src2pkg."
+		echo "Ask your administrator for more details."
+	fi
+fi
+
+# Users can have a personal $HOME/.src2pkg.conf file for their own settings.  If AUTHORIZE_USER_CONF
+# is set to YES, only users who are members of the scr2pkg group will be allowed to use a personal conf file.
+# The personal conf file is read first and then the GLOBAL_CONF. This allows a system administrator a
+# chance to override any settings in the users' personal conf file, if needed or wanted.
+if ! [[ $HAVE_CONF ]] ; then
+# when using the src2pkg wrapper, the conf file(s) get read early. Since they would get read
+# again when/if a script gets sourced, HAVE_CONF is used to avoid reading them a second time.
+  if [[ -e "$HOME"/.src2pkg.conf ]] && [[ $AUTHORIZE_USER_CONF = "YES" ]] && [[ $EUID -ne 0 ]] ; then
+	if grep src2pkg /etc/group |grep $USER &> /dev/null ; then
+		if [[ -e "$HOME"/.src2pkg.conf ]] ; then
+		  [ "$DEBUG" -o "$QUIET" = "NO" ] && echo $BLUE"Found personal src2pkg.conf - "$NORMAL"Reading $HOME/.src2pkg.conf"
+		  . "$HOME"/.src2pkg.conf
+		  if [[ $? != 0 ]] ; then
+			echo $RED"Failed!"$NORMAL"Error returned while reading $HOME/.src2pkg.conf"
+			echo "Please check for bad syntax or illegal commands."
+			exit
+		  fi
+		fi
+	else
+		echo $YELLOW"Warning!"$NORMAL" You are not authorized to use a .src2pkg.conf file in your HOME directory."
+		echo "You must be included in the 'src2pkg' group in order to use a $HOME/.src2pkg.conf file."
+	fi
+  else
+	if [[ -e "$HOME"/.src2pkg.conf ]] ; then
+		[ "$DEBUG" -o "$QUIET" = "NO" ] && echo $BLUE"Found personal src2pkg.conf - "$NORMAL"Reading $HOME/.src2pkg.conf"
+		. "$HOME"/.src2pkg.conf
+		if [[ $? != 0 ]] ; then
+			echo $RED"Failed!"$NORMAL"Error returned while reading $HOME/.src2pkg.conf"
+			echo "Please check for bad syntax or illegal commands."
+			exit
+		fi
+	fi
+  fi
+
+# If GLOBAL_CONF is not specified, look for the default src2pkg.conf file
+  if [[ "$GLOBAL_CONF" != "" ]] ; then
+	# if the GLOBAL_CONF is specified, make sure the user is root -otherwise ignore the request
+	if [[ "$EUID" = 0 ]] ; then
+		if [[ -e $GLOBAL_CONF ]] ; then
+		  [ "$DEBUG" -o "$QUIET" = "NO" ] && echo $BLUE"Found GLOBAL_CONF file - "$NORMAL"Reading $GLOBAL_CONF"
+		  . $GLOBAL_CONF
+		  if [[ $? != 0 ]] ; then
+			echo $RED"Failed!"$NORMAL"Error returned while reading $GLOBAL_CONF"
+			echo "Please check for bad syntax or illegal commands."
+			exit
+		  fi
+		else
+			echo $YELLOW"Notice! "$NORMAL"$GLOBAL_CONF not found."
+		fi
+	else
+		echo $YELLOW"Warning! "$NORMAL"Only root can override the GLOBAL_CONF variable!"
+		GLOBAL_CONF="/etc/src2pkg/src2pkg.conf"
+		if [[ -e $GLOBAL_CONF ]] ; then
+		  [ "$DEBUG" -o "$QUIET" = "NO" ] && echo $BLUE"Using default global src2pkg.conf - "$NORMAL"Reading $GLOBAL_CONF"
+		  . $GLOBAL_CONF
+		  if [[ $? != 0 ]] ; then
+			echo $RED"Failed!"$NORMAL"Error returned while reading $GLOBAL_CONF"
+			echo "Please check for bad syntax or illegal commands."
+			exit
+		  fi
+		fi
+	fi
+  else
+	GLOBAL_CONF="/etc/src2pkg/src2pkg.conf"
+	if [[ -e $GLOBAL_CONF ]] ; then
+	  [ "$DEBUG" -o "$QUIET" = "NO" ] && echo $BLUE"Found global src2pkg.conf - "$NORMAL"Reading $GLOBAL_CONF"
+	  . $GLOBAL_CONF
+	  if [[ $? != 0 ]] ; then
+		echo $RED"Failed!"$NORMAL"Error returned while reading $GLOBAL_CONF"
+		echo "Please check for bad syntax or illegal commands."
+		exit
+	  fi
+	fi
+  fi
+fi
+# You could also keep more than one configuration file as separate 'profiles'
+# and use the  GLOBAL_CONF variable to control their use. This could be
+# used in much the same way as gentoo 'USE' or conary 'FLAVOR',
+# allowing you to set a group of global variables for particular ARCH's, etc
+
+# Clear all aliases which might interfere with src2pkg functionality
+unalias -a
+
+# This variable allows you to run src2pkg from a non-standard location, if
+# needed. Then just make sure that DEFINES, FUNCTIONS and all the
+# separate function files are in the same directory. This would allow you
+# to run src2pkg from your $HOME directory or can be used to 'bootstrap'
+# src2pkg with itself.
+! [[ $SRC2PKG_LIBDIR ]] && SRC2PKG_LIBDIR=/usr/libexec/src2pkg
+
+# having this as a variable allows for possible installation in another location
+! [[ $SRC2PKG_BINDIR ]] && SRC2PKG_BINDIR=/usr/libexec/src2pkg/bin
+# add this path to the users' PATH. This must go in front of the normal PATH 
+export PATH=$SRC2PKG_BINDIR:$PATH
+
+# Load function for eliminating whitespace early:
+white_out() {
+  while read GAGA ; do
+    echo $GAGA
+  done
+}
+
+# Difficult output from things like 'tar -t' or 'df' can be
+# very slowly cleaned up with this nasty bit of code :-)
+scrunch_difficult_white() {
+	while : ; do
+		case $LINE in
+			# double spaces
+			*'  '*) LINE=$(echo ${LINE//  / }) ;;
+			*) 
+				# line begins with a space
+				case $LINE in ' '*) LINE=$(echo $LINE:1) ;; esac
+				# line ends with a space
+				case $LINE in *' ') 
+					LINE=$(echo ${LINE:0:$((${#LINE}-1))}) ;; esac
+				echo $LINE ; break
+			;;
+		esac
+	done
+}
+
+## The DEFINES file sets some very important default variables which are needed for
+## the individual functions. These variables set up the  basic default behaviour of
+## src2pkg. Advanced users could conceivably change some of the basic defaults
+## by editing the DEFINES file. However, a better way is to put any permanent
+## defaults in the src2pkg.conf file using the same syntax as is used in DEFINES 
+## The DEFINES file is kept separate so that no one should need to edit this
+## FUNCTIONS file or any of the individual function files sourced by this file.
+## The DEFINES file must be present for src2pkg to run correctly.
+! [[ $DEFINES ]] && DEFINES=$SRC2PKG_LIBDIR/DEFINES
+if [[ -e $DEFINES ]] ; then
+ source $DEFINES
+else
+ echo "Warning! DEFINES file not found."
+ FAILED="NO DEFINES FILE"
+ exit 0
+fi
+
+# export this as it may speed up sorting routines
+export LANG=C
+export LC_ALL=C
+
+## This FUNCTIONS file used to contain *all* the src2pkg code except for
+## what is found in the DEFINES file. But, since the code base has become
+## quite large, since src2pkg-1.9 the code has been split up into separate
+## files. This should make it easier to read and understand for those who
+## are interested and makes it easier to work on for myself (and contributors).
+## src2pkg is based on shell functions, each of which performs the
+## steps associated with one step of preparing and building a package.
+## So, each file mostly contains all the code which is used by each of the 16
+## src2pkg package-building instruction or steps. The names of each file
+## are the same as the name of the src2pkg function, preceeded by a number
+## which makes them easier to follow and to find specific parts of the code.
+## The only exception to this is for the fake_install function. Since src2pkg
+## can use any one of 3 different methods for creating the package content
+## and the code is rather long, each of these methods is contained in a
+## separate file. the file 08-fake_install contains the main function and
+## the files 08A*, 08B* and 08C* contain the sub-functions.
+## Another extra file has been added: 14A-last_minute_details contains
+## a bunch of related code which is run just before package creation. The
+## routines are called at the end of make_doinst, so there is still a chance
+## to insert manual code in a src2pkg script after these routines are run,
+## but before actual package creation takes place in make_package
+
+## 'source' each of the smaller functions file to read in the code
+. $SRC2PKG_LIBDIR/01-pre_process
+. $SRC2PKG_LIBDIR/02-find_source
+. $SRC2PKG_LIBDIR/03-make_dirs
+. $SRC2PKG_LIBDIR/04-unpack_source
+. $SRC2PKG_LIBDIR/05-fix_source_perms
+. $SRC2PKG_LIBDIR/06-configure_source
+. $SRC2PKG_LIBDIR/07-compile_source
+. $SRC2PKG_LIBDIR/08-fake_install
+# these are now read in as-needed from 08-fake_install
+# . $SRC2PKG_LIBDIR/08A-destdir_install
+# . $SRC2PKG_LIBDIR/08B-jail_root_install
+# . $SRC2PKG_LIBDIR/08C-real_root_install
+# . $SRC2PKG_LIBDIR/08D-union_root_install
+
+. $SRC2PKG_LIBDIR/09-fix_pkg_perms
+. $SRC2PKG_LIBDIR/10-strip_bins
+. $SRC2PKG_LIBDIR/11-create_docs
+. $SRC2PKG_LIBDIR/12-compress_man_pages
+. $SRC2PKG_LIBDIR/13-make_description
+. $SRC2PKG_LIBDIR/14-make_doinst
+. $SRC2PKG_LIBDIR/14A-last_minute_details
+. $SRC2PKG_LIBDIR/15-make_package
+. $SRC2PKG_LIBDIR/16-post_process
+
+## None of the code in the above files is actually executed until the functions are 
+## called by the src2pkg program or from a src2pkg script. A standard src2pkg script
+## calls the 16 steps in order as does the src2pkg command-line program. The program
+## 'trackinstall' which is included with src2pkg is similar to checkinstall. Since it
+## works with already decompressed and (mostly) compiled sources, it does not need
+## all the steps. So only a partial list of them is called by trackinstall. Some of the src2pkg
+## command-line options also use only a partial list of the functions.
+
+### When no special code is needed and all processing steps can be succesfully run when
+###  building a package, it is possible to substitute the list of 16 steps (the functions) with
+### a single 'short-cut' function which is named do_all_processes.
+### The function do_all_processes summarizes the default execution order into a single
+### command. Showing this here provides an overview of the standard list of commands.
+### Most of the functions in this list also call other internal functions. But this list is the
+### list used for a standard build and combined with the variables constitutes an API.
+
+###  Function do_all_processes ########################################
+do_all_processes() {
+# This is exactly the way the functions are written in a standard src2pkg script:
+pre_process
+find_source
+make_dirs
+unpack_source
+fix_source_perms
+configure_source
+compile_source
+fake_install
+fix_pkg_perms
+strip_bins
+create_docs
+compress_man_pages
+make_description
+make_doinst
+make_package
+post_process
+}
+### End Function do_all_processes #######################################
+
+### Processing Functions
+## As mentioned above, the indiviudal processing functions which each perform a separate
+## step in the package-making process have been split out into individual files. Some of the
+## main functions which correspond to the list above also call sub-functions. Most of these
+## sub-functions will be found in the same file they are called from. So, the only thing left
+## in this file are a few small general functions which are called by various other functions.
+
+## General Functions used internally
+## User cancelled at a safe place, so don't warn
+safe_user_cancel() {
+ USER_CANCELLED=1
+ ERROR=2
+}
+
+user_cancel() {
+  echo
+  FAILED="CANCELLED"
+  case $AUDIO_NOTIFICATION in
+	BEEP)	echo -ne '\a';sleep .5;echo -ne '\a' ;;
+	SAY)
+		case $TTS_ENGINE in
+			flite) flite "Build cancelled" 2> /dev/null ;;
+			festival) echo "Build cancelled" |festival --tts 2> /dev/null ;;
+		esac
+		;;
+	PLAY)	play /usr/share/src2pkg/sounds/ouch &> /dev/null ;;
+  esac
+  exit 2
+}
+
+# this gets used by 08B-jail_root_install or 08C-real_root_install
+emergency_restore() {
+echo "   Please don't interrupt while creating content!"
+	rm -rf "$BACKUP_DIR"/$NAME-$VERSION-backup-$BUILD$SIG/BACKUP/no-backup &> /dev/null
+	ls "$BACKUP_DIR"/$NAME-$VERSION-backup-$BUILD$SIG/* &> /dev/null
+	if [[ $? -eq 0 ]] ; then
+		if [[ $(ls "$BACKUP_DIR"/$NAME-$VERSION-backup-$BUILD$SIG/*) != "" ]] ; then
+			cd "$BACKUP_DIR"/$NAME-$VERSION-backup-$BUILD$SIG/BACKUP
+			echo "   Peforming emergency restoration of backup files!"
+			${TAR} -cpf - . | ${TAR} -f - -xvpC / # &> /dev/null
+			RETVAL=$?
+			# INSTW_ROOTPATH must be unset or "$BACKUP_DIR" is un-removeable
+			unset INSTW_ROOTPATH
+			unset LD_PRELOAD
+			if [[ $RETVAL -eq 0 ]] ; then
+				echo $CYAN"   Notice - "$NORMAL"Backup file restoration "$GREEN"Okay"$NORMAL
+				if ! [[ $DEBUG ]] ; then
+					# rm -rf "$BACKUP_DIR"/$NAME-$VERSION-backup-$BUILD$SIG
+					( cd "$BACKUP_DIR" && rm -rf "$BACKUP_DIR_NAME" )
+				fi
+			else
+				echo $CYAN"   Notice - "$NORMAL"Backup file restoration "$RED"Failed!"$NORMAL
+				echo "   Backup files are preserved in BACKUP_DIR/$NAME-$VERSION-backup-$BUILD$SIG"
+			fi
+		fi
+	fi
+	unset INSTW_LOGFILE
+	rm -f $CWD/FILELIST.tmp
+}
+
+## User cancelled at a 'sensitive' spot, so scold them!
+trap_int() {
+  echo
+  echo $RED"*** OUCH!!! ***"$NORMAL
+  emergency_restore
+  FAILED="CANCELLED"
+  case $AUDIO_NOTIFICATION in
+	BEEP)	echo -ne '\a';sleep .5;echo -ne '\a' ;;
+	SAY)
+		case $TTS_ENGINE in
+			flite) flite "Dangerous cancellation" 2> /dev/null ;;
+			festival) echo "Dangerous cancellation" |festival --tts 2> /dev/null ;;
+		esac
+		;;
+	PLAY)	play /usr/share/src2pkg/sounds/ouch &> /dev/null ;;
+  esac
+  exit 2
+}
+
+make_simple_desc() {
+echo $BLUE"Creating new.$PKG_DESC file - "$NORMAL
+echo "Edit, if needed and rename to $PKG_DESC for use."
+
+cat /dev/null > "$CWD"/new.$PKG_DESC
+# Align the text formatting guide starting at ':' (plus one space)
+namelen=${#NAME}
+offset=$(( $namelen + 1 ))
+spaces=0
+echo -n '#' >> "$CWD"/new.$PKG_DESC
+while [[ $spaces -lt $offset ]] ; do
+	echo -n ' ' >> "$CWD"/new.$PKG_DESC
+	(( spaces++ ))
+done
+
+# create a header for the file with a guide for formatting the text
+# HANDY_RULER_TEXT="|-------------Use this guide to format your text with--------------|"
+header_len=${#HANDY_RULER_TEXT}
+padding_len=$(( $DESC_WRAP_LENGTH - $header_len ))
+leading_pad=$(( $padding_len / 2 ))
+trailing_pad=$(( $padding_len - $leading_pad ))
+
+echo -n '|' >> "$CWD"/new.$PKG_DESC
+chars=1
+while [[ $chars -lt $leading_pad ]] ; do
+	echo -n '-' >> "$CWD"/new.$PKG_DESC
+	chars=$(( $chars + 1 ))
+done
+echo -n $HANDY_RULER_TEXT >> "$CWD"/new.$PKG_DESC
+chars=1
+while [[ $chars -lt $trailing_pad ]] ; do
+	echo -n '-' >> "$CWD"/new.$PKG_DESC
+	chars=$(( $chars + 1 ))
+done
+echo '|' >> "$CWD"/new.$PKG_DESC
+
+cat >> "$CWD"/new.$PKG_DESC << END 
+$NAME: $BLURB_1
+$NAME: $BLURB_2
+$NAME: $BLURB_3
+$NAME: $BLURB_4
+$NAME: $BLURB_5
+$NAME: $BLURB_6
+$NAME: $BLURB_7
+$NAME: $BLURB_8
+$NAME: $BLURB_9
+$NAME: $BLURB_10
+$NAME: $BLURB_11
+END
+if [[ $BLURB_12 ]] ; then
+	echo $NAME: ${BLURB_12} >> "$CWD"/new.$PKG_DESC
+fi
+if [[ $BLURB_13 ]] ; then
+	echo $NAME: ${BLURB_13} >> "$CWD"/new.$PKG_DESC
+fi
+}
+
+write_src2pkg_script() {
+echo $BLUE"Writing build script - "$NORMAL"$NAME.src2pkg.auto in the current directory."
+# src2pkg.auto
+echo "#!/bin/bash" > "$CWD"/$NAME.src2pkg.auto
+echo "## src2pkg script for: 	$NAME" >> "$CWD"/$NAME.src2pkg.auto
+echo "## Auto-generated by src2pkg-$SRC2PKG_VERSION" >> "$CWD"/$NAME.src2pkg.auto
+echo "## src2pkg - Copyright 2005-2013 Gilbert Ashley <amigo@ibilio.org>" >> "$CWD"/$NAME.src2pkg.auto
+#echo "## Full package name: $SHORT_NAME.tgz" >> $CWD/$NAME.src2pkg.auto
+echo "" >> "$CWD"/$NAME.src2pkg.auto
+if [[ "$SOURCE_URL" ]] ; then
+	echo "SOURCE_URL='$SOURCE_URL'" >> "$CWD"/$NAME.src2pkg.auto
+	echo "# SOURCE_NAME='$SOURCE_NAME'" >> "$CWD"/$NAME.src2pkg.auto
+elif [[ "$SOURCE_NAME" ]] ; then
+	echo "SOURCE_NAME='$SOURCE_NAME'" >> "$CWD"/$NAME.src2pkg.auto
+fi
+if [[ "$ALT_NAME" != "" ]] ;then
+	echo "ALT_NAME='$ALT_NAME'" >> "$CWD"/$NAME.src2pkg.auto
+else
+	echo "NAME='$NAME'   # Use ALT_NAME to override guessed value" >> "$CWD"/$NAME.src2pkg.auto
+fi
+if [[ "$ALT_VERSION" != "" ]] ;then
+	echo "ALT_VERSION='$ALT_VERSION'" >> "$CWD"/$NAME.src2pkg.auto
+else
+	echo "VERSION='$VERSION'   # Use ALT_VERSION to override guessed value" >> "$CWD"/$NAME.src2pkg.auto
+fi
+[[ $SRC_SUFFIX ]] && echo "SRC_SUFFIX='$SRC_SUFFIX'" >> "$CWD"/$NAME.src2pkg.auto
+#echo "# ARCH='$ARCH'" >> "$CWD"/$NAME.src2pkg.auto
+
+if [[ "$ARCH" = 'noarch' ]] ; then
+	echo "ARCH='noarch'" >> "$CWD"/$NAME.src2pkg.auto
+else
+	echo "# ARCH=''" >> "$CWD"/$NAME.src2pkg.auto
+fi
+if [[ "$BUILD" = "1" ]] ; then
+	echo "# BUILD='$BUILD'" >> "$CWD"/$NAME.src2pkg.auto
+else
+	echo "BUILD='$BUILD'" >> "$CWD"/$NAME.src2pkg.auto
+fi
+
+if [[ "$WRITE_MACHINE_FLAGS" = "1" ]] ; then
+	echo "MACHINE=\"${MACHINE}\"" >> "$CWD"/$NAME.src2pkg.auto
+fi
+if [[ "$WRITE_LIBDIRSUFFIX" = "1" ]] ; then
+	echo "LIBDIRSUFFIX=\"$LIBDIRSUFFIX\"" >> "$CWD"/$NAME.src2pkg.auto
+fi
+
+# echo BUILD='${BUILD:-'$BUILD'}' >> "$CWD"/$NAME.src2pkg.auto
+if [[ "$PRE_FIX" = "usr" ]] || [[ "$PRE_FIX" = "/usr" ]] ; then
+	echo "# PRE_FIX='$PRE_FIX'" >> "$CWD"/$NAME.src2pkg.auto
+else
+	echo "PRE_FIX='$PRE_FIX'" >> "$CWD"/$NAME.src2pkg.auto
+fi
+echo "# Any extra options go here:" >> "$CWD"/$NAME.src2pkg.auto
+#[[ "$STD_CONFIGS" != "" ]] && echo "STD_CONFIGS='$STD_CONFIGS'" >> "$CWD"/$NAME.src2pkg.auto
+[[ $WRITE_CONFIG_COMMAND ]] && echo "CONFIG_COMMAND='$CONFIG_COMMAND'" >> "$CWD"/$NAME.src2pkg.auto
+if [[ "$EXTRA_CONFIGS" != "" ]] ; then
+	echo "EXTRA_CONFIGS=\"${EXTRA_CONFIGS}\"" >> "$CWD"/$NAME.src2pkg.auto
+else
+	echo "# EXTRA_CONFIGS=\"${EXTRA_CONFIGS}\"" >> "$CWD"/$NAME.src2pkg.auto
+fi
+#if [[ $WRITE_FLAGS ]] ; then
+#	echo "STD_FLAGS='$STD_FLAGS'" >> "$CWD"/$NAME.src2pkg.auto
+#else
+#	echo "# STD_FLAGS='$STD_FLAGS'" >> "$CWD"/$NAME.src2pkg.auto
+#fi
+[[ $WRITE_INSTALL_TYPE ]] && echo "INSTALL_TYPE='$INSTALL_TYPE'" >> "$CWD"/$NAME.src2pkg.auto
+[[ $SHELL_INSTALL ]] && echo "SHELL_INSTALL='YES'" >> "$CWD"/$NAME.src2pkg.auto
+if [[ $NEW_BUILD ]] || [[ $CONVERT_SCRIPT = 1 ]] ; then
+	[[ $AUTO_PATCH != "NO" ]] && get_patch_list
+fi
+[[ "$PATCHLIST" != "" ]] && echo "PATCHLIST='${PATCHLIST}'" >> "$CWD"/$NAME.src2pkg.auto
+[ "$MAKEFILE" != "" -a "$MAKEFILE" != "Makefile" ] && echo "MAKEFILE='$MAKEFILE'" >> "$CWD"/$NAME.src2pkg.auto
+[ "$MAKE_COMMAND" != "" -a "$MAKE_COMMAND" != "make" ] && echo "MAKE_COMMAND='$MAKE_COMMAND'" >> "$CWD"/$NAME.src2pkg.auto
+[ "$INSTALL_LINE" != "" -a "$INSTALL_LINE" != "make install" ] && echo "INSTALL_LINE='$INSTALL_LINE'" >> "$CWD"/$NAME.src2pkg.auto
+if [[ $FUNNY_SUBDIR ]] ; then
+	echo "CONFIG_SUBDIR='$FUNNY_SUBDIR'" >> "$CWD"/$NAME.src2pkg.auto
+elif [[ $CONFIG_SUBDIR ]] && [[ $NEW_BUILD ]] ; then
+	echo "CONFIG_SUBDIR='$CONFIG_SUBDIR'" >> "$CWD"/$NAME.src2pkg.auto
+fi
+[[ "$DOCLIST" ]] && echo "DOCLIST='$DOCLIST'" >> "$CWD"/$NAME.src2pkg.auto
+[[ "$USE_OBJ_DIR" = "YES" ]] && echo "USE_OBJ_DIR='YES'" >> "$CWD"/$NAME.src2pkg.auto
+[[ $AUTO_PATCH = "NO" ]] && echo "AUTO_PATCH='NO'" >> "$CWD"/$NAME.src2pkg.auto
+[[ $CORRECT_PERMS = "NO" ]] && echo "CORRECT_PERMS='NO'" >> "$CWD"/$NAME.src2pkg.auto
+[[ $EXTRA_SOURCES ]] && echo "EXTRA_SOURCES='$EXTRA_SOURCES'" >> "$CWD"/$NAME.src2pkg.auto
+echo "" >> "$CWD"/$NAME.src2pkg.auto
+echo "# Optional function replaces configure_source, compile_source, fake_install" >> "$CWD"/$NAME.src2pkg.auto
+echo "# To use, uncomment and write/paste CODE between the {} brackets." >> "$CWD"/$NAME.src2pkg.auto
+echo "# build() { CODE }" >> "$CWD"/$NAME.src2pkg.auto
+echo "" >> "$CWD"/$NAME.src2pkg.auto
+echo "# Get the functions and configs" >> "$CWD"/$NAME.src2pkg.auto
+echo ". /usr/libexec/src2pkg/FUNCTIONS ;" >> "$CWD"/$NAME.src2pkg.auto
+echo "" >> "$CWD"/$NAME.src2pkg.auto
+echo "# Execute the named packaging steps:" >> "$CWD"/$NAME.src2pkg.auto
+#echo "" >> "$CWD"/$NAME.src2pkg.auto
+cat >> "$CWD"/$NAME.src2pkg.auto << EOF
+pre_process
+find_source
+make_dirs
+unpack_source
+fix_source_perms
+configure_source #
+compile_source   # If used, the 'build' function replaces these 3
+fake_install     #
+fix_pkg_perms
+strip_bins
+create_docs
+compress_man_pages
+make_description
+make_doinst
+make_package
+post_process
+EOF
+
+echo "" >> "$CWD"/$NAME.src2pkg.auto
+# echo "# src2pkg - Copyright 2005-2013  Gilbert Ashley <amigo@ibiblio.org>" >> "$CWD"/$NAME.src2pkg.auto
+echo "## See the documentation for more help and examples. Below are some of" >> "$CWD"/$NAME.src2pkg.auto
+echo "# the most common Extras and Options for easy cut-and-paste use." >> "$CWD"/$NAME.src2pkg.auto
+echo "# DOCLIST='' PATCHLIST='' INSTALL_TYPE=''" >> "$CWD"/$NAME.src2pkg.auto
+echo "# CONFIG_COMMAND='' MAKE_COMMAND='' INSTALL_LINE='' " >> "$CWD"/$NAME.src2pkg.auto
+#echo "# SHELL_INSTALL='YES' CORRECT_PERMS='NO'" >> "$CWD"/$NAME.src2pkg.auto
+echo "# When editing src2pkg scripts to add custom code, use these variables" >> "$CWD"/$NAME.src2pkg.auto
+echo "# to refer to the current directory, the sources or the package tree:" >> "$CWD"/$NAME.src2pkg.auto
+echo "# \$CWD (current directory), \$SRC_DIR (sources), \$PKG_DIR (package tree)" >> "$CWD"/$NAME.src2pkg.auto
+echo "# Other commonly-used directories include: \$DOC_DIR (document directory)" >> "$CWD"/$NAME.src2pkg.auto
+echo "# \$MAN_DIR (man-page directory) \$DATA_DIR (shared-data directory)" >> "$CWD"/$NAME.src2pkg.auto
+#echo "" >> "$CWD"/$NAME.src2pkg.auto
+}
+
+unset_vars() {
+# this function 'blanks' (unsets) most of the common src2pkg
+# internal variables which get derived when pre_process is run
+[[ $DEBUG ]] && echo "Resetting variables...!!!"
+BIN_DIR=''
+SBIN_DIR=''
+LIBEXEC_DIR=''
+SYSCONF_DIR=''
+SHAREDSTATE_DIR=''
+LOCALSTATE_DIR=''
+LIB_DIR=''
+INCLUDE_DIR=''
+DATA_DIR=''
+INFO_DIR=''
+LOCALE_DIR=''
+MAN_DIR=''
+DOC_DIR=''
+GAMESBIN_DIR=''
+GAMESDATA_DIR=''
+PIXMAPS_DIR=''
+ICONS_DIR=''
+# these are the obvious ones that need to be reset
+SOURCE_URL=''
+SOURCE_NAME=''
+SOURCE=''
+NAME=''
+VERSION=''
+ALT_NAME=''
+ALT_VERSION=''
+ORIG_NAME=''
+ORIG_VERSION=''
+SRC_DIR=''
+SRC_DIR_NAME=''
+PKG_DIR=''
+PKG_DIR_NAME=''
+OBJ_DIR=''
+OBJ_DIR_NAME=''
+# these get set later, in configure_source
+CONFIG_DIR=''
+CONFIG_SUBDIR=''
+CONFIG_COMMAND=''
+MAKE_COMMAND=''
+VERIFY=''
+}
+
+# this function is called for cleaning up/fixing library paths
+# in pkgconfig *.pc files and libtool *.la files
+sanitize_lib_paths() {
+	FILE=$1
+	: > $FILE.tmp
+	while read LINE ; do
+		case $LINE in
+			libdir=\$\{exec_prefix\}*|libdir=*) PART1=${LINE%%/*} ; PART2=${LINE#*/}
+				case $LIBDIRSUFFIX in
+					64) case $PART2 in
+							*lib64*) echo "$LINE" >> $FILE.tmp ;;
+							*lib32*) echo "$PART1"/"${PART2/32/64}" >> $FILE.tmp ;;
+							*) echo "$PART1"/"${PART2/lib/lib64}" >> $FILE.tmp ;;
+						esac ;;
+					32) case $PART2 in
+							*lib32*) echo $LINE >> $FILE.tmp ;;
+							*lib64*) echo "$PART1"/"${PART2/lib64/lib32}" >> $FILE.tmp ;;
+							*) echo "$PART1"/"${PART2/lib/lib32}" >> $FILE.tmp ;;
+						esac ;;
+					"") case $PART2 in
+							*64*) echo "$PART1"/"${PART2/lib64/lib}" >> $FILE.tmp ;;
+							*32*) echo "$PART1"/"${PART2/lib32/lib}" >> $FILE.tmp ;;
+							*) echo "${LINE}" >> $FILE.tmp ;;
+						esac ;;
+					*) case $PART2 in
+							*$LIBDIRSUFFIX*) echo "${LINE}" >> $FILE.tmp ;;
+							*64*) echo "$PART1"/"${PART2/lib64/lib${LIBDIRSUFFIX}}" >> $FILE.tmp ;;
+							*32*) echo "$PART1"/"${PART2/lib32/lib${LIBDIRSUFFIX}}" >> $FILE.tmp ;;
+							*) echo "$PART1"/"${PART2/lib/lib${LIBDIRSUFFIX}}" >> $FILE.tmp ;;
+						esac ;;
+				esac
+			;;
+			# remove LDFLAGS which gets written to *.pc files otherwise
+			*$LDLFAGS*) echo ${LINE/$LDFLAGS/} >> $FILE.tmp ;;
+			*) echo ${LINE} >> $FILE.tmp ;;
+		esac
+	done < $FILE
+	mv $FILE.tmp $FILE
+}
+
+# write basic info about the package and packager to PKG_META
+write_pkg_info() {
+	THIS_PACKAGE="$1"
+	mkdir -p "$THIS_PACKAGE"/install
+	echo "# Package: ${THIS_PACKAGE##*/}.$PKG_FORMAT" >> "$THIS_PACKAGE"/install/$PKG_META
+	echo "# Created by: '$PACKAGER'  on hostname: $(hostname)" >> "$THIS_PACKAGE"/install/$PKG_META
+	echo "# Date: $(date)" >> "$THIS_PACKAGE"/install/$PKG_META
+	if [[ -n $PKG_GROUP ]] ; then
+		echo "# Package group: $PKG_GROUP" >> "$THIS_PACKAGE"/install/$PKG_META
+	fi
+	echo "# Processor: $(uname -p) $(uname -m)" >> "$THIS_PACKAGE"/install/$PKG_META
+	echo "# OS target architecture: $(gcc -dumpmachine)" >> "$THIS_PACKAGE"/install/$PKG_META
+	echo "# Package created using 'src2pkg' version: $SRC2PKG_VERSION" >> "$THIS_PACKAGE"/install/$PKG_META
+	if [[ -f /etc/os-release ]] ; then
+		echo "# OS Version: $(cat /etc/os-release)" >> "$THIS_PACKAGE"/install/$PKG_META
+	elif [[ -f /etc/kiss-version ]] ; then
+		echo "# OS Version: KISS $(cat /etc/kiss-version)" >> "$THIS_PACKAGE"/install/$PKG_META
+	elif [[ -f /etc/slackware-version ]] ; then
+		echo "# OS Version: $(cat /etc/slackware-version)" >> "$THIS_PACKAGE"/install/$PKG_META
+	fi
+	echo "" >> "$THIS_PACKAGE"/install/$PKG_META
+	
+	# sub-packages
+	case $THIS_PACKAGE in
+		*-devel-*|*-devel_*|*-docs-*|*-docs_*|*-nls-*|*-nls_*|*-solibs-*|*-solibs_*) 
+			echo "# This sub-package created from the build of:" >> "$THIS_PACKAGE"/install/$PKG_META
+			echo "# Parent: $SHORT_NAME.$PKG_FORMAT" >> "$THIS_PACKAGE"/install/$PKG_META
+			echo "" >> "$THIS_PACKAGE"/install/$PKG_META
+		;;
+		*)
+			case "$CUSTOM_PACKAGES" in
+				*${THIS_PACKAGE##*/}*)
+					echo "# This custom package created from the build of:" >> "$THIS_PACKAGE"/install/$PKG_META
+					echo "# Parent: $SHORT_NAME.$PKG_FORMAT" >> "$THIS_PACKAGE"/install/$PKG_META
+					echo "# For details, see the build script: $SCRIPT" >> "$THIS_PACKAGE"/install/$PKG_META
+					echo "" >> "$THIS_PACKAGE"/install/$PKG_META
+				;;
+			esac
+		;;
+	esac
+}
+
+# This routine creates the install/PKG_META file with a rich set of information
+# about who, when, how the package was built
+# This may be called from here for the main package or from 14A-last_minute_details 
+# (segregate_package) for the split devel and/or solibs packages
+write_meta_data() {
+	THIS_PACKAGE="$1"
+	write_pkg_info "$THIS_PACKAGE"
+	#######
+	# info about sub-package
+	# no, this rules out CUSTOM_PACKAGES if we run write_meta_data from there
+	case $THIS_PACKAGE in
+		*$SHORT_NAME)
+			# only write this info to main package
+			if [[ -n $SPLIT_PACKAGE ]] ; then
+				if [[ -d "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME ]] || [[ -d "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME ]] || \
+					[[ -d "$PKG_BUILDS_DIR"/$I18N_PKG_NAME ]] || [[ -d "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME ]] ; then
+					echo "# Sub-packages created automatically from this build:" >> "$THIS_PACKAGE"/install/$PKG_META
+				fi
+				( IFS=, ; for SPLIT in $SPLIT_PACKAGE ; do
+						case $SPLIT in
+							devel) 
+								if [[ -d "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME ]] ; then
+									echo "# Sub-package: $DEVEL_PKG_NAME.$PKG_FORMAT" >> "$PKG_DIR"/install/$PKG_META
+								fi ;;
+							doc|docs) 
+								if [[ -d "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME ]] ; then
+									echo "# Sub-package: $DOCS_PKG_NAME.$PKG_FORMAT" >> "$PKG_DIR"/install/$PKG_META
+								fi ;;
+							i18n|nls) 
+								if [[ -d "$PKG_BUILDS_DIR"/$I18N_PKG_NAME ]] ; then
+									echo "# Sub-package: $I18N_PKG_NAME.$PKG_FORMAT" >> "$PKG_DIR"/install/$PKG_META
+								fi ;;
+							solibs) 
+								if [[ -d "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME ]] ; then
+									echo "# Sub-package: $SOLIBS_PKG_NAME.$PKG_FORMAT" >> "$PKG_DIR"/install/$PKG_META
+								fi ;;
+						esac
+					done
+				)
+				echo "" >> "$THIS_PACKAGE"/install/$PKG_META
+			fi
+			
+			if [[ -n $SUB_PACKAGES ]] ; then
+				if [[ -d "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME ]] || [[ -d "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME ]] || \
+					[[ -d "$PKG_BUILDS_DIR"/$I18N_PKG_NAME ]] || [[ -d "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME ]] ; then
+					echo "# Sub-packages created by the build script:" >> "$PKG_DIR"/install/$PKG_META
+					( IFS=, ; for ASUB in $SUB_PACKAGES ; do
+						case $ASUB in
+							devel) 
+							if [[ -d "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME ]] ; then
+								echo "# Sub-package: $DEVEL_PKG_NAME.$PKG_FORMAT" >> "$PKG_DIR"/install/$PKG_META
+							fi ;;
+							doc|docs) 
+							if [[ -d "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME ]] ; then
+								echo "# Sub-package: $DOCS_PKG_NAME.$PKG_FORMAT" >> "$PKG_DIR"/install/$PKG_META
+								fi ;;
+							i18n|nls) 
+							if [[ -d "$PKG_BUILDS_DIR"/$I18N_PKG_NAME ]] ; then
+								echo "# Sub-package: $I18N_PKG_NAME.$PKG_FORMAT" >> "$PKG_DIR"/install/$PKG_META
+							fi ;;
+							solibs) 
+							if [[ -d "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME ]] ; then
+								echo "# Sub-package: $SOLIBS_PKG_NAME.$PKG_FORMAT" >> "$PKG_DIR"/install/$PKG_META
+							fi ;;
+						esac
+					done
+					)
+					echo "" >> "$THIS_PACKAGE"/install/$PKG_META
+				fi
+			fi
+			# okay, so handle -non-standard sub-packages as well
+			if [[ -n $CUSTOM_PACKAGES ]] ; then
+				echo "# Custom packages created by the build script:" >> "$PKG_DIR"/install/$PKG_META
+				for CUSTOM_PACKAGE in $CUSTOM_PACKAGES ; do
+					echo  "# Custom package: $CUSTOM_PACKAGE.$PKG_FORMAT" >> "$PKG_DIR"/install/$PKG_META
+				done
+				echo "" >> "$PKG_DIR"/install/$PKG_META
+			fi
+		;;
+	esac
+	
+	# This info indirectly identifies the OS release
+	echo "# KERNEL: $(uname -r) $(uname -v)" >> "$THIS_PACKAGE"/install/$PKG_META
+	# echo "# TOOLCHAIN:" >> "$THIS_PACKAGE"/install/$PKG_META
+	/lib/libc.so.6 > "$SRC_DIR"/glibc-info.txt
+	echo -n "# LIBC: " >> "$THIS_PACKAGE"/install/$PKG_META
+	head -n 1 "$SRC_DIR"/glibc-info.txt |cut -f 1 -d',' >> "$THIS_PACKAGE"/install/$PKG_META
+	echo -n "#       " >> "$THIS_PACKAGE"/install/$PKG_META
+	grep "Compiled by" "$SRC_DIR"/glibc-info.txt >> "$THIS_PACKAGE"/install/$PKG_META
+	echo -n "#       " >> "$THIS_PACKAGE"/install/$PKG_META
+	grep "Compiled on" "$SRC_DIR"/glibc-info.txt >> "$THIS_PACKAGE"/install/$PKG_META
+	# grep "Available extensions" "$SRC_DIR"/glibc-info.txt >> "$THIS_PACKAGE"/install/$PKG_META
+	# tail -n +9 "$SRC_DIR"/glibc-info.txt |head -n 4 >> "$THIS_PACKAGE"/install/$PKG_META
+	echo "# COMPILER: GCC-$(gcc -dumpversion) $(gcc -dumpmachine)" >> "$THIS_PACKAGE"/install/$PKG_META
+	echo "# BINUTILS: $(ld --version |head -n 1 |cut -f3- -d' ')" >> "$THIS_PACKAGE"/install/$PKG_META
+	echo "" >> "$THIS_PACKAGE"/install/$PKG_META
+	
+	# get the md5sum of the SOURCE
+	if [[ -f $SOURCES_DIR/$SOURCE_NAME ]] ; then
+		#MD5SUM=$(md5sum $SOURCE)
+		MD5SUM=$(md5sum $SOURCES_DIR/$SOURCE_NAME)
+	elif [[ -f $CWD/$SOURCE_NAME ]] ; then
+		MD5SUM=$(md5sum $CWD/$SOURCE_NAME)
+	fi
+	MD5SUM=$(echo ${MD5SUM% *})
+	
+	if [[ "$SOURCE_URL" != "" ]] ; then
+		echo "# Source URL: $SOURCE_URL" >> "$THIS_PACKAGE"/install/$PKG_META
+		echo "# Source md5sum: $MD5SUM" >> "$THIS_PACKAGE"/install/$PKG_META
+	elif [[ "$SOURCE_NAME" != "" ]] ; then
+		echo "# Source name: $SOURCE_NAME" >> "$THIS_PACKAGE"/install/$PKG_META
+		echo "# Source md5sum: $MD5SUM" >> "$THIS_PACKAGE"/install/$PKG_META
+	elif [[ "$SOURCE" != "" ]] ; then
+		echo "# Source: $SOURCE" >> "$THIS_PACKAGE"/install/$PKG_META
+		echo "# Source md5sum: $MD5SUM" >> "$THIS_PACKAGE"/install/$PKG_META
+	fi
+	echo "" >> "$THIS_PACKAGE"/install/$PKG_META
+	
+	if [[ -n $PATCHLIST ]] ; then
+		#echo "# Patches applied: $PATCHLIST" >> "$THIS_PACKAGE"/install/$PKG_META
+		echo "# Patches applied automatically from PATCHLIST:" >> "$THIS_PACKAGE"/install/$PKG_META
+		for PATCH in $PATCHLIST ; do
+			echo $'\t'"${PATCH##*/}" >> "$THIS_PACKAGE"/install/$PKG_META
+		done
+		echo "" >> "$THIS_PACKAGE"/install/$PKG_META
+	elif [[ -s $SRC_DIR/$NAME-patches-applied.log ]] ; then
+		echo "# Patches applied automatically:" >> "$THIS_PACKAGE"/install/$PKG_META
+		for PATCH in $(cat $SRC_DIR/$NAME-patches-applied.log) ; do
+			echo $'\t'"$PATCH" >> "$THIS_PACKAGE"/install/$PKG_META
+		done
+		echo "" >> "$THIS_PACKAGE"/install/$PKG_META
+	fi
+	
+	grep patch "$CWD"/$SCRIPT |grep '<' > "$SRC_DIR"/patch.list
+	grep "zcat" "$CWD"/$SCRIPT |grep '| patch' >> "$SRC_DIR"/patch.list
+	if [[ -s "$SRC_DIR"/patch.list ]] ; then
+		echo "# Patches applied by build script:" >> "$THIS_PACKAGE"/install/$PKG_META
+		while read LINE ; do
+			LINE=$(echo $LINE)
+			case $LINE in
+				'#'*) : ;;
+				*'patch'*'<'*) 
+					PATCH=${LINE##*'<'}
+					PATCH=${PATCH%*')'}
+					echo $'\t'"${PATCH##*/}" >> "$THIS_PACKAGE"/install/$PKG_META
+				;;
+				*'zcat'*' | patch'*)
+					PATCH=$(echo ${LINE%' | patch'*})
+					PATCH=${PATCH##* }
+					echo $'\t'"${PATCH##*/}" >> "$THIS_PACKAGE"/install/$PKG_META
+				;;
+			esac
+		done < "$SRC_DIR"/patch.list
+		echo "" >> "$THIS_PACKAGE"/install/$PKG_META
+	fi
+	rm -f "$SRC_DIR"/patch.list
+	
+	#########
+	case $THIS_PACKAGE in
+		# Don't write this info for 'noarch' packages
+		*-noarch-*) : ;;
+		*$SHORT_NAME|*$DEVEL_PKG_NAME|*$SOLIBS_PKG_NAME)
+			echo "# Build configuration:" >> "$THIS_PACKAGE"/install/$PKG_META
+			if [[ -f "$SRC_DIR"/$NAME-config-command.txt ]] ; then
+				cat "$SRC_DIR"/$NAME-config-command.txt >> "$THIS_PACKAGE"/install/$PKG_META
+			else
+				echo "	LDFLAGS=\"$LDFLAGS\"" >> "$THIS_PACKAGE"/install/$PKG_META
+				if [[ -n $FLAG_LINE ]] ; then
+					echo "	CFLAGS=\"$FLAG_LINE\"" >> "$THIS_PACKAGE"/install/$PKG_META
+				else
+					echo "	CFLAGS=\"$CFLAGS\"" >> "$THIS_PACKAGE"/install/$PKG_META
+				fi
+				if [[ $CONFIG_COMMAND != 'skip' ]] ; then
+					echo "	$CONFIG_COMMAND $CONFIG_ARGS" >> "$THIS_PACKAGE"/install/$PKG_META
+				fi
+				
+			fi
+			
+			if [[ -f "$SRC_DIR"/$NAME-compressed-bins ]] ; then
+				echo "" >> "$THIS_PACKAGE"/install/$PKG_META
+				echo "# Package contains these binaries compressed with $BIN_COMPRESSOR:" >> "$THIS_PACKAGE"/install/$PKG_META
+				cat "$SRC_DIR"/$NAME-compressed-bins >> "$THIS_PACKAGE"/install/$PKG_META
+				echo "# If you have problems running any of the above listed binaries," >> "$THIS_PACKAGE"/install/$PKG_META
+				echo "# please report the problem to the package creator. If you have" >> "$THIS_PACKAGE"/install/$PKG_META
+				echo "# '$BIN_COMPRESSOR' on your system, you can first try running them" >> "$THIS_PACKAGE"/install/$PKG_META
+				echo "# after decompressing them with the following command:" >> "$THIS_PACKAGE"/install/$PKG_META
+				echo "# $BIN_COMPRESSOR -d prog-name" >> "$THIS_PACKAGE"/install/$PKG_META
+			fi
+			echo "" >> "$THIS_PACKAGE"/install/$PKG_META
+		;;
+	esac
+}
+
+get_installed_version() {
+	SHORT=$1
+	# make sure there are no spaces
+	SHORT=${SHORT// /}
+	IV=$(find $DB_ROOT/var/lib/tpkg/packages -name ${SHORT}_* 2> /dev/null)
+	echo ${IV##*/}
+}
+
+gen_required_file() {
+	# function parameter 1 is the directory name to work in
+	WD=$1
+	cd $WD
+	
+	case $WD in
+		*/"$NAME-devel-"*|*/"$NAME-devel_"*) TAG=devel ; LABEL= ;;
+		*/"$NAME-docs-"*|*/"$NAME-docs_"*) TAG=docs ; LABEL= ;;
+		*/"$NAME-nls-"*|*/"$NAME-nls_"*) TAG=nls ; LABEL= ;;
+		*/"$NAME-solibs-"*|*/"$NAME-solibs_"*) TAG=solibs ; LABEL=_SOLIBS ;;
+		*) TAG=''; LABEL= ;;
+	esac
+	case $TAG in
+		'') FILENAMES="${PKG_REQUIRED}.${NAME} ${NAME}.${PKG_REQUIRED} ${PKG_REQUIRED}" ;;
+		*) FILENAMES="${PKG_REQUIRED}.${NAME}-${TAG} ${NAME}-${TAG}.${PKG_REQUIRED}"
+	esac
+	
+	if [[ "$ADD_REQUIRED_FILE" = "YES" ]] ; then
+		mkdir -p install
+		for FILENAME in $FILENAMES ; do
+		   for SEARCH_PATH in  "$PATCHES_DIR"/$NAME-$VERSION-patches "$PATCHES_DIR"/$NAME-patches "$CWD" "$CWD"/Resources "$CWD"/patches ; do
+			if [[ -f $SEARCH_PATH/$FILENAME ]] ; then
+				echo "   Copying $FILENAME to: "$NORMAL"install/$PKG_REQUIRED"
+				cat "$SEARCH_PATH"/$FILENAME > install/$PKG_REQUIRED
+				HAVE_REQUIRED=1
+				break ;
+			fi
+		   done
+		done
+		
+		if [[ ! $HAVE_REQUIRED ]] ; then
+			#[[ $DEBUG ]] && echo "   Checking for packages required by: ${WD##*/} "
+			if [[ "$PKG_FORMAT" = "tpkg"  ]] || [[ "$PKG_FORMAT" = "tpm"  ]] ; then
+				#if [[ -d $DB_ROOT/var/lib/tpkg/manifests ]] ; then
+				if [[ -n $DB_ROOT ]] ; then
+					FILE_LISTS=$DB_ROOT/var/lib/tpkg/packages
+					DEPTH=$(( $DEPTH + $(freq / ${DB_ROOT}) ))
+				else
+					FILE_LISTS=$ADM_DIR_NAME/packages
+				fi
+				# generate 'deps_list' file
+				gen_deps_list_kiss
+			fi
+			#[[ $DEBUG ]] && echo $GREEN"Done"$NORMAL
+			
+			if [[ -s deps_list ]] ; then
+				#[[ $DEBUG ]] && echo -n "      Creating: '$PKG_REQUIRED' "$NORMAL
+				echo -n "      Creating: '$PKG_REQUIRED' "$NORMAL
+				case $PKG_FORMAT in
+					'tpkg') 
+						case $TAG in
+							solibs) echo "# ${NAME}-${TAG}_${VERSION}-${ARCH}-${BUILD}${SIG}" > install/$PKG_REQUIRED ;;
+							*) echo "# ${NAME}_${VERSION}-${ARCH}-${BUILD}${SIG}" > install/$PKG_REQUIRED ;;
+						esac
+					;;
+					*) echo "# $NAME-$VERSION-${ARCH}-${BUILD}${SIG}" > install/$PKG_REQUIRED
+				esac
+				if [[ -n $BuildRequires ]] ; then
+					echo "# BuildRequires='$BuildRequires'" >> install/$PKG_REQUIRED
+				elif [[ -n $BUILD_REQUIRES ]] ; then
+					echo "# BuildRequires='$BUILD_REQUIRES'" >> install/$PKG_REQUIRED
+				fi
+				printf "%-40s %-40s\n" "# Requires: " "|Supplied by: " >> install/$PKG_REQUIRED
+				cat deps_list >> install/$PKG_REQUIRED
+				# [[ $DEBUG ]] && echo $GREEN"Done"$NORMAL
+				echo $GREEN"Done"$NORMAL
+			fi
+			! [[ $DEBUG ]] && rm -f deps_list
+			rm -f deps_list
+		#else
+			#[[ $DEBUG ]] && echo $GREEN"Done"$NORMAL
+		fi
+		
+		add_requireds1() {
+				(IFS=, ; for REQ in $@; do
+					case $REQ in
+						*_*) echo $REQ >> install/$PKG_REQUIRED ;;
+						*)
+							IV=$(get_installed_version $REQ)
+							case $IV in
+								'') echo $REQ >> install/$PKG_REQUIRED ;;
+								*) echo $IV >> install/$PKG_REQUIRED ;;
+							esac
+						;;
+					esac
+				done
+				)
+		}
+		
+		add_requireds() {
+				OLD_IFS=$IFS
+				(IFS=, ; for REQ in $ADD_REQS ; do
+					case $REQ in
+								*|*) 
+										(IFS='|' ; for REQ_ALT in $REQ ; do
+												#echo REQ_ALT="'$REQ_ALT'"
+												REQ_ALT=${REQ_ALT// /}
+												IV=$(get_installed_version $REQ_ALT)
+												#echo IV=$IV
+												case $IV in
+													'|') : ;;
+													'') OUT="$OUT $REQ_ALT |";;
+													*) OUT="$OUT $IV |";;
+												esac
+											done
+											IFS=$OLD_IFS
+											OUT=$(echo ${OUT:0:$(( ${#OUT} -2))})
+											echo ${OUT} >> install/$PKG_REQUIRED
+										)
+									;;
+								*)
+									IV=$(get_installed_version $REQ)
+										case $IV in
+											'') echo $REQ ;;
+											*) echo $IV  ;;
+										esac
+					esac
+				done
+				)
+		}
+		
+		if [[ "$TAG" = "solibs" ]] && [[ -n $ADD_REQS_SOLIBS ]] ; then
+			if [[ -f install/$PKG_REQUIRED ]] ; then
+				echo "# Automatically added from ADD_REQS_SOLIBS: " >> install/$PKG_REQUIRED
+				add_requireds $ADD_REQS_SOLIBS
+			else
+				echo "# $NAME-$VERSION-${ARCH}-${BUILD}${SIG}" > install/$PKG_REQUIRED
+				echo "# Requires: " >> install/$PKG_REQUIRED
+				add_requireds $ADD_REQS_SOLIBS
+			fi
+		elif [[ "$TAG" = "" ]] && [[ -n $ADD_REQS ]] ; then
+			if [[ -f install/$PKG_REQUIRED ]] ; then
+				echo "# Automatically added from ADD_REQS: " >> install/$PKG_REQUIRED
+				add_requireds $ADD_REQS
+			else
+				echo "# $NAME-$VERSION-${ARCH}-${BUILD}${SIG}" > install/$PKG_REQUIRED
+				echo "# Requires added from ADD_REQS: " >> install/$PKG_REQUIRED
+				add_requireds $ADD_REQS
+			fi
+		fi
+		
+		# if the main package has a required file and none is in CWD, then copy it there if auto-scripting
+		if [[ $AUTO_SCRIPT ]] && [[ "$TAG" = "" ]] && [[ -f install/$PKG_REQUIRED ]] ; then 
+			if [[ ! -f "$CWD"/$PKG_REQUIRED ]] ; then
+			   cat install/$PKG_REQUIRED > "$CWD"/new.$PKG_REQUIRED
+			fi
+		fi
+	fi
+	# 
+	if [[ -s unfound_depends ]] ; then
+		echo $YELLOW"   Notice - "$NORMAL"Package has dependencies not found in package database:"
+		cat unfound_depends
+	fi
+	rm -f unfound_depend
+	if [[ -s unsatisfied_deps ]] ; then
+		echo $YELLOW"   Notice - "$NORMAL"Package has unsatisfied dependencies not found on system:"
+		cat unsatisfied_deps
+	fi
+	rm -f unsatisfied_deps
+  
+}
+
+gen_deps_list_kiss() {
+	: > deps_list.tmp
+	if [[ -s $SRC_DIR/$NAME-ELF-all ]] ; then
+		while read LINE ; do
+			# skip non-existing -they may have been moved
+			if [[ -f $LINE ]] ; then
+				_ldd $LINE >> deps_list.tmp
+			fi
+		done < $SRC_DIR/$NAME-ELF-all
+	fi
+	
+	if [[ -s deps_list.tmp ]] ; then
+		# sort and uniq separately for best results:
+		sort -u deps_list.tmp > deps_list
+		uniq -u deps_list > deps_list.tmp
+		# and cull
+		: > deps_list
+		while read LINE ; do
+			case $LINE in
+				*"not found"*) : ;;
+				*) echo ${LINE#*/} >> deps_list
+			esac
+		done < deps_list.tmp
+		rm -f deps_list.tmp
+	fi
+	
+	# any deps which are not packaged?
+	fgrep "not found" deps_list 2> /dev/null > unsatisfied_deps_list.tmp
+	if [[ -s unsatisfied_deps_list.tmp ]] ; then
+		: > unsatisfied_deps_list
+		while read LINE ; do
+			( set $(echo $LINE) ; echo $1 >> unsatisfied_deps_list )
+			#echo ${LINE%% *} >> unsatisfied_deps_list
+		done < unsatisfied_deps_list.tmp
+		while read LINE ; do
+			# any items 'not found' which aren't in this package get reported. Of course, this
+			# should only happen if we are packaging some pre-compiled program
+			while read line ; do
+				case $line in
+					*$LINE*) : ;;
+					*) echo ${LINE} >> unsatisfied_deps_list.tmp
+				esac
+			done 2> /dev/null < install/$PKG_PROVIDES
+			
+		done < unsatisfied_deps_list
+		mv unsatisfied_deps_list.tmp unsatisfied_deps_list
+		
+	fi
+	rm -f unsatisfied_deps_list.tmp
+	
+	if [[ -s deps_list ]] ; then
+		#while read PKG_DEP in ; do
+		while read PKG_DEP ; do
+			THIS_DEP=
+			PKG_DEP_COUNT=0
+			SCRIPT_DEP_COUNT=0
+			COUNT=0
+			# make sure we are not reading a blank line
+			if [[ -n $PKG_DEP ]] ; then
+				# if PKG_DEP is found in this package skip it
+				if [[ $(fgrep ${PKG_DEP##*/} install/$PKG_PROVIDES 2> /dev/null) ]] ; then
+					continue
+				fi
+				PKG_DEP=$(readlink /$PKG_DEP)
+				PKG_DEP_COUNT=$(grep ${PKG_DEP} $FILE_LISTS/* 2> /dev/null |wc -l)
+				
+				if [[ $PKG_DEP_COUNT -eq 0 ]] && [[ -n $PKG_DEP ]] ; then
+					# this lists files which are found on the system, but not in the package database
+					if ! [[ $(grep $PKG_DEP $FILE_LISTS/glibc* 2> /dev/null) ]] ; then
+						if [[ ! -f unfound_depends ]] ; then
+							echo "These dependencies were not found in the package database:" > unfound_depends
+						fi
+						echo "$PKG_DEP" >> unfound_depends
+					fi
+				fi
+				
+				# reverse the sort order for files contained in lib_gcc, cxxlibs or *solibs* packages
+				# this has the effect of listing the possible packages so that solibs packages are
+				# listed before full packages, and cxxlibs or lib_gcc before gcc* packages
+				# This keeps dependency resolvers from installing all of gcc-g++ for libstdc++, for example
+				REVERSE=
+				case $PKG_DEP in
+					*libgcc*|*libgomp*|*libmudflap*|*libssp*) REVERSE='-r' ;;
+				esac
+				if [[ $(grep -m 1 "${PKG_DEP}" $FILE_LISTS/*solibs* 2> /dev/null) ]] \
+					|| [[ $(grep -m 1 "${PKG_DEP}" "$FILE_LISTS/cxxlibs*" 2> /dev/null) ]] ; then
+					REVERSE='-r'
+				fi
+				
+				if [[ $PKG_DEP_COUNT -gt 0 ]] ; then
+					if [[ $INCLUDE_BASE_LIBS = "YES" ]] ; then
+						THIS_DEP="$(grep -m 1 ${PKG_DEP} $FILE_LISTS/* 2> /dev/null |cut -f1 -d: |cut -f $DEPTH -d/ |sort $REVERSE |head -n 1)"
+					else
+						THIS_DEP="$(grep -m 1 ${PKG_DEP} $FILE_LISTS/* 2> /dev/null |cut -f1 -d: |cut -f $DEPTH -d/ |grep -v '^glibc_' |sort $REVERSE |head -n 1)"
+					fi
+				
+				fi
+				case $THIS_DEP in
+					'') : ;; # echo PKG_DEP: $PKG_DEP "is part of glibc"
+					*) 	# echo THIS_DEP=$THIS_DEP
+						if [[ $INCLUDE_DEP_VERSIONS = "NO" ]] ; then
+							THIS_DEP=${THIS_DEP%_*-*-*} 
+						fi
+						# if dependent on itself, don't mention it
+						case $THIS_DEP in
+							#$NAME|"$NAME = "*) THIS_DEP="" ;;
+							$NAME|"$NAME"_*) THIS_DEP="" ;;
+						esac
+					;;
+				esac
+			fi
+			
+			if [[ -n $THIS_DEP ]] ; then
+				# if multiple packages can supply this file, then
+				# cat the results together pipe-separated:  ONE | TWO | THREE
+				COUNT=2
+				while [[ $COUNT -le $PKG_DEP_COUNT ]] ; do
+					if [[ $INCLUDE_BASE_LIBS = "YES" ]] ; then
+						NEXT_DEP="$(grep -m 1 ${PKG_DEP} $FILE_LISTS/* 2> /dev/null |cut -f1 -d: |cut -f $DEPTH -d/ |sort $REVERSE |tail --lines +$COUNT |head -n1)"
+					else
+						NEXT_DEP="$(grep -m 1 ${PKG_DEP} $FILE_LISTS/* 2> /dev/null |cut -f1 -d: |cut -f $DEPTH -d/ |grep -v '^glibc_' |sort $REVERSE |tail --lines +$COUNT |head -n1)"
+					fi
+					if [[ $INCLUDE_DEP_VERSIONS = "NO" ]] ; then
+						NEXT_DEP=${NEXT_DEP%-*-*-*} 
+					fi
+					for ONE_DEP in $THIS_DEP ; do
+						case $NEXT_DEP in
+							$ONE_DEP) HAVE_THIS_DEP=1 ; break ;;
+						esac
+					done
+					if ! [[ $HAVE_THIS_DEP ]] ; then
+						case $NEXT_DEP in
+							$NAME_$VERSION-$ARCH-$BUILD*|$NAME) true ;;
+							"") true ;;
+							*) THIS_DEP="$THIS_DEP | $NEXT_DEP" ;;
+						esac
+					fi
+					(( COUNT++ ))
+				done
+				# add THIS_DEP if not null
+				case $THIS_DEP in
+					"") true ;;
+					*)	printf "%-40s %-40s\n" "# File: ${PKG_DEP##*/}" "|: $THIS_DEP" >> deps_list.tmp
+						echo "$THIS_DEP" >> deps_list.tmp ;;
+				esac
+			fi
+		done < deps_list
+		
+		rm -f deps_list
+		if [[ -s deps_list.tmp ]] ; then
+			sort -u deps_list.tmp |uniq -u > deps_list
+		fi
+	fi
+	rm -f deps_list.tmp
+}
+
+gen_suggests_file() {
+	# function parameter 1 is the directory name to work in
+	WD=$1
+	cd $WD
+	
+	case $WD in
+		*/"$NAME-devel-"*|*/"$NAME-devel_"*) TAG=devel ; LABEL= ;;
+		*/"$NAME-docs-"*|*/"$NAME-docs_"*) TAG=docs ; LABEL= ;;
+		*/"$NAME-nls-"*|*/"$NAME-nls_"*) TAG=nls ; LABEL= ;;
+		*/"$NAME-solibs-"*|*/"$NAME-solibs_"*) TAG=solibs ; LABEL=_SOLIBS ;;
+		*) TAG=''; LABEL= ;;
+	esac
+	case $TAG in
+		'') FILENAMES="${PKG_SUGGESTS}.${NAME} ${NAME}.${PKG_SUGGESTS} ${PKG_SUGGESTS}" ;;
+		*) FILENAMES="${PKG_SUGGESTS}.${NAME}-${TAG} ${NAME}-${TAG}.${PKG_SUGGESTS}"
+	esac
+	
+	mkdir -p install
+	for FILENAME in $FILENAMES ; do
+		for SEARCH_PATH in  "$PATCHES_DIR"/$NAME-$VERSION-patches "$PATCHES_DIR"/$NAME-patches "$CWD" "$CWD"/Resources "$CWD"/patches ; do
+		if [[ -f $SEARCH_PATH/$FILENAME ]] ; then
+			echo "      Copying $FILENAME to: "$NORMAL"install/$PKG_SUGGESTS"
+			cat "$SEARCH_PATH"/$FILENAME > install/$PKG_SUGGESTS
+			HAVE_SUGGESTS=1
+			break ;
+		fi
+		done
+	done
+	
+	if [[ ! $HAVE_SUGGESTS ]] ; then
+		if [[ -f "$SRC_DIR/$NAME-script-files" ]] ; then
+			# [[ $DEBUG ]] && echo -n "      Creating: '$PKG_SUGGESTS' "
+			# echo -n "      Creating: '$PKG_SUGGESTS' "
+			> $SRC_DIR/$NAME-script-bin.list
+			> $SRC_DIR/$NAME-script-suggests.list
+			#for FILE in $(cat $SRC_DIR/$NAME-script-files) ; do
+			while read FILE ; do
+				case $FILE in
+					'') continue ;;
+				esac
+				# has it been moved out of here? (example script in the docs, etc.)
+				if ! [[ -f "$PKG_DIR/$FILE" ]] ; then
+					continue
+				fi
+				# get the full shebang itself
+				SHEBANG=$(head -n 1 "$PKG_DIR/$FILE")
+				# ignore the first three chars
+				SHEBANG=${SHEBANG:3}
+				# ignore any options to the interpretor
+				# what about /usr/bin/env perl ????
+				case $SHEBANG in
+					*'bin/env '*) SHEBANG=${SHEBANG#* } ;;
+				esac
+				SHEBANG=${SHEBANG%% *}
+				# make sure it's a shell script. for now we can't handle others
+				# except to include the interpretor itself
+				case "$SHEBANG" in
+					*'bin/bash '*|*bin/bash|*'bin/sh '*|*bin/sh|*'bin/initsh '*|*bin/initsh|*'bin/ash '*|*bin/ash) 
+						#if grep -m 1 'exec' $FILE |grep 'wish' &> /dev/null ; then
+						if grep -m 1 "exec *wish " $FILE&> /dev/null ; then
+							# this is really a tcl/tk script
+							echo "tk" >> $SRC_DIR/$NAME-script-suggests.list
+						else
+							show_shell_requires $FILE >> $SRC_DIR/$NAME-script-suggests.list
+						fi
+					;;
+					*'perl '*|*perl) # this is just a template/place-marker for better code later
+						IV=$(get_installed_version perl)
+						echo "$IV" >> $SRC_DIR/$NAME-script-suggests.list
+					;;
+					*'python '*|*python) # this is just a template/place-marker for better code later
+						IV=$(get_installed_version python)
+						echo "$IV" >> $SRC_DIR/$NAME-script-suggests.list
+					;;
+					*'tcsh '*|*tcsh) # this is just a template/place-marker for better code later
+						echo "tcsh" >> $SRC_DIR/$NAME-script-suggests.list
+					;;
+				esac
+			done < $SRC_DIR/$NAME-script-files
+			
+			sort -u $SRC_DIR/$NAME-script-suggests.list >$SRC_DIR/$NAME-script-suggests.list.tmp
+			uniq -u $SRC_DIR/$NAME-script-suggests.list.tmp > $SRC_DIR/$NAME-script-suggests.list
+			rm -f $SRC_DIR/$NAME-script-suggests.list.tmp
+			
+			
+			while read LINE ; do
+				case $LINE in
+					'') : ;; # ignore blank lines 
+					$NAME) : ;; # ignore if the program is in this package
+					aaa-base|aaa-etc) : ;; # ignore these false positives
+					*)	
+						# if the item is already required, don't suggest it
+						if ! grep -q ${LINE}_ install/$PKG_REQUIRED 2> /dev/null ; then
+							if [[ -f /usr/share/kiss-setup/QUE.required ]] ; then
+								# if the item is part of a 'base' package, don't mention it
+								if ! grep -q $LINE$ /usr/share/kiss-setup/QUE.required 2> /dev/null ; then
+									echo $LINE >> $SRC_DIR/$NAME-script-suggests.list.tmp
+								fi
+							else
+								echo $LINE >> $SRC_DIR/$NAME-script-suggests.list.tmp
+							fi
+						fi
+					;;
+				esac
+			done < $SRC_DIR/$NAME-script-suggests.list
+			
+			if [[ -s $SRC_DIR/$NAME-script-suggests.list.tmp ]] ; then
+				mv $SRC_DIR/$NAME-script-suggests.list.tmp $SRC_DIR/$NAME-script-suggests.list 2> /dev/null
+			else
+				rm -f $SRC_DIR/$NAME-script-suggests.list
+			fi
+			if [[ -s $SRC_DIR/$NAME-script-suggests.list ]] ; then
+				echo -n "      Creating: '$PKG_SUGGESTS' "
+				echo "# ${WD##*/}" > install/$PKG_SUGGESTS
+				#echo "# Full functionality of this package" >> install/$PKG_SUGGESTS
+				echo "# Suggests:" >> install/$PKG_SUGGESTS
+				cat $SRC_DIR/$NAME-script-suggests.list >> install/$PKG_SUGGESTS
+				echo $GREEN"Done"$NORMAL
+			fi
+		fi
+	fi
+}
+
+
+show_shell_requires() {
+	# get the full shebang line
+	SHEBANG=$(head -n 1 $1)
+	# ignore any options to the interpretor
+	SHEBANG=${SHEBANG%% *}
+	echo ${SHEBANG:3} >> $SRC_DIR/$NAME-script-bin.list
+	
+	for PROG in $(bash --show-requires $1) ; do
+		case $PROG in
+			'/'*) #echo "absolute path: $PROG"
+					if [[ -f ${PROG:1} ]] ; then
+						: #echo "$PROG is in this package"
+					else
+						PROG=${PROG:1}
+						echo "$PROG" >> $SRC_DIR/$NAME-script-bin.list
+					fi
+			;;
+			*'/'*) #echo "relative path: $PROG" 
+					if [[ -f ${PROG} ]] ; then
+						: #echo "$PROG is in this package"
+					elif [[ -x /$PROG ]] ; then
+						: #echo "bad relative path? $PROG"
+					else
+						: #echo "Bad relative path:$PROG"
+					fi
+					;;
+			*)
+					if grep $PROG[[:space:]]*\(\) $FILE &> /dev/null || \
+						grep $PROG[[:space:]]*\{ $FILE &> /dev/null ; then
+						: #echo "$PROG is a function in $FILE"
+					else
+						if [[ -f $PROG ]] ; then
+							: #echo "$PROG is in this package"
+						else
+							FOUND=0
+							for P in /bin /sbin /usr/bin /usr/sbin ; do
+								if [[ -x $P/$PROG ]] ; then
+									echo ${P:1}/$PROG  >> $SRC_DIR/$NAME-script-bin.list
+									FOUND=1
+									break
+								fi
+							done
+							#[[ $FOUND = 0 ]] && echo "not found: $PROG"
+						fi
+					fi
+			;;
+		esac
+	done
+	sort -u $SRC_DIR/$NAME-script-bin.list > $SRC_DIR/$NAME-script-bin.list.tmp
+	uniq -u $SRC_DIR/$NAME-script-bin.list.tmp > $SRC_DIR/$NAME-script-bin.list
+	rm -f $SRC_DIR/$NAME-script-bin.list.tmp
+	
+	while read PROG ; do
+		# for debugging
+		#echo -n "$PROG: "
+		APKG=$(grep -m1 "$PROG"$ /var/lib/tpkg/packages/* |grep -v 'devel' |head -n 1)
+		if [[ -n $APKG ]] ; then
+			case $APKG in
+				'') continue ;;
+				*)
+					# left of '_' or ':' ??
+					#APKG=${APKG%%:*}
+					# for 'soft' depends let's not use the package version, etc.
+					APKG=${APKG%%_*}
+					# basename
+					APKG=${APKG##*/}
+					echo $APKG >> $SRC_DIR/$NAME-script-suggests.list
+					# for debugging
+					#echo $APKG
+				;;
+			esac
+		else
+			# for debugging
+			#echo "Not found"
+			:
+		fi
+	done < $SRC_DIR/$NAME-script-bin.list
+}
+
+#TPM
+
+write_pkg_spec() {
+	THIS_PACKAGE="$1"
+	# the header writer is used by all packages
+	write_pkg_spec_header "$THIS_PACKAGE"
+	# the rest here is only for the main package
+	
+	########
+	if [[ -n $CONFLICTS ]] ; then
+		echo "conflicts=\"$CONFLICTS\"" >> install/pkg-spec 
+	elif [[ -f install/pkg-conflicts ]] ; then
+		while read LINE ; do
+			CONFLICTS="CONFLICTS $LINE"
+		done < install/pkg-conflicts
+		echo "conflicts=\$CONFLICTS\"" >> install/pkg-spec
+	fi
+	rm -f install/pkg-conflicts
+	if [[ -n $SUGGESTS ]] ; then
+		echo "suggests=\"$SUGGESTS\"" >> install/pkg-spec
+	elif [[ -f install/pkg-suggests ]] ; then
+		while read LINE ; do
+			SUGGESTS="SUGGESTS $LINE"
+		done < install/pkg-suggests
+		echo "suggests=\$SUGGESTS\"" >> install/pkg-spec
+	fi
+	rm -f install/pkg-suggests
+	if [[ -z $LICENSE ]] ; then
+		if [[ -f install/pkg-desc ]] ; then
+			# pull the license from the main package?
+			LICENSE=$(grep License':' install/pkg-desc)
+			LICENSE="${LICENSE##*'License: '}"
+		fi
+	fi
+	echo "license=\"$LICENSE\"" >> install/pkg-spec
+	if [[ -z $SUMMARY ]] ; then
+		if [[ -f install/pkg-desc ]] ; then
+			SUMMARY=$(grep -m 1 "^${NAME}"':' install/pkg-desc 2>/dev/null)
+			SUMMARY="${SUMMARY##*': '}"
+			echo "summary=\"${SUMMARY##*$NAME }\"" >> install/pkg-spec
+		fi
+	fi
+	
+	# pull out the description
+	echo 'description="' >> install/pkg-spec
+	#read
+	if [[ -f install/pkg-desc ]] ; then
+	HAVE_SUMMARY=0
+	while read LINE ; do
+		case "$LINE" in
+			''|'#'*|*"License:"*|*"Packaged by"*|*"Use this guide to format"*|"$NAME:"|"$NAME: ") : ;;
+			*)	if (( HAVE_SUMMARY )) ; then
+					LINE="${LINE#*': '}"
+					echo "${LINE//\"/}" >> install/pkg-spec
+				else
+					HAVE_SUMMARY=1
+				fi
+			;;
+		esac
+	done < install/pkg-desc
+	fi
+	echo '"' >> install/pkg-spec
+	
+	# save this for use by sub-packages to show license
+	#rm -f install/pkg-desc
+	
+	# info about sub-package
+	if [[ -n $SPLIT_PACKAGE ]] ; then
+		if [[ -d "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME ]] || [[ -d "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME ]] || \
+			[[ -d "$PKG_BUILDS_DIR"/$I18N_PKG_NAME ]] || [[ -d "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME ]] ; then
+			echo -n "sub-packages=\"" >> "$THIS_PACKAGE"/install/$PKG_META
+			
+			( IFS=, ; for SPLIT in $SPLIT_PACKAGE ; do
+				case $SPLIT in
+					devel) 
+						if [[ -d "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME ]] ; then
+							echo -n "$DEVEL_PKG_NAME.$PKG_FORMAT " >> "$PKG_DIR"/install/$PKG_META
+						fi ;;
+					doc|docs) 
+						if [[ -d "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME ]] ; then
+							echo -n "$DOCS_PKG_NAME.$PKG_FORMAT " >> "$PKG_DIR"/install/$PKG_META
+						fi ;;
+					i18n|nls) 
+						if [[ -d "$PKG_BUILDS_DIR"/$I18N_PKG_NAME ]] ; then
+							echo -n "$I18N_PKG_NAME.$PKG_FORMAT " >> "$PKG_DIR"/install/$PKG_META
+						fi ;;
+					solibs) 
+						if [[ -d "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME ]] ; then
+							echo -n "$SOLIBS_PKG_NAME.$PKG_FORMAT " >> "$PKG_DIR"/install/$PKG_META
+						fi ;;
+				esac
+			done
+			)
+			echo "\"" >> "$THIS_PACKAGE"/install/$PKG_META
+		fi
+	fi
+	
+	# okay, so handle -non-standard sub-packages as well
+	if [[ -n $CUSTOM_PACKAGES ]] ; then
+		#echo -n "child_packages=\"" >> "$PKG_DIR"/install/$PKG_META
+		#for CUSTOM_PACKAGE in $CUSTOM_PACKAGES ; do
+		#	echo -n "$CUSTOM_PACKAGE.$PKG_FORMAT" >> "$PKG_DIR"/install/$PKG_META
+		#done
+		#echo "\"" >> "$PKG_DIR"/install/$PKG_META
+		
+		echo "child_packages=\"$CUSTOM_PACKAGES\"" >> "$PKG_DIR"/install/$PKG_META
+	fi
+	
+	# This info indirectly identifies the OS release
+	echo "kernel='$(uname -r) $(uname -v)'" >> "$THIS_PACKAGE"/install/$PKG_META
+	# echo "# TOOLCHAIN:" >> "$THIS_PACKAGE"/install/$PKG_META
+	/lib/libc.so.6 > "$SRC_DIR"/glibc-info.txt
+	LIBC=$(head -n 1 "$SRC_DIR"/glibc-info.txt |cut -f 1 -d',')
+	LIBC=${LIBC##* }
+	echo "toolchain=\"glibc-$LIBC gcc-$(gcc -dumpversion) binutils-$(ld --version |head -n 1 |cut -f5- -d' ')\"" >> "$THIS_PACKAGE"/install/$PKG_META
+	
+	# get the md5sum of the SOURCE
+	if [[ -f $SOURCES_DIR/$SOURCE_NAME ]] ; then
+		#MD5SUM=$(md5sum $SOURCE)
+		MD5SUM=$(md5sum $SOURCES_DIR/$SOURCE_NAME)
+	elif [[ -f $CWD/$SOURCE_NAME ]] ; then
+		MD5SUM=$(md5sum $CWD/$SOURCE_NAME)
+	fi
+	MD5SUM=$(echo ${MD5SUM% *})
+	
+	if [[ "$SOURCE_URL" != "" ]] ; then
+		echo "source_url=\"$SOURCE_URL\"" >> "$THIS_PACKAGE"/install/$PKG_META
+		echo "source_md5sum=\"$MD5SUM\"" >> "$THIS_PACKAGE"/install/$PKG_META
+	elif [[ "$SOURCE_NAME" != "" ]] ; then
+		echo "source_name=\"$SOURCE_NAME\"" >> "$THIS_PACKAGE"/install/$PKG_META
+		echo "source_md5sum=\"$MD5SUM\"" >> "$THIS_PACKAGE"/install/$PKG_META
+	elif [[ "$SOURCE" != "" ]] ; then
+		echo "source=\"$SOURCE\"" >> "$THIS_PACKAGE"/install/$PKG_META
+		echo "source_md5sum=\"$MD5SUM\"" >> "$THIS_PACKAGE"/install/$PKG_META
+	fi
+	
+	if [[ -n $PATCHLIST ]] ; then
+		#echo "# Patches applied: $PATCHLIST" >> "$THIS_PACKAGE"/install/$PKG_META
+		echo "patches=\"" >> "$THIS_PACKAGE"/install/$PKG_META
+		for PATCH in $PATCHLIST ; do
+			#echo $'\t'"${PATCH##*/}" >> "$THIS_PACKAGE"/install/$PKG_META
+			echo $"${PATCH##*/}" >> "$THIS_PACKAGE"/install/$PKG_META
+		done
+		echo "\"" >> "$THIS_PACKAGE"/install/$PKG_META
+	elif [[ -s $SRC_DIR/$NAME-patches-applied.log ]] ; then
+		echo "patches=\"" >> "$THIS_PACKAGE"/install/$PKG_META
+		for PATCH in $(cat $SRC_DIR/$NAME-patches-applied.log) ; do
+			#echo $'\t'"$PATCH" >> "$THIS_PACKAGE"/install/$PKG_META
+			echo $"$PATCH" >> "$THIS_PACKAGE"/install/$PKG_META
+		done
+		echo "\"" >> "$THIS_PACKAGE"/install/$PKG_META
+	fi
+	
+	grep patch "$CWD"/$SCRIPT 2>/dev/null |grep '<' > "$SRC_DIR"/patch.list
+	grep "zcat" "$CWD"/$SCRIPT 2>/dev/null |grep '| patch' >> "$SRC_DIR"/patch.list
+	if [[ -s "$SRC_DIR"/patch.list ]] ; then
+		echo "other_patches=\"" >> "$THIS_PACKAGE"/install/$PKG_META
+		while read LINE ; do
+			LINE=$(echo $LINE)
+			case $LINE in
+				'#'*) : ;;
+				*'patch'*'<'*) 
+					PATCH=${LINE##*'<'}
+					PATCH=${PATCH%*')'}
+					echo $'\t'"${PATCH##*/}" >> "$THIS_PACKAGE"/install/$PKG_META
+				;;
+				*'zcat'*' | patch'*)
+					PATCH=$(echo ${LINE%' | patch'*})
+					PATCH=${PATCH##* }
+					echo $'\t'"${PATCH##*/}" >> "$THIS_PACKAGE"/install/$PKG_META
+				;;
+			esac
+		done < "$SRC_DIR"/patch.list
+		echo "\"" >> "$THIS_PACKAGE"/install/$PKG_META
+	fi
+	rm -f "$SRC_DIR"/patch.list
+	
+	#########
+	case $THIS_PACKAGE in
+		# Don't write this info for 'noarch' packages
+		*-noarch-*) : ;;
+		*$SHORT_NAME|*$DEVEL_PKG_NAME|*$SOLIBS_PKG_NAME)
+			
+			if [[ -f "$SRC_DIR"/$NAME-compressed-bins ]] ; then
+				echo "compressed_binaries=\"" >> "$THIS_PACKAGE"/install/$PKG_META
+				cat "$SRC_DIR"/$NAME-compressed-bins >> "$THIS_PACKAGE"/install/$PKG_META
+				echo "\"" >> "$THIS_PACKAGE"/install/$PKG_META
+			fi
+			
+			echo "build_configuration='" >> "$THIS_PACKAGE"/install/$PKG_META
+			if [[ -f "$SRC_DIR"/$NAME-config-command.txt ]] ; then
+				cat "$SRC_DIR"/$NAME-config-command.txt >> "$THIS_PACKAGE"/install/$PKG_META
+			else
+				echo "	LDFLAGS=\"$LDFLAGS\"" >> "$THIS_PACKAGE"/install/$PKG_META
+				if [[ -n $FLAG_LINE ]] ; then
+					echo "	CFLAGS=\"$FLAG_LINE\"" >> "$THIS_PACKAGE"/install/$PKG_META
+				else
+					echo "	CFLAGS=\"$CFLAGS\"" >> "$THIS_PACKAGE"/install/$PKG_META
+				fi
+				if [[ $CONFIG_COMMAND != 'skip' ]] ; then
+					echo "	$CONFIG_COMMAND $CONFIG_ARGS" >> "$THIS_PACKAGE"/install/$PKG_META
+				fi
+				
+			fi
+			echo "'" >> "$THIS_PACKAGE"/install/$PKG_META
+		;;
+	esac
+}
+
+function set_my_vars_from_name() {
+	MY_LONG_NAME="$(basename ${1} '.tpm')"
+	MY_SHORT_NAME="${MY_LONG_NAME%%_*}"
+	MY_LONG_VERSION=$(echo ${MY_LONG_NAME#*_})
+	local IFS='-'
+	set -- ${MY_LONG_VERSION}
+	MY_VERSION="$1"
+	MY_ARCH="$2"
+	case "$3" in
+		*_*)
+			MY_RELEASE="${3%%_*}"
+			MY_SIG="${3#*_}"
+		;;
+		*) MY_RELEASE="${3}" ;;
+	esac
+}
+
+write_pkg_spec_header() {
+	THIS_PACKAGE="$1"
+	set_my_vars_from_name "$THIS_PACKAGE"
+	mkdir -p install
+	echo "package=\"${MY_LONG_NAME}.$PKG_FORMAT\"" >> install/$PKG_META
+	echo "packager=\"${PACKAGER}\"" >> install/$PKG_META
+	echo "name=\"${MY_SHORT_NAME}\"" >> install/$PKG_META
+	echo "version=\"${MY_VERSION}\"" >> install/$PKG_META
+	echo "arch=\"${MY_ARCH}\"" >> install/$PKG_META
+	echo "release=\"${MY_RELEASE}\"" >> install/$PKG_META
+	echo "sig=\"${MY_SIG}\"" >> install/$PKG_META
+	echo "pkg_creation_date=\"$(date +%Y-%m-%d_%T)\"" >> install/$PKG_META
+	
+	SIZE="$(du -ks .)"
+	echo "uncompressed_size=\"${SIZE%%$'\t'*} KB\"" >> install/pkg-spec
+	if [[ -n $PKG_GROUP ]] ; then
+		echo "pkg_group=\"$PKG_GROUP\"" >> install/$PKG_META
+	fi
+	# if this is a child package, add the parent package name
+	case $THIS_PACKAGE in
+		*-devel-*|*-devel_*|*-docs-*|*-docs_*|*-nls-*|*-nls_*|*-solibs-*|*-solibs_*) 
+			echo "parent_package=\"$SHORT_NAME.$PKG_FORMAT\"" >> install/$PKG_META
+		;;
+		*)
+			case "$CUSTOM_PACKAGES" in
+				*${THIS_PACKAGE##*/}*)
+					echo "parent_package=\"$SHORT_NAME.$PKG_FORMAT\"" >> install/$PKG_META
+				;;
+			esac
+		;;
+	esac
+	
+	# other build-time identifiers
+	
+	# distro version
+	if [[ -f /etc/os-release ]] ; then
+		echo "os_version=\"$(cat /etc/os-release)\"" >> install/$PKG_META
+	elif [[ -f /etc/kiss-version ]] ; then
+		echo "os_version=\"KISS $(cat /etc/kiss-version)\"" >> install/$PKG_META
+	elif [[ -f /etc/slackware-version ]] ; then
+		echo "os_version=\"$(cat /etc/slackware-version)\"" >> install/$PKG_META
+	fi
+	echo "host=\"$(hostname)\"" >> install/$PKG_META
+	echo "processor=\"$(uname -m) $(uname -p)\"" >> install/$PKG_META
+	echo "target_architecture=\"$(gcc -dumpmachine)\"" >> install/$PKG_META
+	echo "src2pkg_version=\"$SRC2PKG_VERSION\"" >> install/$PKG_META
+}
+

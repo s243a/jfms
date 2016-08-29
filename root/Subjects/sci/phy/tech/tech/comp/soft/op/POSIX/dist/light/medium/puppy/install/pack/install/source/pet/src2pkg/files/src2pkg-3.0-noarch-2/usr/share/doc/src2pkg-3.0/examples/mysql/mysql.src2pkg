@@ -1,0 +1,92 @@
+#!/bin/bash
+## src2pkg script for: 	mysql
+## src2pkg Copyright 2005-2007 Gilbert Ashley <amigo@ibilio.org>
+
+SOURCE_NAME='mysql-5.0.51.tar.gz'
+NAME='mysql'
+VERSION='5.0.51'
+ARCH='i486'
+BUILD='1'
+PRE_FIX='/usr'
+# Any extra options go here
+EXTRA_CONFIGS='--with-mysqld-user=mysql --with-unix-socket-path=/var/run/mysql/mysql.sock \
+	--localstatedir=/var/lib/mysql --with-extra-charsets=complex --without-debug \
+	--without-bench --sysconfdir=/etc/mysql --enable-assembler --libexecdir=/usr/sbin \
+	--enable-static --with-zlib=/usr/lib --with-openssl=/etc/ssl \
+	--with-openssl-includes=/usr/include --with-openssl-libs=/usr/lib \
+	--with-big-tables --with-example-storage-engine \
+	--with-archive-storage-engine --with-blackhole-storage-engine \
+	--enable-thread-safe-client'
+	
+STD_FLAGS='-O2 -funroll-loops -fomit-frame-pointer -march=i486 -mtune=i686'
+
+DOCLIST='COPYING MIRRORS README ChangeLog Docs/INSTALL-BINARY '
+# Get the functions and configs
+. /usr/libexec/src2pkg/FUNCTIONS ;
+
+# do_all_processes can substitute these 16 steps:
+
+pre_process
+find_source
+make_dirs
+unpack_source
+fix_source_perms
+configure_source
+compile_source
+fake_install
+
+# most of this manual code comes from the SlackBuild for mysql by David Cantrell
+
+# Do not include the test suite:
+rm -rf $PKG_DIR/usr/mysql-test
+
+mkdir -p $PKG_DIR/etc/mysql
+( cd $SRC_DIR/support-files
+  cp my-huge.cnf my-large.cnf my-medium.cnf my-small.cnf $PKG/etc/mysql )
+
+# this is the directory where databases are stored
+mkdir -p $PKG_DIR/var/lib/mysql
+chown mysql.mysql $PKG_DIR/var/lib/mysql
+chmod 750 $PKG_DIR/var/lib/mysql
+
+# this is where the socket is stored
+mkdir -p $PKG_DIR/var/run/mysql
+chown mysql.mysql $PKG_DIR/var/run/mysql
+chmod 755 $PKG_DIR/var/run/mysql
+
+# Add init script:
+mkdir -p $PKG_DIR/etc/rc.d
+# This is intentionally chmod 644.
+cat $CWD/rc.mysqld > $PKG_DIR/etc/rc.d/rc.mysqld.new
+
+# Add some handy library symlinks:
+if [ -r $PKG_DIR/usr/lib/mysql/libmysqlclient.so.15 ]; then
+  ( cd $PKG_DIR/usr/lib
+    rm -f libmysqlclient.so libmysqlclient.so.15
+    ln -sf mysql/libmysqlclient.so .
+    ln -sf mysql/libmysqlclient.so.15 .
+  )
+fi
+if [ -r $PKG_DIR/usr/lib/mysql/libmysqlclient_r.so.15 ]; then
+  ( cd $PKG_DIR/usr/lib
+    rm -f libmysqlclient_r.so libmysqlclient_r.so.15
+    ln -sf mysql/libmysqlclient_r.so .
+    ln -sf mysql/libmysqlclient_r.so.15 .
+  )
+fi
+
+fix_pkg_perms
+strip_bins
+create_docs
+compress_man_pages
+make_description
+make_doinst
+make_package
+post_process
+
+# src2pkg - Copyright 2005-2007  Gilbert Ashley <amigo@ibiblio.org>
+## See the documentation for more help and examples. Below are some of
+# the most common Extras and Options for easy cut-and-paste use.
+# EXTRA_CONFIGS='' PRE_FIX='' DOCLIST=''
+# MAKE_COMMAND='' INSTALL_LINE='' 
+# SHELL_INSTALL='YES' CORRECT_PERMS='NO'

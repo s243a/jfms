@@ -1,0 +1,375 @@
+# packaging functions for kiss tar packages
+
+# tiny_make_package
+tiny_make_package() {
+	PACKAGE_NAME=$1
+	TARGET_NAME=$(dirname "$PACKAGE_NAME")
+	PACKAGE_NAME=$(basename "$PACKAGE_NAME")
+	SHORT_NAME=$(basename "$PACKAGE_NAME" ".$PKG_FORMAT")
+	umask 022
+	echo ""
+	
+	if [[ "$EUID" = "0" ]] ; then
+		${TAR} cvf "$SHORT_NAME".tar .
+	else
+		${TAR} --owner=root --group=root -cvf "$SHORT_NAME".tar .
+	fi
+	echo ""
+	
+	LONG_NAME=$SHORT_NAME.tar.xz
+	echo "Compressing $SHORT_NAME.tar using xz(lzma-2)..."
+	xz $SHORT_NAME.tar
+	
+	echo "Renaming $LONG_NAME to $PACKAGE_NAME..."
+	mv "$LONG_NAME" "$PACKAGE_NAME"
+	
+	if [[ ! "$TARGET_NAME" = "." ]]; then
+		echo "Moving $PACKAGE_NAME to $TARGET_NAME"
+		mv "$PACKAGE_NAME" "$TARGET_NAME"
+	fi
+}
+
+# Internal Routines
+mini_installpkg_slack() {
+THIS_PACKAGE="$1"
+THIS_PACKAGE_BASENAME="${THIS_PACKAGE##*/}"
+THIS_PACKAGE_SHORT_NAME="${THIS_PACKAGE_BASENAME%.*}"
+echo $BLUE"Installing package "$NORMAL"${THIS_PACKAGE_BASENAME}"
+PKG_COMPRESSOR=xz
+
+# ( cd  ; ${TAR} -xzlUpvf - ) < $PACKAGE 2> /dev/null
+# ( cd  ; ${TAR} -xlUpv --use-compress-program $PKG_COMPRESSOR -f - ) < $PACKAGE 2> /dev/null
+${TAR} -xlUpv -C / --use-compress-program $PKG_COMPRESSOR -f "$THIS_PACKAGE" 2> /dev/null
+
+DATABASE_FILE=$ADM_DIR_NAME/packages/"$THIS_PACKAGE_SHORT_NAME"
+make_database
+if [[ -f install/$PKG_POSTINST ]] ; then
+	echo "Executing install script for $SHORT_NAME..."
+	( cd / ; sh install/$PKG_POSTINST -install; )
+fi
+
+if [[ -x /sbin/ldconfig ]] && [[ $ROOT = "" ]] ; then
+    /sbin/ldconfig
+fi
+
+if [[ -d install ]] ; then
+	
+	if [[ -r install/$PKG_POSTINST ]] ; then
+		cp install/$PKG_POSTINST $ADM_DIR_NAME/postinst/"$THIS_PACKAGE_SHORT_NAME"
+		chmod 644 $ADM_DIR_NAME/postinst/"$THIS_PACKAGE_SHORT_NAME"
+	fi
+	if [[ -r install/$PKG_PREINST ]] ; then
+		cp install/$PKG_PREINST $ADM_DIR_NAME/preinst/"$THIS_PACKAGE_SHORT_NAME"
+		chmod 644 $ADM_DIR_NAME/preinst/"$THIS_PACKAGE_SHORT_NAME"
+	fi
+	if [[ -r install/$PKG_POSTRM ]] ; then
+		cp install/$PKG_POSTRM $ADM_DIR_NAME/postrm/"$THIS_PACKAGE_SHORT_NAME"
+		chmod 644 $ADM_DIR_NAME/postrm/"$THIS_PACKAGE_SHORT_NAME"
+	fi
+	if [[ -r install/$PKG_PRERM ]] ; then
+		cp install/$PKG_PRERM $ADM_DIR_NAME/prerm/"$THIS_PACKAGE_SHORT_NAME"
+		chmod 644 $ADM_DIR_NAME/prerm/"$THIS_PACKAGE_SHORT_NAME"
+	fi
+	if [[ -r install/$PKG_REQUIRED ]] ; then
+		cp install/$PKG_REQUIRED $ADM_DIR_NAME/required/"$THIS_PACKAGE_SHORT_NAME"
+		chmod 644 $ADM_DIR_NAME/required/"$THIS_PACKAGE_SHORT_NAME"
+	fi
+	if [[ -r install/$PKG_PROVIDES ]] ; then
+		cp install/$PKG_PROVIDES $ADM_DIR_NAME/provides/"$THIS_PACKAGE_SHORT_NAME"
+		chmod 644 $ADM_DIR_NAME/provides/"$THIS_PACKAGE_SHORT_NAME"
+	fi
+    ( cd /install 2> /dev/null && rm -f $PKG_POSTINST slack-* pkg-* *desc *required *provides *suggests *conflicts 1> /dev/null 2>&1 )
+    rmdir /install 1> /dev/null 2>&1
+fi
+}
+
+make_kiss_pkg() {
+# package segregated packages if they exist
+	# DEVEL
+	if [[ -d "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME ]] ; then
+		rm -f "$DEVEL_PACKAGE"
+		( cd "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME
+			echo -n $BLUE"Creating package: "$NORMAL"${DEVEL_PACKAGE##*/} - "
+			mkdir -p install
+			if [[ -f $PATCHES_DIR/$NAME-patches/$PKG_POSTINST.${NAME}-$DEVEL_TAG ]] ; then
+				cp $PATCHES_DIR/$NAME-patches/$PKG_POSTINST.${NAME}-$DEVEL_TAG install/$PKG_POSTINST
+			elif [[ -f $CWD/$PKG_POSTINST.${NAME}-$DEVEL_TAG ]] ; then
+				cp $CWD/$PKG_POSTINST.${NAME}-$DEVEL_TAG install/$PKG_POSTINST
+			else
+				# should we allow prepend or append files?
+				if [[ -s doinst.links ]] ; then
+					if [[ ! -s install/$PKG_POSTINST ]] ; then
+						echo "#!/bin/sh" > install/$PKG_POSTINST
+					fi
+					cat doinst.links >> install/$PKG_POSTINST
+				fi
+			fi
+			rm -f doinst.links
+			find * -type l -exec rm -f {} \;
+			
+			if [[ -s links.list ]] && [[ $EXTENDED_DATABASE = 'YES' ]] ; then
+				cat links.list > install/$PKG_LINKS
+			fi
+			rm -f links.list
+			
+			if [[ -f $PATCHES_DIR/$NAME-patches/$PKG_DESC.${NAME}-$DEVEL_TAG ]] ; then
+				cp $PATCHES_DIR/$NAME-patches/$PKG_DESC.${NAME}-$DEVEL_TAG install/$PKG_DESC
+			elif [[ -f $CWD/$PKG_DESC.${NAME}-$DEVEL_TAG ]] ; then
+				cp $CWD/$PKG_DESC.${NAME}-$DEVEL_TAG install/$PKG_DESC
+			else
+				echo "${NAME}-$DEVEL_TAG: ${NAME}-$DEVEL_TAG Development headers and Libraries from $NAME" > install/$PKG_DESC
+				echo "${NAME}-$DEVEL_TAG:" >> install/$PKG_DESC
+				echo "${NAME}-$DEVEL_TAG: This package contains the development headers and libraries from $NAME" >> install/$PKG_DESC
+				for i in {1..7} ; do
+					echo "${NAME}-$DEVEL_TAG:" >> install/$PKG_DESC
+				done
+				echo "${NAME}-$DEVEL_TAG: $SIGNATURE" >> install/$PKG_DESC
+			fi
+			# See the note in 14A-last_minute_details about this option
+			if [[ $ADD_MANIFEST_FILE != "NO"  ]] ; then
+				gen_pkg_manifest "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME silent
+			fi
+			# create the child package
+			tiny_make_package "$DEVEL_PACKAGE" &> /dev/null
+			if [[ -f "$DEVEL_PACKAGE" ]] ; then
+				echo $GREEN"Done"$NORMAL
+				[[ $REALLY_INSTALL = "YES" ]] && really_install "$DEVEL_PACKAGE"
+			else
+				echo $RED"Failed!"$NORMAL
+			fi
+		)
+		! [[ $DEBUG ]] && (cd "$PKG_BUILDS_DIR" && rm -rf $DEVEL_PKG_NAME)
+	fi
+	# DOCS
+	if [[ -d "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME ]] ; then
+		rm -f "$DOCS_PACKAGE"
+		( cd "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME
+			echo -n $BLUE"Creating package: "$NORMAL"${DOCS_PACKAGE##*/} - "
+			mkdir -p install
+			if [[ -f $PATCHES_DIR/$NAME-patches/$PKG_POSTINST.${NAME}-$DOCS_TAG ]] ; then
+				cp $PATCHES_DIR/$NAME-patches/$PKG_POSTINST.${NAME}-$DOCS_TAG install/$PKG_POSTINST
+			elif [[ -f $CWD/$PKG_POSTINST.${NAME}-$DOCS_TAG ]] ; then
+				cp $CWD/$PKG_POSTINST.${NAME}-$DOCS_TAG install/$PKG_POSTINST
+			else
+				# should we allow prepend or append files?
+				if [[ -s doinst.links ]] ; then
+					if [[ ! -s install/$PKG_POSTINST ]] ; then
+						echo "#!/bin/sh" > install/$PKG_POSTINST
+					fi
+					cat doinst.links >> install/$PKG_POSTINST
+				fi
+			fi
+			rm -f doinst.links
+			find * -type l -exec rm -f {} \;
+			
+			if [[ -s links.list ]] && [[ $EXTENDED_DATABASE = 'YES' ]] ; then
+				cat links.list > install/$PKG_LINKS
+			fi
+			rm -f links.list
+			
+			if [[ -f $PATCHES_DIR/$NAME-patches/$PKG_DESC.${NAME}-$DOCS_TAG ]] ; then
+				cp $PATCHES_DIR/$NAME-patches/$PKG_DESC.${NAME}-$DOCS_TAG install/$PKG_DESC
+			elif [[ -f $CWD/$PKG_DESC.${NAME}-$DOCS_TAG ]] ; then
+				cp $CWD/$PKG_DESC.${NAME}-$DOCS_TAG install/$PKG_DESC
+			else
+				echo "${NAME}-$DOCS_TAG: ${NAME}-$DOCS_TAG Document files for $NAME" > install/$PKG_DESC
+				echo "${NAME}-$DOCS_TAG:" >> install/$PKG_DESC
+				echo "${NAME}-$DOCS_TAG: This package contains the documentation for: $NAME" >> install/$PKG_DESC
+				for i in {1..7} ; do
+					echo "${NAME}-$DOCS_TAG:" >> install/$PKG_DESC
+				done
+				echo "${NAME}-$DOCS_TAG: $SIGNATURE" >> install/$PKG_DESC
+			fi
+			# See the note in 14A-last_minute_details about this option
+			if [[ $ADD_MANIFEST_FILE != "NO"  ]] ; then
+				gen_pkg_manifest "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME silent
+			fi
+			# create the child package
+			tiny_make_package "$DOCS_PACKAGE" &> /dev/null
+			if [[ -f "$DOCS_PACKAGE" ]] ; then
+				echo $GREEN"Done"$NORMAL
+				[[ $REALLY_INSTALL = "YES" ]] && really_install "$DOCS_PACKAGE"
+			else
+				echo $RED"Failed!"$NORMAL
+			fi
+		)
+		! [[ $DEBUG ]] && (cd "$PKG_BUILDS_DIR" && rm -rf $DOCS_PKG_NAME)
+	fi
+	# I18N
+	if [[ -d "$PKG_BUILDS_DIR"/$I18N_PKG_NAME ]] ; then
+		rm -f "$I18N_PACKAGE"
+		( cd "$PKG_BUILDS_DIR"/$I18N_PKG_NAME
+			echo -n $BLUE"Creating package: "$NORMAL"${I18N_PACKAGE##*/} - "
+			mkdir -p install
+			if [[ -f $PATCHES_DIR/$NAME-patches/$PKG_POSTINST.${NAME}-$I18N_tag ]] ; then
+				cp $PATCHES_DIR/$NAME-patches/$PKG_POSTINST.${NAME}-$I18N_tag install/$PKG_POSTINST
+			elif [[ -f $CWD/$PKG_POSTINST.${NAME}-$I18N_tag ]] ; then
+				cp $CWD/$PKG_POSTINST.${NAME}-$I18N_tag install/$PKG_POSTINST
+			else
+				# should we allow prepend or append files?
+				if [[ -s doinst.links ]] ; then
+					if [[ ! -s install/$PKG_POSTINST ]] ; then
+						echo "#!/bin/sh" > install/$PKG_POSTINST
+					fi
+					cat doinst.links >> install/$PKG_POSTINST
+				fi
+			fi
+			rm -f doinst.links
+			find * -type l -exec rm -f {} \;
+			
+			if [[ -s links.list ]] && [[ $EXTENDED_DATABASE = 'YES' ]] ; then
+				cat links.list > install/$PKG_LINKS
+			fi
+			rm -f links.list
+			
+			if [[ -f $PATCHES_DIR/$NAME-patches/$PKG_DESC.${NAME}-$I18N_TAG ]] ; then
+				cp $PATCHES_DIR/$NAME-patches/$PKG_DESC.${NAME}-$I18N_TAG install/$PKG_DESC
+			elif [[ -f $CWD/$PKG_DESC.${NAME}-$I18N_TAG ]] ; then
+				cp $CWD/$PKG_DESC.${NAME}-$I18N_TAG install/$PKG_DESC
+			else
+				echo "${NAME}-$I18N_TAG: ${NAME}-$I18N_TAG Language files for $NAME" > install/$PKG_DESC
+				echo "${NAME}-$I18N_TAG:" >> install/$PKG_DESC
+				echo "${NAME}-$I18N_TAG: This package contains the language files for: $NAME" >> install/$PKG_DESC
+				for i in {1..7} ; do
+					echo "${NAME}-$I18N_TAG:" >> install/$PKG_DESC
+				done
+				echo "${NAME}-$I18N_TAG: $SIGNATURE" >> install/$PKG_DESC
+			fi
+			# See the note in 14A-last_minute_details about this option
+			if [[ $ADD_MANIFEST_FILE != "NO"  ]] ; then
+				gen_pkg_manifest "$PKG_BUILDS_DIR"/$I18N_PKG_NAME silent
+			fi
+			# create the child package
+			tiny_make_package "$I18N_PACKAGE" &> /dev/null
+			if [[ -f "$I18N_PACKAGE" ]] ; then
+				echo $GREEN"Done"$NORMAL
+				[[ $REALLY_INSTALL = "YES" ]] && really_install "$I18N_PACKAGE"
+			else
+				echo $RED"Failed!"$NORMAL
+			fi
+		)
+		! [[ $DEBUG ]] && (cd "$PKG_BUILDS_DIR" && rm -rf $I18N_PKG_NAME)
+	fi
+	# SOLIBS
+	if [[ -d "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME ]] ; then
+		rm -f "$SOLIBS_PACKAGE"
+		( cd "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME
+			echo -n $BLUE"Creating package: "$NORMAL"${SOLIBS_PACKAGE##*/} - "
+			mkdir -p install
+			if [[ -f $PATCHES_DIR/$NAME-patches/$PKG_POSTINST.${NAME}-$SOLIBS_TAG ]] ; then
+				cp $PATCHES_DIR/$NAME-patches/$PKG_POSTINST.${NAME}-$SOLIBS_TAG install/$PKG_POSTINST
+			elif [[ -f $CWD/$PKG_POSTINST.${NAME}-$SOLIBS_TAG ]] ; then
+				cp $CWD/$PKG_POSTINST.${NAME}-$SOLIBS_TAG install/$PKG_POSTINST
+			else
+				# should we allow prepend or append files?
+				if [[ -s doinst.links ]] ; then
+					if [[ ! -s install/$PKG_POSTINST ]] ; then
+						echo "#!/bin/sh" > install/$PKG_POSTINST
+					fi
+					cat doinst.links >> install/$PKG_POSTINST
+				fi
+			fi
+			rm -f doinst.links
+			# find * -type l -exec rm -f {} \;
+			
+			# Create or install the package description file
+			if [[ -f $PATCHES_DIR/$NAME-patches/$PKG_DESC.${NAME}-$SOLIBS_TAG ]] ; then
+				cp $PATCHES_DIR/$NAME-patches/$PKG_DESC.${NAME}-$SOLIBS_TAG install/$PKG_DESC
+			elif [[ -f $CWD/$PKG_DESC.${NAME}-$SOLIBS_TAG ]] ; then
+				cp $CWD/$PKG_DESC.${NAME}-$SOLIBS_TAG install/$PKG_DESC
+			else
+				echo "${NAME}-$SOLIBS_TAG: ${NAME}-$SOLIBS_TAG Runtime libraries from $NAME" > install/$PKG_DESC
+				echo "${NAME}-$SOLIBS_TAG:" >> install/$PKG_DESC
+				echo "${NAME}-$SOLIBS_TAG: This package contains the runtime libraries from: $NAME" >> install/$PKG_DESC
+				for i in {1..7} ; do
+					echo "${NAME}-$SOLIBS_TAG:" >> install/$PKG_DESC
+				done
+				echo "${NAME}-$SOLIBS_TAG: $SIGNATURE" >> install/$PKG_DESC
+			fi
+			
+			if [[ "$ADD_PROVIDES_FILE" = "YES" ]] ; then
+				# Create a PKG_PROVIDES file
+				gen_provides_list  "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME > "$SRC_DIR"/provides.tmp
+				if [[ -s "$SRC_DIR"/provides.tmp ]] ; then
+					#echo -n "      Creating '$PKG_PROVIDES' "
+					#echo "# $SOLIBS_PKG_NAME provides these 'requireable' items:" > install/$PKG_PROVIDES
+					sort -u "$SRC_DIR"/provides.tmp |uniq -u > install/$PKG_PROVIDES
+					#echo $GREEN"Done"$NORMAL
+				fi
+				rm -f "$SRC_DIR"/provides.tmp
+			fi
+			
+			if [[ -s links.list ]] ; then
+				while read ONE_LINK ONE_TARGET ; do
+					case $ONE_LINK in
+						'') : ;; #ignore blank lines
+						*)	DIR=${ONE_LINK%/*}
+							BASE=${ONE_LINK##*/}
+							#TARGET=$( cd $DIR and stat -L $BASE ) #works also
+							TARGET=$( cd $DIR and readlink $BASE )
+							# if TARGET is prefix with '../' or is an absolute path then eliminate that
+							case $TARGET in
+								*'./'*) TARGET=${TARGET##*'./'} ;;
+								'/'*) TARGET=${TARGET:1} ;;
+							esac
+							# only include this link if it refers to a 'requireable' item from list generated above
+							if [[ $( grep "$TARGET"$  install/$PKG_PROVIDES ) ]] ; then
+							# maybe need '|| [[ -e $TARGET ]] || [[ -L $TARGET ]]' #for badly-formed links
+								echo $ONE_LINK >> install/$PKG_PROVIDES 
+							fi
+						;;
+					esac
+				done < links.list
+				if [[ $EXTENDED_DATABASE = 'YES' ]] ; then
+					cat links.list > install/$PKG_LINKS
+				fi
+			fi
+			rm -f links.list
+			find * -type l -exec rm -f {} \;
+			# See the note in 14A-last_minute_details about this option
+			if [[ $ADD_MANIFEST_FILE != "NO"  ]] ; then
+				gen_pkg_manifest "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME silent
+			fi
+			# create the child package
+			tiny_make_package "$SOLIBS_PACKAGE" &> /dev/null
+			if [[ -f "$SOLIBS_PACKAGE" ]] ; then
+				echo $GREEN"Done"$NORMAL
+				[[ $REALLY_INSTALL = "YES" ]] && really_install "$SOLIBS_PACKAGE"
+			else
+				echo $RED"Failed!"$NORMAL
+			fi
+		)
+		! [[ $DEBUG ]] && (cd "$PKG_BUILDS_DIR" && rm -rf $SOLIBS_PKG_NAME)
+	fi
+	
+	# create the main package
+	rm -f "$PACKAGE"
+	echo -n $BLUE"Creating package: "$NORMAL"${PACKAGE##*/} - "
+	if [[ $QUIET = "YES" ]] ; then
+		cd "$PKG_DIR" ;
+		tiny_make_package "$PACKAGE" &> /dev/null
+	else
+		cd "$PKG_DIR" ;
+		echo ""
+		tiny_make_package "$PACKAGE"
+	fi
+	if [[ -f "$PACKAGE" ]] ; then
+		echo $GREEN"Done"$NORMAL
+		if [[ "$CREATE_MD5_CHECKSUM" = "YES" ]]; then
+			echo $BLUE"Creating md5 checksum - "$NORMAL"$(basename $PACKAGE).md5"
+			cd "$PKG_DEST_DIR"
+			md5sum $(basename "$PACKAGE") > "$PACKAGE".md5
+		fi
+		echo $BLUE"Package Creation - "$GREEN"Successful! "$NORMAL"Package Location:"
+		echo "$PACKAGE"
+	else
+		echo $RED"FAILED! "$NORMAL
+		echo "Creation of ${PACKAGE##*/} has failed."
+		FAILED="PACKAGE CREATION in: $FUNCNAME"
+	fi
+	[[ $REALLY_INSTALL = "YES" ]] && really_install "$PACKAGE"
+	if [[ $PAUSE = "AFTER" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+		echo $MAGENTA"Notice - "$BLUE"Pausing after: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+		read
+	fi
+}

@@ -1,0 +1,642 @@
+#!/bin/bash
+# /usr/bin/src2pkg
+# This file is part of the src2pkg program:
+# src2pkg - Copyright 2005-2014 Gilbert Ashley <amigo@ibilio.org>
+# src2pkg is released under the GNU General Public License Version 2
+
+! [[ "$CWD" ]] && CWD="$(pwd)" # && export CWD
+SRC2PKG_VERSION="3.0"
+! [[ $SRC2PKG_LIBDIR ]] && SRC2PKG_LIBDIR=/usr/libexec/src2pkg
+# ANSI COLORS
+CRE="[K"
+NORMAL="[0;39m"
+# RED: Failure or error message
+RED="[1;31m"
+# GREEN: Success message
+GREEN="[1;32m"
+# YELLOW: Warnings
+YELLOW="[1;33m"
+# BLUE: Summary messages
+BLUE="[1;34m"
+# CYAN: Current Process
+CYAN="[1;36m"
+
+show_usage() {
+echo ""
+echo "  $(basename $0) - Build an installable package from a source tarball or other content."
+echo "  $(basename $0) [-h,--help,--more-help(-hh) --version, --setup, --list]"
+echo "  $(basename $0) [User Options] [Build Options]  FILENAME"
+echo "  $(basename $0) -[ABCDHINOPQRTUV(VV)WX] -CWD -[abcdefimnpsuv] FILENAME"
+echo "  FILENAME should be the name of an archive or *.src2pkg build script."
+echo "  FILENAME can be a relative or absolute path or a valid URL address."
+echo ""
+echo "  The following User Options take no argument:"
+echo " -A	Autogenerate a src2pkg script if the build succeeds."
+echo " -B	Keep backups of overwritten files (implies the SAFE method)."
+echo " -C	Place finished package in Current directory."
+echo " -CWD	Use the current directory for all build locations."
+echo " -D	Don't apply diff or patch files automatically."
+echo " -H	Place finished package in your HOME directory."
+echo " -I	Install the created package when finished."
+echo " -N	Generate a starting src2pkg script and description file only."
+echo " -O	Compile sources in a separate 'clean' directory."
+echo " -P	Preserve permissions in the source directory"
+echo " -Q	Query the user interactively during configuration and package creation."
+echo " -R	Replay errors if configuration or compilation fail."
+echo " -T	Test-build the source code without installing or making a package."
+echo " -U	Update the build script, if needed."
+echo " -V	Show detailed prompts for debugging."
+echo " -VV	Be verbose. Show all output from the steps."
+echo " -W	(--cleanup) Delete (wipe out) temporary build files."
+echo " -X	Find and execute a build script in the current working directory."
+echo ""
+echo "  The following Build Options require an argument separated by the '=' sign."
+echo "  Use single quotes '' around the arguments if they contain spaces."
+echo " -a	(--arch) Set the architecture of the package. [-a=noarch]"
+echo " -b	(--build) Set the build or release number. [-b=2]"
+echo " -c	(--config_command) Set CONFIG_COMMAND option. [-c='./configure Linux']"
+echo " -d	(--doclist) List of documents to include. [-d='README AUTHORS']"
+echo " -e	(--extra_configs) Extra arguments to configure. [-e='--with-gnu-ld']"
+echo " --excludes Exclude comma-separated list of items from package. [PKG_EXCLUDES]"
+echo " -f	(--std_flags) Set the CFLAGS variable. [-f='-Wall -O3']"
+echo " -i	(--install_line) Set the install command line.[-i='make install']"
+echo " -m	(--make_command) Set the 'make' command. [-m='make dep all']"
+echo " -n	(--alt_name) Set the package name [-n='newname']."
+echo " -p	(--pre_fix,--prefix) Set the package installation prefix. [-p=/usr]"
+echo " -s	(--config_subdir) Set the configuration subdir. [-s=src]"
+echo " -u	(--source_url) URL location of the source tarball [-u=http://xxx]"
+echo " -v	(--alt_version) Set the version of the package. [-v=0.0.0a]"
+echo ""
+echo "  Special Options:"
+echo " -h         (--help) Show this help page and exit."
+echo " -hh        (--more-help) Show extended options and examples."
+echo " --version  Show the src2pkg version number and exit."
+echo " --list     Show a list of the src2pkg instruction functions."
+echo " --setup    Compile the binaries and libraries needed by src2pkg."
+echo "            Usually only needed when you first install src2pkg."
+echo ""
+echo "  Examples:"
+echo "  src2pkg myprogram-0.1.tar.bz2"
+echo "  src2pkg -N myprogram-0.1.tar.bz2"
+echo "  src2pkg -i='make install install-data' -A myprogram-0.1.tar.bz2"
+echo "  src2pkg -e='--disable-nls' -A myprogram-0.1.tar.bz2"
+echo "  src2pkg URL  (URL can be the URL of a tarball or of a src2pkg script)"
+echo ""
+if ! [[ -x /usr/libexec/src2pkg/lib/libsentry.so ]] ; then
+	echo $RED"   Notice!"$NORMAL" src2pkg has not been set up for use yet. You must run"
+	echo "   'src2pkg --setup' as user 'root' before src2pkg can be used."
+else
+	echo "   Please give the path or URL to an archive, or give other valid argument."
+	echo "   Extra help options can be seen by running the command 'src2pkg -hh'."
+fi
+}
+
+show_more_help() {
+echo ""
+echo " -LOG	    Log output of 'configure', 'make' and 'make install' to a file."
+echo " -ACF	Use configure options from rpm *.spec or debian rules files, if found."
+echo " -ACN	Use configure options found from the configure script in the sources."
+echo " -BUMP	Increment the BUILD number by one and write the change to the script."
+echo " -CHECK	Verify the build using 'make check' (or command set with -t/--test_command)."
+echo " -DEST	Run installation using the DESTDIR (or similar) variable, if available."
+echo " -JAIL	Run installation in a 'jailed root' or sandbox directory."
+echo " -REAL	Run installation in the real root filesystem using tracking (root only)."
+echo " -SAFE	Backup and restore files which are overwritten by the installation(root only)."
+echo " -UNION	Run installation using a unionfs/chroot, if available(root only)."
+echo " --pause=?? (before|after) Pause before or after running each function."
+echo " --pause=funcname Pause before and after the named function. (--list to see options)"
+echo " --resume=funcname  Resume build starting at named function. (--list to see options)"
+echo " --convert-simple  Convert a SlackBuild into a simple src2pkg script."
+echo " --convert  Convert a SlackBuild into a src2pkg script with a 'build' function."
+# echo " --convert-brief  Convert a SlackBuild into a src2pkg script with a brief 'build' function."
+echo " --splitpkg=??,??  Create separate 'devel', 'nls', 'docs' and/or 'solibs' packages."
+echo " -t (--test_command) Set the test command (implies -CHECK). [-t='make check']"
+echo ""
+echo "		Advanced options:"
+echo " --cc=?? Set the CC variable to choose the C compiler to use. (export CC=??)"
+echo " --cxx=?? Set the CXX variable to choose the C++ compiler to use. (export CXX=??)"
+echo " --db-root=?? Use the database files from an alternate root."
+echo " -E	Create extended database files (slack-required and slack-supplies)"
+echo " -LANG	Delete extra language files (man-pages, locale and i18n) files."
+echo " --jobs=??	Set number of concurrent 'jobs' for 'make'. (NUMJOBS=-j??)"
+echo " -L32	Use /lib32, /usr/lib32 and /usr/lib32/pkgconfig paths"
+echo " -L64	Use /lib64, /usr/lib64 and /usr/lib64/pkgconfig paths"
+echo " -L0/-LNULL/-Lnull	Use /lib, /usr/lib and /usr/lib/pkgconfig paths"
+echo " --libdirsuffix=??	Use /lib??, /usr/lib?? and /usr/lib??/pkgconfig paths"
+echo " -M32	Compile for 32-bit machine (MACHINE=-m32)"
+echo " -M64	Compile for 64-bit machine (MACHINE=-m64)"
+echo " --machine=??	Compile for machine (MACHINE=-m??)"
+echo " -DEB  Create the final package as a debian *.deb archive"
+echo " -PET	 Create the final package as a '.pet' archive."
+echo " -PET2 Create the package as a '.pet' 'woof' archive."
+echo " -RPM	 Create the final package as an '.rpm' archive."
+echo " -TAZ	 Create the final package as an '.tazpkg' archive."
+echo " -TGZ	 Use gzip to compress the final package (default)."
+echo " -TBZ	 Use bzip2 instead of gzip to compress the final package."
+echo " -TLZ	 Use lzma instead of gzip to compress the final package."
+echo " -TXZ	 Use xz (lzma-2) instead of gzip to compress the final package."
+echo " -TPKG	 Create the final package as a KISS '.tpkg' archive (xz compression)."
+echo " -TPM	 Create the final package as a KISS '.tpm' archive (xz compression)."
+echo " -EPX	 Use exepak to compress binaries inside the package."
+echo " -UPX	 Use upx-ucl or upx to compress binaries inside the package."
+#echo "  -UPXL	Use upx-ucl or upx to compress libraries inside the package."
+echo " -Z?	SAVE_SPACE=? Squeeze packages by using more compression:"
+echo "   	The 'Z' options are cumulative - Z4 does all of Z1, Z2 and Z3."
+echo " -Z1	Z1 Use bzip2 instead of gzip for man-pages."
+echo " -Z2	Z2 Compresses ELF binaries using upx-ucl, upx or exepak if present"
+echo " -Z3	Z3 Link to a common copy of the GPL in /usr/share/licences."
+echo " -Z4	Z4 Archive the package doc directory and remove 'info' files."
+}
+
+FUNCTION_LIST="
+find_source
+make_dirs
+unpack_source
+fix_source_perms
+configure_source
+compile_source
+fake_install
+fix_pkg_perms
+strip_bins
+create_docs
+compress_man_pages
+make_description
+make_doinst
+make_package
+"
+
+list_functions() {
+for FUNCTION in $FUNCTION_LIST ; do
+echo $FUNCTION
+done
+echo ""
+echo "* pre_process and post_process are left out of the list."
+echo "* If used, the 'build' function replaces these three:"
+echo "   configure_source, compile_source and fake_install."
+exit 0
+}
+
+if [[ -z $1 ]] ; then
+	show_usage
+	exit 0
+else
+	if [[ $1 = "-h" ]] || [[ $1 = "--help" ]] ; then
+	 show_usage
+	 exit 0
+	fi
+	if [[ $1 = "--version" ]] ; then
+	 echo "src2pkg version-$SRC2PKG_VERSION"
+	 exit 0
+	fi
+	if [[ $1 = "--more-help" ]] | [[ $1 = "-hh" ]] ; then
+	 show_more_help
+	 exit 0
+	fi
+	if [[ $1 = "--setup" ]] ; then
+		if [[ $EUID -eq 0 ]] ; then
+			if [[ -f $SRC2PKG_LIBDIR/bin/version ]] ; then
+				INSTALLED_HELPERS_VERSION=$(cat $SRC2PKG_LIBDIR/bin/version)
+			elif [ -f var/log/packages/src2pkg-helpers* ] ; then
+				INSTALLED_HELPERS_VERSION=$(ls var/log/packages/src2pkg-helpers* |cut -f3 -d'-')
+			else
+				INSTALLED_HELPERS_VERSION=0
+			fi
+			CURRENT_HELPERS_VERSION="$(grep '^VERSION=' /usr/src/src2pkg/src2pkg-helpers/src2pkg-helpers.src2pkg |cut -f 2 -d'=')"
+			
+			if [[ $INSTALLED_HELPERS_VERSION = 0 ]] ; then
+				/bin/bash -c "/usr/src/src2pkg/src2pkg-helpers/src2pkg.setup"
+			elif [[ $INSTALLED_HELPERS_VERSION != $CURRENT_HELPERS_VERSION ]] ; then
+				export UPDATE=1 ; /bin/bash -c "/usr/src/src2pkg/src2pkg-helpers/src2pkg.setup"
+			else
+				case $FORCE in
+					1|YES) . /usr/src/src2pkg/src2pkg-helpers/src2pkg.setup ;;
+					*)	echo "Hmmm, your src2pkg-helpers seems to be up to date."
+						echo "Run: 'export FORCE=1 ; src2pkg --setup' to force build.";;
+				esac
+			fi
+			exit 0
+		else
+		  echo $RED"FAILED! "$NORMAL" You must be logged in as user 'root' to setup src2pkg."
+		  exit 0
+		fi
+	fi
+	for option in "$@" ; do
+	  case $option in
+		-A) AUTO_SCRIPT=1 ; shift ;;
+		-ACF) AUTO_CONFIG=FOREIGN ; shift ;;
+		-ACN) AUTO_CONFIG=NATIVE ; shift ;;
+		-B) KEEP_BACKUPS="YES" ; SAFE_METHOD=YES ; INSTALL_TYPE=REAL ; shift ;;
+		-BUMP) INCREMENT_BUILD="YES" ; shift ;;
+		-C) PKG_DEST_DIR="$CWD" ; shift ;;
+		-CHECK) CHECK_BUILD="YES" ; shift ;;
+		-CWD) SOURCES_DIR="$CWD" PKG_DEST_DIR="$CWD" SRC_BUILDS_DIR="$CWD" PKG_BUILDS_DIR="$CWD" BACKUP_DIR="$CWD" ; shift ;;
+		-D) AUTO_PATCH="NO" ; shift ;;
+		-DESTDIR|-DEST) INSTALL_TYPE="DESTDIR" WRITE_INSTALL_TYPE=1 ; shift ;;
+		-E) EXTENDED_DATABASE="YES" ; shift ;;
+		-EPX) COMPRESS_BINS="YES" ; BIN_COMPRESSOR="exepak" ; shift ;;
+		-H) PKG_DEST_DIR="$HOME" ; shift ;;
+		-I) REALLY_INSTALL="YES" ; shift ;;
+		-JAIL) INSTALL_TYPE="JAIL" WRITE_INSTALL_TYPE=1 ; shift ;;
+		# -J0) NUMJOBS="" ; shift ;;
+		--jobs=*) NUMJOBS=${option:7} ; shift ;;
+		-LANG)  PURGE_LOCALES="YES" ; shift ;;
+		-LOG) LOG_COMMANDS="YES" ; shift ;;
+		#-L32) LIBDIRSUFFIX="32" ; WRITE_LIBDIRSUFFIX=1 ; shift ;;
+		-L32) LIBDIRSUFFIX="32" ; WRITE_LIBDIRSUFFIX=0 ; shift ;;
+		-L64) LIBDIRSUFFIX="64" ; WRITE_LIBDIRSUFFIX=0 ; shift ;;
+		-L0|-LNULL|-Lnull) LIBDIRSUFFIX="NULL" ; WRITE_LIBDIRSUFFIX=0 ; shift ;;
+		--libdirsuffix=*) LIBDIRSUFFIX="${option:15}" ; WRITE_LIBDIRSUFFIX=0 ; shift ;;
+		#-M0) MACHINE="" ; WRITE_MACHINE_FLAGS=1 ; shift ;;
+		-M0) MACHINE="" ; WRITE_MACHINE_FLAGS=0 ; shift ;;
+		-M32) MACHINE="-m32" ; WRITE_MACHINE_FLAGS=0 ; shift ;;
+		-M64) MACHINE="-m64" ; WRITE_MACHINE_FLAGS=0 ; shift ;;
+		--machine=*) MACHINE="-m${option:10}" ; WRITE_MACHINE_FLAGS=0 ; shift ;;
+		-N) NEW_BUILD=1 ; shift ;;
+		-O) USE_OBJ_DIR="YES" ; shift ;;
+		-P) CORRECT_PERMS="NO" ; shift ;;
+		-Q) INTERACTIVE_MODE="ALL" ; shift ;;
+		-R) REPLAY_ERRORS="YES" ; shift ;;
+		-REAL) INSTALL_TYPE="REAL" WRITE_INSTALL_TYPE=1 ; shift ;;
+		-S) SHELL_INSTALL=1 ; shift ;;
+		-SAFE) SAFE_METHOD=YES ; INSTALL_TYPE=REAL ; shift ;;
+		-T) TEST_BUILD=1 ; shift ;;
+		-DEB) PKG_FORMAT="deb" ; shift ;;
+		-PET) PKG_FORMAT="pet" ; shift ;;
+		-PET2) PKG_FORMAT="pet" ; PET2=1 ; shift ;;
+		-RPM) PKG_FORMAT="rpm" ; shift ;;
+		-TAZ) PKG_FORMAT="tazpkg" ; shift ;;
+		-TBZ) PKG_FORMAT="tbz" ; shift ;;
+		-TGZ) PKG_FORMAT="tgz" ; shift ;;
+		-TLZ) PKG_FORMAT="tlz" ; shift ;;
+		-TXZ) PKG_FORMAT="txz" ; shift ;;
+		-TPKG) PKG_FORMAT="tpkg" ; shift ;;
+		-TPM) PKG_FORMAT="tpm" ; shift ;;
+		-U) UPDATE_SCRIPT=1 ; shift ;;
+		-UNION) INSTALL_TYPE=UNION ; shift ;;
+		-UPX) COMPRESS_BINS="YES" ; shift ;;
+		-V) DEBUG=1 SHOW_DEPS=1 ; shift ;;
+		-VV) QUIET="NO" ; shift ;;
+		-W|--cleanup) CLEANUP="ALL" ; shift ;;
+		-X) RUN_SCRIPT=1 ; shift ;;
+		-Z1) SAVE_SPACE=1 ; shift ;;
+		-Z2) SAVE_SPACE=2 ; shift ;;
+		-Z3) SAVE_SPACE=3 ; COMPRESS_BINS="YES" ; shift ;;
+		-Z4) SAVE_SPACE=4 ; shift ;;
+		--cc=*) export CC="${option:5}" ; shift ;;
+		--cxx=*) export CXX="${option:6}" ; shift ;;
+		--convert) CONVERT_SCRIPT=1 ; shift ;;
+		--convert-simple) CONVERT_SCRIPT=1 ; CONVERT_SIMPLE=1 ; shift ;;
+		--db-root=*) DB_ROOT="${option:10}" ; shift ;;
+		--list) list_functions ;;
+		--resume=*) RESUME=$(echo $option |cut -f2 -d'=') ;
+					if ! [[ $(echo $FUNCTION_LIST |grep $RESUME) ]] ; then
+						echo "'$RESUME' is not a valid function name."
+						echo "Run 'src2pkg --list' to see the list of functions."
+						exit 0
+					else
+						shift
+					fi ;;
+		--pause=*) PAUSE=$(echo $option |cut -f2 -d'=') ;
+					if [[ $PAUSE = "before" ]] ; then
+						PAUSE=BEFORE ; shift
+					elif [[ $PAUSE = "after" ]] ; then
+						PAUSE=AFTER ; shift
+					else
+						if ! [[ $(echo $FUNCTION_LIST |grep $PAUSE) ]] ; then
+							echo "Invalid use of '--pause=??' option."
+							echo "Usage: '--pause=before', '--pause=after' or: '--pause=funcname'"
+							exit 0
+						else
+							shift
+						fi
+					fi ;;
+		--splitpkg=*) SPLIT_PACKAGE="$(echo $option |cut -f2 -d'=')" ; shift ;;
+		-a=*|--arch=*) ARCH=$(echo $option |cut -f2 -d'=') ; shift ;;
+		-b=*|--build=*) BUILD=$(echo $option |cut -f2 -d'=') ; shift ;;
+		-c=*|--config_command=*) CONFIG_COMMAND=$(echo $option |cut -f2 -d'=') ;
+					WRITE_CONFIG_COMMAND=1 ; shift ;;
+		-d=*|--doclist=*) DOCLIST=$(echo $option |cut -f2 -d'=') ; shift ;;
+		-e=*|--extra_configs=*) EXTRA_CONFIGS=$(echo $option |cut -f2- -d'=') ; shift ;;
+		--excludes=*) PKG_EXCLUDES=$(echo $option |cut -f2- -d'=') ; shift ;;
+		-f=*|--std_flags=*) STD_FLAGS=$(echo $option |cut -f2- -d'=') ;
+					WRITE_FLAGS=1 ; shift ;;
+		-i=*|--install_line=*) INSTALL_LINE=$(echo $option |cut -f2- -d'=') ; shift ;;
+		-m=*|--make_command=*) MAKE_COMMAND=$(echo $option |cut -f2- -d'=') ; shift ;;
+		-n=*|--alt_name=*) ALT_NAME=$(echo $option |cut -f2 -d'=') ; shift ;;
+		-p=*|--pre_fix=*|--prefix=*) PRE_FIX=$(echo $option |cut -f2 -d'=') ; shift ;;
+		-s=*|--config_subdir=*) CONFIG_SUBDIR=$(echo $option |cut -f2 -d '=') ; shift ;;
+		-t=*|--test_command=*) CHECK_COMMAND=$(echo $option |cut -f2- -d'=') ;
+					CHECK_BUILD="YES" ; shift ;;
+		-u=*|--source_url=*) SOURCE_URL=$(echo $option |cut -f2 -d '=') ; shift ;;
+		-v=*|--alt_version=*) ALT_VERSION=$(echo $option |cut -f2 -d'=') ; shift ;;
+		*.tar)		EXT=tar ; SOURCE="$1" ; shift ;;
+		*.tbz)		EXT=tbz ; SOURCE="$1" ; shift ;;
+		*.tbz2)		EXT=tbz2 ; SOURCE="$1" ; shift ;;
+		*.tar.bz2)	EXT=tar.bz2 ; SOURCE="$1" ; shift ;;
+		*.tgz)		EXT=tgz ; SOURCE="$1" ; shift ;;
+		*.tar.gz)	EXT=tar.gz ; SOURCE="$1" ; shift ;;
+		*.tlz)		EXT=tlz ; SOURCE="$1" ; shift ;;
+		*.tar.lzma)	EXT=tar.lzma ; SOURCE="$1" ; shift ;;
+		*.txz)		EXT=txz ; SOURCE="$1" ; shift ;;
+		*.tar.xz)	EXT=tar.xz ; SOURCE="$1" ; shift ;;
+		*.tar.lzma2)	EXT=tar.lzma2 ; SOURCE="$1" ; shift ;;
+		*.deb)		EXT=deb ; SOURCE="$1" ; shift ;;
+		*.src.rpm)	EXT=src.rpm ; SOURCE="$1" ; shift ;;
+		*.rpm)		EXT=rpm ; SOURCE="$1" ; shift ;;
+		*.zip)		EXT=zip ; SOURCE="$1" ; shift ;;
+		*.src2pkg)	EXT=.src2pkg ; SCRIPT="$1" ; shift ;;
+		*.src2pkg.auto)	EXT=.src2pkg.auto ; SCRIPT="$1" ; shift ;;
+		*.PkgBuild) 	EXT=.PkgBuild ; SCRIPT="$1" ; shift ;;
+		*.PkgBuild.auto) EXT=.PkgBuild.auto ; SCRIPT="$1" ; shift ;;
+		*.SlackBuild) 	EXT=.SlackBuild ; SCRIPT="$1" ; shift ;;
+		# *.torrent)	EXT=.torrent ;;
+		*)	echo "Unrecognized option: $option" ; exit 1 ;;
+	  esac
+	done
+	
+	. $SRC2PKG_LIBDIR/FUNCTIONS
+	# Since we have already read the conf files set HAVE_CONF so that they don't
+	# get read again if we later source a SCRIPT
+	HAVE_CONF=1
+	if [[ $CONVERT_SCRIPT = 1 ]] ; then
+		if [[ $SCRIPT =~ ".SlackBuild" ]] ; then
+			# This is usually right...
+			NAME=$(echo $SCRIPT |cut -f1 -d'.')
+			if [[ $CONVERT_SIMPLE = 1 ]] ; then
+				sb2sp --simple $SCRIPT
+				if [[ $? -ne 0 ]] ; then
+					echo $RED"Failed! "$NORMAL"Unable to create script"
+					exit
+				fi
+			else
+				sb2sp $SCRIPT
+				if [[ $? -ne 0 ]] ; then
+					echo $RED"Failed! "$NORMAL"Unable to create script"
+					exit
+				fi
+			fi
+			SCRIPT=$NAME.src2pkg.auto
+			if [[ $RUN_SCRIPT = 1 ]] ; then
+				# trying to run the script can cause problems because of environmental pollution
+				unset_vars
+				echo $BLUE"Running build script:"$NORMAL $(basename "$SCRIPT")
+				. $SCRIPT
+			else
+				[[ ! -f $CWD/$PKG_DESC ]] && make_simple_desc
+				echo $CYAN"Notice - "$NORMAL"$SCRIPT can be run with 'src2pkg -X'"
+			fi
+			exit
+		else
+			echo $YELLOW"Notice - "$NORMAL"The convert option is for use with *.SlackBuild scripts"
+			exit
+		fi
+	fi
+	
+	# this routine will update a script to a new source version
+	if [[ "$SOURCE" != "" ]] || [[ "$SOURCE_URL" != "" ]] && [[ $UPDATE_SCRIPT ]] ; then
+		. $SRC2PKG_LIBDIR/FUNCTIONS
+		
+		if [[ "$SOURCE_URL" != "" ]] ; then
+			IS_URL=1
+		else
+			case $SOURCE in
+			/*) IS_SOURCE=1 ;;
+			*://*) IS_URL=1 ;;
+			*) IS_SOURCE_NAME=1 ;;
+			esac
+		fi
+		# pre-process the SOURCE or SOURCE_URL or SOURCE_NAME to get the NAME
+		pre_process
+		if [[ -f $NAME.src2pkg ]] ; then
+			SCRIPT=$NAME.src2pkg
+		elif [[ -f $NAME.src2pkg.auto ]] ; then
+			SCRIPT=$NAME.src2pkg.auto
+		fi
+		if [[ $SCRIPT ]] ; then
+			OLD_SOURCE=$(grep '^SOURCE' $SCRIPT |cut -f2 -d= |cut -f1 -d' ')
+			OLD_VERSION=$(grep '^VERSION' $SCRIPT |cut -f2 -d= |cut -f1 -d' ')
+			OLD_SOURCE=${OLD_SOURCE//\'/}
+			OLD_VERSION=${OLD_VERSION//\'/}
+			if [[ $IS_URL ]] && [[ "$OLD_SOURCE" != "$SOURCE_URL" ]] ; then
+				echo $CYAN"   Notice - "$NORMAL"Updating old SOURCE: '$OLD_SOURCE' to:  '$SOURCE_URL'"
+				sed -i "s,^SOURCE.*,SOURCE_URL='$SOURCE_URL'," "$SCRIPT"
+				HAVE_UPDATED=1
+			elif [[ $IS_SOURCE ]] && [[ "$OLD_SOURCE" != "$SOURCE" ]] ; then
+				echo $CYAN"   Notice - "$NORMAL"Updating old SOURCE: '$OLD_SOURCE' to:  '$SOURCE'"
+				sed -i "s,^SOURCE.*,SOURCE='$SOURCE'," "$SCRIPT"
+				HAVE_UPDATED=1
+			elif [[ "$OLD_SOURCE" != "$SOURCE_NAME" ]] ; then
+				echo $CYAN"   Notice - "$NORMAL"Updating old SOURCE_NAME: '$OLD_SOURCE' to:  '$SOURCE_NAME'"
+				sed -i "s,^SOURCE.*,SOURCE_NAME='$SOURCE_NAME'," "$SCRIPT"
+				HAVE_UPDATED=1
+			fi
+			if [[ "$OLD_VERSION" != "$VERSION" ]] ; then
+				echo $CYAN"   Notice - "$NORMAL"Updating old VERSION: '$OLD_VERSION' to:  '$VERSION'"
+				sed -i "s,^VERSION=.*,VERSION='$VERSION'," "$SCRIPT"
+				HAVE_UPDATED=1
+			fi
+			if [[ ! $HAVE_UPDATED ]] ; then
+				echo $CYAN"   Notice - "$NORMAL"No update needed in: $SCRIPT"
+			fi
+			# unset these so we skip the next section and run the script instead
+			SOURCE=
+			SOURCE_URL=
+			UPDATE_SCRIPT=
+			if [[ ! $RUN_SCRIPT ]] ; then
+				exit
+			fi
+			unset_vars
+		else
+			echo $CYAN"   Notice - "$NORMAL"No script found to update!"
+			exit 1
+		fi
+	fi
+	if [[ "$SOURCE" != "" ]] || [[ "$SOURCE_URL" != "" ]] ; then
+		! [[ $SRC2PKG_LIBDIR ]] && SRC2PKG_LIBDIR=/usr/libexec/src2pkg
+		. $SRC2PKG_LIBDIR/FUNCTIONS
+		if [[ $NEW_BUILD ]] ; then
+			pre_process
+		elif [[ $TEST_BUILD ]] ; then
+			pre_process
+			find_source
+			make_dirs
+			unpack_source
+			fix_source_perms
+			configure_source
+			compile_source
+			if [[ $FAILED = "" ]] ; then
+			 echo $BLUE"Test Compile - "$GREEN"Successful! "$NORMAL"for $NAME-$VERSION"
+			 echo $CYAN"   Notice - "$NORMAL"This doesn't necessarily mean a package can be made." 
+			else
+			 echo $RED"FAILED!! "$NORMAL"Test build of $NAME-$VERSION has failed."
+			 exit
+			fi
+		else
+			do_all_processes
+			case $? in
+				0) exit 0 ;;
+				1) exit 1 ;;
+				2) exit 2 ;;
+			esac
+			if [[ $FAILED != "" ]] ; then
+			 exit
+			fi
+		fi
+		# create a default description file -the function is located in FUNCTIONS
+		if [ "$TEST_BUILD" -a "$AUTO_SCRIPT" ] && [[ ! -e "$CWD"/$PKG_DESC ]] ; then
+			make_simple_desc
+		fi
+		# write the script -the function is located in FUNCTIONS
+		if [[ $NEW_BUILD ]] ; then
+		  if [[ "$INTERACTIVE_MODE" = "ALL" ]] ; then
+			echo $BLUE"   Note: "$NORMAL"src2pkg has guessed the NAME and VERSION"
+			echo "   based on the name of the archive. Check to see if these are"
+			echo "   correct and accept them or enter a new NAME and VERSION."
+			# prompt the user to accept or change the NAME guessed by pre_process
+			echo $BLUE"Guessed NAME: "$NORMAL"$NAME"
+			echo -n "Press ENTER to use the Guessed NAME or enter a new NAME:"
+			read -e NEWNAME
+			if [[ $NEWNAME != "" ]] ; then
+			  # BLURB_1 needs to be reset if NAME changes
+			  if [[ $BLURB_1 = $NAME ]] ; then
+				BLURB_1=$NEWNAME
+			  fi
+			  ALT_NAME=$NEWNAME
+			  NAME=$ALT_NAME
+			  echo $BLUE"Using NAME: "$NORMAL"$ALT_NAME"
+			else
+			   echo $BLUE"Using NAME: "$NORMAL"$NAME"
+			fi
+			# prompt the user to accept or change the VERSIONguessed by pre_process
+			echo
+			echo $BLUE"Guessed VERSION: "$NORMAL"$VERSION"
+			echo -n "Press ENTER to use the Guessed VERSION or enter a new VERSION:"
+			read -e NEWVERSION
+			if [[ $NEWVERSION != "" ]] ; then
+			  ALT_VERSION=$NEWVERSION
+			  VERSION=$ALT_VERSION
+			  echo $BLUE"Using VERSION: "$NORMAL"$ALT_VERSION"
+			else
+			  echo $BLUE"Using VERSION: "$NORMAL"$VERSION"
+			fi
+		  fi
+		  [[ ! -e "$CWD"/$PKG_DESC ]] && make_simple_desc
+		  [[ ${PRE_FIX:0:1} = "/" ]] && PRE_FIX=${PRE_FIX:1}
+		  write_src2pkg_script
+		fi
+		exit 0
+	fi
+	
+	if [[ $UPDATE_SCRIPT ]] || [[ $INCREMENT_BUILD ]] ; then
+		if [[ $RUN_SCRIPT ]] ; then
+			SCRIPT=$(ls -1 *.src2pkg *.src2pkg.auto 2> /dev/null |head -n 1) &> /dev/null
+		fi
+		if ! [[ "$SCRIPT" ]] ; then
+			if [ -f "$CWD"/*.PkgBuild ] ; then
+			 SCRIPT=$(ls *.PkgBuild -1 2> /dev/null |head -n 1) EXT=.PkgBuild
+			elif [ -f $PWD/*.PkgBuild.auto ] ; then
+			 [[ SCRIPT = "" ]] && SCRIPT=$(ls *.PkgBuild.auto -1 2> /dev/null |head -n 1) EXT=.PkgBuild.auto
+			fi
+			if [[ $SCRIPT = "" ]] ; then
+			 echo SCRIPT=$SCRIPT
+			 echo "No PkgBuild script found!"
+			 exit 0
+			fi
+		fi
+		if [[ "$SCRIPT" ]] ; then
+		  echo -n $BLUE"Updating $SCRIPT - "$NORMAL
+		  if [[ $(grep 'BUILD=' $SCRIPT |grep -v '#') ]] ; then
+			#OLD_BUILD=$(grep '^BUILD=' $SCRIPT |cut -f2- -d '=')
+			OLD_BUILD=$(eval echo $(grep BUILD $SCRIPT |grep -v '^#' |cut -f2- -d= ))
+			if [[ $INCREMENT_BUILD = "YES" ]] ; then
+				BUILD=$(( $OLD_BUILD + 1 ))
+			fi
+		  fi
+		  
+		  sed -e "s'Amigo PkgBuild'\src2pkg'" \
+		      -e "s/2005-2006/2005-2012/" \
+		      -e "s/2006-2007/2005-2012/" \
+		      -e "s'PkgBuild'\src2pkg'" \
+		      -e "s'pkgbuild'\src2pkg'" "$SCRIPT" > "$SCRIPT".new
+		  if [[ $INCREMENT_BUILD = "YES" ]] ; then
+		      echo -n "BUILD=$BUILD "$NORMAL
+			  sed -i "s,^BUILD=.*,BUILD=$BUILD," "$SCRIPT".new
+		  fi
+		  rm -f "$SCRIPT"
+		  
+		  SCRIPT_NAME=$(basename "$SCRIPT" $EXT)
+		  if [[ $EXT = ".PkgBuild" ]] ; then
+		   mv -f "$SCRIPT".new "$SCRIPT_NAME".src2pkg
+		   SCRIPT="$SCRIPT_NAME".src2pkg
+		  elif [[ $EXT = ".PkgBuild.auto" ]] ; then
+		   mv -f "$SCRIPT".new "$SCRIPT_NAME".src2pkg.auto
+		   SCRIPT="$SCRIPT_NAME".src2pkg.auto
+		  else
+		   mv -f "$SCRIPT".new "$SCRIPT"
+		  fi
+		  chmod 644 "$SCRIPT"
+		  echo $GREEN"DONE!"$NORMAL
+		fi
+	fi
+	
+	if [[ "$SCRIPT" != "" ]] && [[ -e $CWD/$(basename "$SCRIPT") ]] ; then
+	  echo $BLUE"Running build script:"$NORMAL $(basename "$SCRIPT")
+	  . "$CWD"/$(basename "$SCRIPT")
+	  case $? in
+		0) exit 0 ;;
+		1) exit 1 ;;
+		2) exit 2 ;;
+	  esac
+	elif [[ $RUN_SCRIPT ]] ; then
+	  if [[ $(ls -1 *.src2pkg 2> /dev/null) != "" ]] ; then
+		SCRIPT=$(ls -1 *.src2pkg |head -n 1) &> /dev/null
+	  elif [[ $(ls -1 *.src2pkg.auto 2> /dev/null) != "" ]] ; then
+		SCRIPT=$(ls -1 *.src2pkg.auto |head -n 1) &> /dev/null
+	  else
+		echo "No src2pkg script found!"
+		exit 1
+	  fi
+	  echo $BLUE"Running build script:"$NORMAL $(basename "$SCRIPT")
+	  # run the script by sourcing it
+	  . "$SCRIPT"
+	  case $? in
+		0) exit 0 ;;
+		1) exit 1 ;;
+		2) exit 2 ;;
+	  esac
+	elif [[ $(echo "$SCRIPT" |grep '://') != "" ]] ; then
+		if [ ! -w "$CWD" ] ; then
+			echo $RED"FAILED! "$NORMAL"CWD is not writable... exiting."
+			FAILED="READONLY CWD"
+		else
+			URL_ADDRESS="${SCRIPT}"
+			URL_DEST="${CWD}"/$(basename "$URL_ADDRESS")
+			URL_TYPE="build script"
+			download_url
+			if [ $? -ne 0 ]; then
+				mv -f "${URL_DEST}" "${URL_DEST}".FAIL
+				echo $RED"FAILED! "$NORMAL"Downloading '$(basename ${URL_DEST})' failed or cancelled."
+				FAILED="SCRIPT DOWNLOAD"
+			else
+				if [ "$DOWNLOAD_ONLY" ]; then
+					echo $BLUE"Download completed to: "$NORMAL"$URL_DEST"
+					exit 0
+				else
+					echo $BLUE"Script downloaded to: "$NORMAL"$URL_DEST"
+					SCRIPT="$(basename $URL_DEST)"
+				fi
+			fi
+			# run the script by sourcing it
+			. "$(basename $SCRIPT)"
+			case $? in
+				0) echo $PACKAGE >&3 ; exit 0 ;;
+				1) exit 1 ;;
+				2) exit 2 ;;
+			esac
+		fi
+	else
+	  echo "File $@ not found!"
+	  exit 1
+	fi
+fi
+

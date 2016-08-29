@@ -1,0 +1,53 @@
+
+This directory conatins a useful example for building a kernel package.
+The configuration files found here will configure the kernel to be
+built with a very small size.
+
+The config file 'config-tiny' is the default for use with the
+kernel-tiny.src2pkg script. It will build a kernel small enough
+to fit on a floppy disk. Everyone seems to think that a 2.6 kernel
+won't fit on a floppy, so I had to prove them wrong. I'll leave
+it as an exercise for the reader (for now) to figure out how to
+create a proper boot-floppy using such a kernel. I will provide
+a couple of tips, though. The kernel size of about ~1250KB may not
+leave enough room to put an adequate initrd on the same disk.
+So, the initrd would have to be placed on a separate floppy.
+But there is enough room for installing a bootloader like
+lilo on the floppy -of course you need that to be able to boot 
+the kernel anyway. And you could write a lilo boot-entry which
+would boot your machine from a floppy, in case of emergency.
+
+The configuration includes support for a couple of filesystems:
+ext2 and ext3 as well as support for initramfs. Otherwise it is
+quite limited. But there may be room to add a couple of other
+features, if needed, and some features could still be disabled to
+allow even more free room. You'd have to run 'make menuconfig'
+and produce a new config file. It would be easy enough to create
+a boot-entry in your hard-disk /boot directory/partition in
+order to test the kernel out before creating the floppy. If nothing
+else, the config file serves to show just how much cruft can
+be left out and still have a functional kernel.
+
+An even better alternative would be to produce a working boot-floppy
+with grub installed as this would provide more flexibility. But
+you'd need to produce a very small brub stage2 in order for the
+kernel, stage2 and (optional) menu.lst to fit on one floppy.
+
+The config file named kernel-small is a much more workable
+configuration which will probably not fit on a floppy, but
+it makes a good starting point from which to create your own
+compact kernel config file for normal custom use.
+
+Both config files are setup for the 2.6.23.6 kernel. You'll probably
+be using some other version, so you'll need to start your
+own configuration using this one and then run 'make oldconfig'
+in the sources in order to select/deselect features for a 
+later or earlier version. Then copy the resulting hidden '.config'
+file to this directory and name it config-tiny or
+other suitable name.
+
+See the general directions in the directory above this one 
+for how to use src2pkg to build a kernel package.
+
+Have fun!
+Gilbert Ashley <amigo@ibiblio.org>

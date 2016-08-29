@@ -1,0 +1,444 @@
+#!/bin/sh
+# /sbin/webmin-setup
+# This script should be run after the webmin package is installed,
+# in order to setup the various config files
+
+wadir=/usr/libexec/webmin
+config_dir=/etc/webmin
+var_dir=/var/log/webmin
+tempdir=/tmp/.webmin
+perl=/usr/bin/perl
+
+nochown=1
+# Find install directory
+LANG=
+export LANG
+
+srcdir=$wadir ;
+
+ver=`cat "$wadir/version"`
+
+echo "***********************************************************************"
+echo "*            Welcome to the Webmin setup script, version $ver        *"
+echo "***********************************************************************"
+echo "Webmin is a web-based interface that allows Unix-like operating"
+echo "systems and common Unix services to be easily administered."
+echo ""
+
+# Only root can run this
+id | grep "uid=0(" >/dev/null
+if [ $? != "0" ]; then
+	uname -a | grep -i CYGWIN >/dev/null
+	if [ $? != "0" ]; then
+		echo "ERROR: The Webmin setup script must be run as root";
+		echo "";
+		exit 1;
+	fi
+fi
+
+echo "Webmin is installed in $wadir ..."
+echo "Webmin config files are in $config_dir ..."
+
+killall -2 miniserv.pl 1> /dev/null 2> /dev/null
+sleep 1
+killall -9 miniserv.pl 1> /dev/null 2> /dev/null
+
+cd "$wadir"
+
+# Work out perl library path
+PERLLIB=$wadir
+if [ "$perllib" != "" ]; then
+	PERLLIB="$PERLLIB:$perllib"
+fi
+
+# Validate source directory
+allmods=`cd "$srcdir"; echo */module.info | sed -e 's/\/module.info//g'`
+if [ "$allmods" = "" ]; then
+	echo "ERROR: Failed to get module list"
+	echo ""
+	exit 1
+fi
+echo ""
+
+	# Test perl 
+	echo "Testing Perl ..."
+	if [ ! -x $perl ]; then
+		echo "ERROR: Failed to find perl at $perl"
+		echo ""
+		exit 5
+	fi
+	$perl -e 'print "foobar\n"' 2>/dev/null | grep foobar >/dev/null
+	if [ $? != "0" ]; then
+		echo "ERROR: Failed to run test perl script. Maybe $perl is"
+		echo "not the perl interpreter, or is not installed properly"
+		echo ""
+		exit 6
+	fi
+	$perl -e 'exit ($] < 5.002 ? 1 : 0)'
+	if [ $? = "1" ]; then
+		echo "ERROR: Detected old perl version. Webmin requires"
+		echo "perl 5.002 or better to run"
+		echo ""
+		exit 7
+	fi
+	$perl -e 'use Socket; print "foobar\n"' 2>/dev/null | grep foobar >/dev/null
+	if [ $? != "0" ]; then
+		echo "ERROR: Perl Socket module not installed. Maybe Perl has"
+		echo "not been properly installed on your system"
+		echo ""
+		exit 8
+	fi
+	$perl -e '$c = crypt("xx", "yy"); exit($c ? 0 : 1)'
+	if [ $? != "0" ]; then
+		$perl -e 'use Crypt::UnixCrypt' >/dev/null 2>&1
+	fi
+	if [ $? != "0" ]; then
+		echo "ERROR: Perl crypt function does not work. Maybe Perl has"
+		echo "not been properly installed on your system"
+		echo ""
+		exit 8
+	fi
+	echo "Perl seems to be installed ok"
+	echo ""
+
+	# Create temp files directory
+	$perl "$srcdir/maketemp.pl"
+	if [ "$?" != "0" ]; then
+		echo "ERROR: Failed to create or check temp files directory $tempdir"
+		echo ""
+		exit 2
+	fi
+
+	# Ask for operating system type
+	echo "***********************************************************************"
+	autoos=1
+	$perl "$srcdir/oschooser.pl" "$srcdir/os_list.txt" $tempdir/$$.os $autoos
+	if [ $? != 0 ]; then
+		exit $?
+	fi
+	. $tempdir/$$.os
+	rm -f $tempdir/$$.os
+
+	echo "Operating system name:    $real_os_type"
+	echo "Operating system version: $real_os_version"
+	echo ""
+
+	# Ask for web server port, name and password
+	echo "***********************************************************************"
+	echo "Webmin uses its own password protected web server to provide access"
+	echo "to the administration programs. The setup script needs to know :"
+	echo " - What port to run the web server on. There must not be another"
+	echo "   web server already using this port."
+	echo " - The login name required to access the web server."
+	echo " - The password required to access the web server."
+	echo " - If the webserver should use SSL (if your system supports it)."
+	echo ""
+	printf "Web server port (default 10000): "
+	if [ "$port" = "" ]; then
+		read port
+		if [ "$port" = "" ]; then
+			port=10000
+		fi
+	fi
+	if [ $port -lt 1 ]; then
+		echo "ERROR: $port is not a valid port number"
+		echo ""
+		exit 11
+	fi
+	if [ $port -gt 65535 ]; then
+		echo "ERROR: $port is not a valid port number. Port numbers cannot be"
+		echo "       greater than 65535"
+		echo ""
+		exit 12
+	fi
+	$perl -e 'use Socket; socket(FOO, PF_INET, SOCK_STREAM, getprotobyname("tcp")); setsockopt(FOO, SOL_SOCKET, SO_REUSEADDR, pack("l", 1)); bind(FOO, pack_sockaddr_in($ARGV[0], INADDR_ANY)) || exit(1); exit(0);' $port
+	if [ $? != "0" ]; then
+		echo "ERROR: TCP port $port is already in use by another program"
+		echo ""
+		exit 13
+	fi
+	printf "Login name (default admin): "
+	if [ "$login" = "" ]; then
+		read login
+		if [ "$login" = "" ]; then
+			login="admin"
+		fi
+	fi
+	echo "$login" | grep : >/dev/null
+	if [ "$?" = "0" ]; then
+		echo "ERROR: Username contains a : character"
+		echo ""
+		exit 14
+	fi
+	echo $login | grep " " >/dev/null
+	if [ "$?" = "0" ]; then
+		echo "ERROR: Username contains a space"
+		echo ""
+		exit 14
+	fi
+	if [ "$login" = "webmin" ]; then
+		echo "ERROR: Username 'webmin' is reserved for internal use"
+		echo ""
+		exit 14
+	fi
+	printf "Login password: "
+	if [ "$password" = "" -a "$crypt" = "" ]; then
+		stty -echo
+		read password
+		stty echo
+		printf "\n"
+		printf "Password again: "
+		stty -echo
+		read password2
+		stty echo
+		printf "\n"
+		if [ "$password" != "$password2" ]; then
+			echo "ERROR: Passwords don't match"
+			echo ""
+			exit 14
+		fi
+		echo $password | grep : >/dev/null
+		if [ "$?" = "0" ]; then
+			echo "ERROR: Password contains a : character"
+			echo ""
+			exit 14
+		fi
+	fi
+
+	# Ask the user if SSL should be used
+	if [ "$ssl" = "" ]; then
+		ssl=0
+		$perl -e 'use Net::SSLeay' >/dev/null 2>/dev/null
+		if [ $? = "0" ]; then
+			printf "Use SSL (y/n): "
+			read sslyn
+			if [ "$sslyn" = "y" -o "$sslyn" = "Y" ]; then
+				ssl=1
+			fi
+		else
+			echo "The Perl SSLeay library is not installed. SSL not available."
+			rm -f core
+		fi
+	fi
+
+	# Don't use SSL if missing Net::SSLeay
+	if [ "$ssl" = "1" ]; then
+		$perl -e 'use Net::SSLeay' >/dev/null 2>/dev/null
+		if [ $? != "0" ]; then
+			ssl=0
+		fi
+	fi
+
+	# Create webserver config file
+	echo $perl > $config_dir/perl-path
+	echo $var_dir > $config_dir/var-path
+	echo "Creating web server config files.."
+	cfile=$config_dir/miniserv.conf
+	echo "port=$port" >> $cfile
+	echo "root=$wadir" >> $cfile
+	echo "mimetypes=$wadir/mime.types" >> $cfile
+	echo "addtype_cgi=internal/cgi" >> $cfile
+	echo "realm=Webmin Server" >> $cfile
+	echo "logfile=$var_dir/miniserv.log" >> $cfile
+	echo "errorlog=$var_dir/miniserv.error" >> $cfile
+	echo "pidfile=$var_dir/miniserv.pid" >> $cfile
+	echo "logtime=168" >> $cfile
+	echo "ppath=$ppath" >> $cfile
+	echo "ssl=$ssl" >> $cfile
+	echo "env_WEBMIN_CONFIG=$config_dir" >> $cfile
+	echo "env_WEBMIN_VAR=$var_dir" >> $cfile
+	echo "logout=$config_dir/logout-flag" >> $cfile
+	if [ "$listen" != "" ]; then
+		echo "listen=$listen" >> $cfile
+	else
+		echo "listen=10000" >> $cfile
+	fi
+	echo "denyfile=\\.pl\$" >> $cfile
+	echo "log=1" >> $cfile
+	echo "blockhost_failures=5" >> $cfile
+	echo "blockhost_time=60" >> $cfile
+	echo "syslog=1" >> $cfile
+	if [ "$allow" != "" ]; then
+		echo "allow=$allow" >> $cfile
+	fi
+	if [ "$session" != "" ]; then
+		echo "session=$session" >> $cfile
+	else
+		echo "session=1" >> $cfile
+	fi
+
+	md5pass=`$perl -e 'print crypt("test", "\\$1\\$A9wB3O18\\$zaZgqrEmb9VNltWTL454R/") eq "\\$1\\$A9wB3O18\\$zaZgqrEmb9VNltWTL454R/" ? "1\n" : "0\n"'`
+
+	ufile=$config_dir/miniserv.users
+	if [ "$crypt" != "" ]; then
+		echo "$login:$crypt:0" > $ufile
+	else
+		if [ "$md5pass" = "1" ]; then
+			$perl -e 'print "$ARGV[0]:",crypt($ARGV[1], "\$1\$XXXXXXXX"),":0\n"' "$login" "$password" > $ufile
+		else
+			$perl -e 'print "$ARGV[0]:",crypt($ARGV[1], "XX"),":0\n"' "$login" "$password" > $ufile
+		fi
+	fi
+	chmod 600 $ufile
+	echo "userfile=$ufile" >> $cfile
+
+	kfile=$config_dir/miniserv.pem
+	openssl version >/dev/null 2>&1
+	if [ "$?" = "0" ]; then
+		# We can generate a new SSL key for this host
+		host=`hostname`
+		openssl req -newkey rsa:512 -x509 -nodes -out $tempdir/cert -keyout $tempdir/key -days 1825 >/dev/null 2>&1 <<EOF
+.
+.
+.
+Webmin Webserver on $host
+.
+*
+root@$host
+EOF
+		if [ "$?" = "0" ]; then
+			cat $tempdir/cert $tempdir/key >$kfile
+		fi
+		rm -f $tempdir/cert $tempdir/key
+	fi
+	if [ ! -r $kfile ]; then
+		# Fall back to the built-in key
+		cp "$wadir/miniserv.pem" $kfile
+	fi
+	chmod 600 $kfile
+	echo "keyfile=$config_dir/miniserv.pem" >> $cfile
+
+	chmod 600 $cfile
+	echo "..done"
+	echo ""
+
+	echo "Creating access control file.."
+	afile=$config_dir/webmin.acl
+	rm -f $afile
+	if [ "$defaultmods" = "" ]; then
+		echo "$login: $allmods" >> $afile
+	else
+		echo "$login: $defaultmods" >> $afile
+	fi
+	chmod 600 $afile
+	echo "..done"
+	echo ""
+
+	if [ "$login" != "root" -a "$login" != "admin" ]; then
+		# Allow use of RPC by this user
+		echo rpc=1 >>$config_dir/$login.acl
+	fi
+
+echo "Copying config files.."
+
+newmods=`$perl "$wadir/copyconfig.pl" "$os_type/$real_os_type" "$os_version/$real_os_version" "$wadir" $config_dir "" $allmods`
+echo $newmods
+
+	# Store the OS and version
+	echo "os_type=$os_type" >> $config_dir/config
+	echo "os_version=$os_version" >> $config_dir/config
+	echo "real_os_type=$real_os_type" >> $config_dir/config
+	echo "real_os_version=$real_os_version" >> $config_dir/config
+	if [ -r /etc/system.cnf ]; then
+		# Found a caldera system config file .. get the language
+		source /etc/system.cnf
+		if [ "$CONF_LST_LANG" = "us" ]; then
+			CONF_LST_LANG=en
+		elif [ "$CONF_LST_LANG" = "uk" ]; then
+			CONF_LST_LANG=en
+		fi
+		grep "lang=$CONF_LST_LANG," "$wadir/lang_list.txt" >/dev/null 2>&1
+		if [ "$?" = 0 ]; then
+			echo "lang=$CONF_LST_LANG" >> $config_dir/config
+		fi
+	fi
+
+	# Turn on logging by default
+	echo "log=1" >> $config_dir/config
+
+	# Use licence module specified by environment variable
+	if [ "$licence_module" != "" ]; then
+		echo licence_module=$licence_module >>$cfile
+	fi
+
+echo $ver > $config_dir/version
+echo "..done"
+echo ""
+
+# Set passwd_ fields in miniserv.conf from global config
+for field in passwd_file passwd_uindex passwd_pindex passwd_cindex passwd_mindex; do
+	grep $field= $config_dir/miniserv.conf >/dev/null
+	if [ "$?" != "0" ]; then
+		grep $field= $config_dir/config >> $config_dir/miniserv.conf
+	fi
+done
+grep passwd_mode= $config_dir/miniserv.conf >/dev/null
+if [ "$?" != "0" ]; then
+	echo passwd_mode=0 >> $config_dir/miniserv.conf
+fi
+
+# If Perl crypt supports MD5, then make it the default
+if [ "$md5pass" = "1" ]; then
+	echo md5pass=1 >> $config_dir/config
+fi
+
+# Set a special theme if none was set before
+if [ "$theme" = "" ]; then
+	theme=`cat "$wadir/defaulttheme" 2>/dev/null`
+fi
+oldthemeline=`grep "^theme=" $config_dir/config`
+oldtheme=`echo $oldthemeline | sed -e 's/theme=//g'`
+if [ "$theme" != "" ] && [ "$oldthemeline" = "" ] && [ -d "$wadir/$theme" ]; then
+	echo "theme=$theme" >> $config_dir/config
+	echo "preroot=$theme" >> $config_dir/miniserv.conf
+fi
+
+# Set the product field in the global config
+grep product= $config_dir/config >/dev/null
+if [ "$?" != "0" ]; then
+	echo product=webmin >> $config_dir/config
+fi
+
+# If password delays are not specifically disabled, enable them
+grep passdelay= $config_dir/miniserv.conf >/dev/null
+if [ "$?" != "0" ]; then
+	echo passdelay=1 >> $config_dir/miniserv.conf
+fi
+
+rm -f $config_dir/install-dir
+
+echo "If you want webmin to start at boot time, you should"
+echo "make the file /etc/rc.d/rc.webmin executable with the"
+echo "command 'chmod 755 /etc/rc.d/rc.webmin'."
+echo ""
+echo "Would you like me to do that for you now? [ y/n ]"
+
+read makeexe
+if [ $makeexe == y ] ; then
+	chmod 755 /etc/rc.d/rc.webmin
+else
+	chmod 644 /etc/rc.d/rc.webmin
+fi
+echo ""
+echo "You can manually start or stop the webmin service"
+echo "at any time with the command '/etc/rc.d/rc.webmin start'"
+echo " '/etc/rc.d/rc.webmin stop'. (Must be done by root user.)"
+echo ""
+echo "Would you like me to start Webmin for you now? [ y/n ]"
+
+read dostart
+if [ $dostart == y ] ; then
+	. /etc/rc.d/rc.webmin start & 1> /dev/null 2> /dev/null
+else
+	. /etc/rc.d/rc.webmin stop & 1> /dev/null 2> /dev/null
+fi
+echo ""
+sleep 2
+echo ""
+echo "To use the webmin program, point your web browser to:"
+echo "http://localhost:${port} and login as user $login."
+
+echo ""
+echo "You can re-run this /sbin/webmin-setup script as 'root'"
+echo "at any time in order to change your Webmin configuration."
+echo ""

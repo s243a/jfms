@@ -1,0 +1,684 @@
+#!/bin/bash
+# src2pkg.setup
+# Copyright 2007-2014 Gilbert Ashley <amigo@ibiblio.org>
+# When you run the command 'src2pkg --setup' this script gets run by src2pkg.
+# This script builds the binaries and libraries needed by src2pkg to function properly. The src2pkg package
+# contains no binaries when first installed, so this script  must be run to setup src2pkg for use on your system.
+# This method is used to ensure that the binaries and libraries work properly on your system, no matter
+# which architecture and OS version you are running. It also provides a check to be sure that your system
+# has the basic tools needed to compile software. Otherwise src2pkg would not work anyway.
+
+# This script will try to detect the type of system it is being run on, and if possible, create and install a
+# package of the src2pkg-helpers. But, you can specify the type of package it will create and install by
+# passing the environmental variable SYSTEM_TYPE to this script, using any of the following values:
+# tgz, deb, rpm, pet, tazpkg or 'generic' (generic can be used for systems which have no package manager)
+# example:
+# SYSTEM_TYPE=generic bash src2pkg.setup
+# or by running src2pkg itself this way:
+# SYSTEM_TYPE=generic src2pkg --setup
+
+NAME=src2pkg-helpers
+SRC2PKG_HELPERS_VERSION=1.6
+LIBSENTRY_VERSION=0.7.2
+TAR_VERSION=1.13c
+COREUTILS_VERSION=5.2.1b
+UNIONFS_FUSE_VERSION=0.26
+BUILD=1
+VERSION=${SRC2PKG_HELPERS_VERSION}
+
+# we use this arbitrary location because of possible problems if /tmp is mounted on tmpfs
+TEMP_DIR=/usr/src/src2pkg/builds/src2pkg-helpers
+SRC_DIR="${TEMP_DIR}"/src2pkg-helpers-${VERSION}
+PKG_DIR="${TEMP_DIR}"/PKG
+HELPERS_DEST_DIR=/usr/src/src2pkg/src2pkg-helpers
+
+if [[ "$EUID" -ne 0 ]] ; then
+	echo "You must be logged in as 'root' to setup src2pkg-helpers"
+	exit 1
+fi
+
+# Since this scripts is run from src2pkg, /usr/libexec/src2pkg/bin is the first element of 
+# the PATH. We won't to avoid using programs in that path, because these tools will be
+# replaced during any package upgrade and that confuses the shell and 'which'
+for path in /bin /usr/bin /usr/local/bin /usr/libexec/src2pkg/bin ; do
+	if [ -x $path/cat ] ; then
+		CAT=$path/cat
+		break
+	fi
+done
+for path in /bin /usr/bin /usr/local/bin /usr/libexec/src2pkg/bin ; do
+	if [ -x $path/chmod ] ; then
+		CHMOD=$path/chmod
+		break
+	fi
+done
+for path in /bin /usr/bin /usr/local/bin /usr/libexec/src2pkg/bin ; do
+	if [ -x $path/cp ] ; then
+		CP=$path/cp
+		break
+	fi
+done
+for path in /bin /usr/bin /usr/local/bin /usr/libexec/src2pkg/bin ; do
+	if [ -x $path/mkdir ] ; then
+		MKDIR=$path/mkdir
+		break
+	fi
+done
+for path in /bin /usr/bin /usr/local/bin /usr/libexec/src2pkg/bin ; do
+	if [ -x $path/mv ] ; then
+		MV=$path/mv
+		break
+	fi
+done
+for path in /bin /usr/bin /usr/local/bin /usr/libexec/src2pkg/bin ; do
+	if [ -x $path/rm ] ; then
+		RM=$path/rm
+		break
+	fi
+done
+
+# ANSI COLORS
+CRE="[K"
+NORMAL="[0;39m"
+# RED: Failure or error message
+RED="[1;31m"
+# GREEN: Success message
+GREEN="[1;32m"
+# YELLOW: Warnings
+YELLOW="[1;33m"
+# BLUE: Summary messages
+BLUE="[1;34m"
+# CYAN: Current Process
+CYAN="[1;36m"
+
+#############################################
+# functions for building the sources and various package types
+##################
+unpack_sources() {
+	cd "$TEMP_DIR" ;
+	echo -n $BLUE"Unpacking sources - "$NORMAL
+	tar xjf "$HELPERS_DEST_DIR"/src2pkg-helpers-$VERSION.tar.bz2
+	echo $GREEN"OK"$NORMAL
+}
+
+# build the sources
+build_sources() {
+  ( cd "$SRC_DIR"
+	### now do the bins
+  
+	# make tar
+	( cd tar-$TAR_VERSION ;
+	echo -n $BLUE"Creating tar-1.13 - "$NORMAL
+	touch *
+	CFLAGS="$CFLAGS" ./configure --disable-nls --with-ncursesw --enable-widec &> /dev/null
+	make &> /dev/null
+	if [[ $? -eq 0 ]] ; then
+		${MKDIR} -p "$PKG_DIR"/usr/libexec/src2pkg/bin
+		${CP} -f src/tar "$PKG_DIR"/usr/libexec/src2pkg/bin/tar-1.13
+		${CHMOD} 755 "$PKG_DIR"/usr/libexec/src2pkg/bin/tar-1.13
+		echo $GREEN"OK"$NORMAL
+	else
+		echo $RED"Failed! "$NORMAL"Error is non-fatal. Continuing..."
+	fi
+	)
+
+	# make the coreutils
+	( cd coreutils-$COREUTILS_VERSION ;
+	echo -n $BLUE"Creating coreutils - "$NORMAL
+	touch *
+	#patch -p1 < "$SRC_DIR"/coreutils-5.2.1a-mktime.diff &> /dev/null
+	# patch -p1 < "$SRC_DIR"/coreutils-disable-mktime-stat-touch.diff &> /dev/null
+	CFLAGS="$CFLAGS" ./configure --disable-nls &> /dev/null
+	make &> /dev/null
+	if [[ $? -eq 0 ]] ; then
+		cd src
+		for PROG in cat chmod chown cp ginstall link ln mkdir mknod mv readlink rm rmdir unlink; do
+			${CP} -f $PROG "$PKG_DIR"/usr/libexec/src2pkg/bin
+			${CHMOD} 755 "$PKG_DIR"/usr/libexec/src2pkg/bin/$PROG
+		done
+		# this is already in the doinst.sh, but do it anyway for systems with no pkgtool
+		( cd "$PKG_DIR"/usr/libexec/src2pkg/bin ; ln -sf ginstall install )
+		echo $GREEN"OK"$NORMAL
+	else
+		echo $RED"Failed! "$NORMAL"Error is non-fatal. Continuing..."
+	fi
+	
+  )
+  # if fuse is installed build unionfs-fuse
+  if [[ -f /usr/include/fuse.h ]] || [[ -f /usr/local/include/fuse.h ]] ; then
+	if [[ -L /lib/libfuse.so ]] || [[ -L /usr/lib/libfuse.so ]] \
+		|| [[ -L /lib64/libfuse.so ]] || [[ -L /usr/lib64/libfuse.so ]] ; then
+		echo -n $BLUE"Creating unionfs-fuse - "$NORMAL
+		( cd unionfs-fuse-$UNIONFS_FUSE_VERSION
+			make &> /dev/null
+			if [[ $? -eq 0 ]] ; then
+				${CP} src/unionfs "$PKG_DIR"/usr/libexec/src2pkg/bin/unionfs-fuse
+				${CHMOD} 755 "$PKG_DIR"/usr/libexec/src2pkg/bin/unionfs-fuse
+				echo $GREEN"OK"$NORMAL
+			else
+				echo $RED"Failed! "$NORMAL"Error is non-fatal. Continuing..."
+			fi
+		)
+	fi
+  else
+	echo $CYAN"Notice - "$NORMAL"Skipping creation of unionfs-fuse -you don't have fuse installed."
+  fi
+  )
+}
+# end build_sources
+
+##################
+# For Slackware, create a tgz package
+create_tgz() {
+	echo - $BLUE"Creating Slackware-type tgz package - "$NORMAL
+	# remove any old package(s)
+	${RM} -f "$HELPERS_DEST_DIR"/src2pkg-helpers-${VERSION}-${ARCH}-${BUILD}.tgz
+	# install install
+	${MKDIR} -p "$PKG_DIR"/install
+	${CP} "$HELPERS_DEST_DIR"/slack-desc "$PKG_DIR"/install
+	${CP} "$HELPERS_DEST_DIR"/doinst.sh "$PKG_DIR"/install
+	(cd "$PKG_DIR"
+	makepkg -l n -c n "$HELPERS_DEST_DIR"/src2pkg-helpers-${VERSION}-${ARCH}-${BUILD}.tgz
+	if [ $? = 0 ] ; then
+		echo $GREEN"Done"$NORMAL
+		echo $CYAN"Notice - "$NORMAL"The finished package: src2pkg-helpers-${VERSION}-${ARCH}-${BUILD}.tgz"
+		echo "         is located in: $HELPERS_DEST_DIR"
+		# install new package -upgrading if necessary
+		cd "$HELPERS_DEST_DIR"
+		echo - $BLUE"Installing Slackware-type tgz package - "$NORMAL
+		upgradepkg --install-new --reinstall "$HELPERS_DEST_DIR"/src2pkg-helpers-${VERSION}-${ARCH}-${BUILD}.tgz
+		if [ $? = 0 ] ; then
+			echo $GREEN"Done "$NORMAL"src2pkg is now ready to use."
+		else
+			echo $RED"Failed! "$NORMAL
+			echo "Failed to install package: src2pkg-helpers-${VERSION}-${ARCH}-${BUILD}.tgz"
+			exit 1
+		fi
+	else
+		echo $RED"Failed! "$NORMAL
+		echo "Failed to create package: src2pkg-helpers-${VERSION}-${ARCH}-${BUILD}.tgz"
+		exit 1
+	fi
+	)
+}
+# end create_tgz
+
+# For KISS, create a tpkg package
+create_tpkg() {
+	echo - $BLUE"Creating KISS tpkg package - "$NORMAL
+	# remove any old package(s)
+	${RM} -f "$HELPERS_DEST_DIR"/src2pkg-helpers_${VERSION}-${ARCH}-${BUILD}.tpkg
+	# install install
+	${MKDIR} -p "$PKG_DIR"/install
+	if [[ -f "$HELPERS_DEST_DIR"/pkg-desc ]] ; then
+		${CP} "$HELPERS_DEST_DIR"/pkg-desc "$PKG_DIR"/install
+	elif [[ -f "$HELPERS_DEST_DIR"/slack-desc ]] ; then
+		${CP} "$HELPERS_DEST_DIR"/slack-desc "$PKG_DIR"/install/pkg-desc
+	fi
+	${CP} "$HELPERS_DEST_DIR"/doinst.sh "$PKG_DIR"/install
+	(cd $PKG_DIR
+	tpkg-make "$HELPERS_DEST_DIR"/src2pkg-helpers_${VERSION}-${ARCH}-${BUILD}.tpkg
+	if [ $? = 0 ] ; then
+		echo $GREEN"Done"$NORMAL
+		echo $CYAN"Notice - "$NORMAL"The finished package: src2pkg-helpers_${VERSION}-${ARCH}-${BUILD}.tpkg"
+		echo "         is located in: $HELPERS_DEST_DIR"
+		# install new package -upgrading if necessary
+		cd "$HELPERS_DEST_DIR"
+		echo - $BLUE"Installing KISS tpkg package - "$NORMAL
+		tpkg-i --force "$HELPERS_DEST_DIR"/src2pkg-helpers_${VERSION}-${ARCH}-${BUILD}.tpkg
+		if [ $? = 0 ] ; then
+			echo $GREEN"Done "$NORMAL"src2pkg is now ready to use."
+		else
+			echo $RED"Failed! "$NORMAL
+			echo "Failed to install package: src2pkg-helpers_${VERSION}-${ARCH}-${BUILD}.tpkg"
+			exit 1
+		fi
+	else
+		echo $RED"Failed! "$NORMAL
+		echo "Failed to create package: src2pkg-helpers_${VERSION}-${ARCH}-${BUILD}.tpkg"
+		exit 1
+	fi
+	)
+}
+# end create_tpkg
+
+# For debian, create a *.deb package
+create_deb() {
+	# delete any existing deb package
+	ARCH=$(dpkg --print-architecture)
+	${RM} -f "$HELPERS_DEST_DIR"/${NAME}_${VERSION}-${BUILD}_${ARCH}.deb
+	echo -n $BLUE"Creating deb package - "$NORMAL
+
+	(cd "$TEMP_DIR"
+		INSTALLED_SIZE="$(du -s -k $PKG_DIR |white_out |cut -f1 -d ' ')K"
+		echo "Package: ${NAME}${TAG}" > "$TEMP_DIR"/control.tmp
+		echo "Version: ${VERSION}-${BUILD}" >> "$TEMP_DIR"/control.tmp
+		echo "Architecture: $ARCH" >> "$TEMP_DIR"/control.tmp
+		echo "Installed-Size: $INSTALLED_SIZE" >> "$TEMP_DIR"/control.tmp
+		echo "Maintainer: Gilbert Ashley <amigo@ibiblio.org>" >> "$TEMP_DIR"/control.tmp
+		echo "Description: Helper programs and library for src2pkg" >> "$TEMP_DIR"/control.tmp
+		echo "Homepage: http://amigolinux.org" >> "$TEMP_DIR"/control.tmp
+	
+		( cd "$PKG_DIR" && find * -type f -exec md5sum {} \; > "$TEMP_DIR"/md5sums )
+		rm -f "$TEMP_DIR"/data.tar.gz
+		( cd "$PKG_DIR" && tar -c --use-compress-program gzip -f "$TEMP_DIR"/data.tar.gz .
+			rm -rf usr
+		)
+		
+		mv "$TEMP_DIR"/data.tar.gz "$PKG_DIR"/data.tar.gz
+		
+		echo "2.0" > "$PKG_DIR"/debian-binary
+		${CAT} "$TEMP_DIR"/control.tmp > "$PKG_DIR"/control
+		${RM} -f "$TEMP_DIR"/control.tmp
+		${CAT} "$TEMP_DIR"/md5sums > "$PKG_DIR"/md5sums
+		${RM} -f "$TEMP_DIR"/md5sums
+		${CAT} "$HELPERS_DEST_DIR"/postinst > "$PKG_DIR"/postinst
+		chmod 755 "$PKG_DIR"/postinst
+		( cd "$PKG_DIR" \
+			&& tar --owner=root --group=root -c -z control md5sums postinst -f control.tar.gz . \
+			&& ${RM} -rf control md5sums postinst
+		)
+	)
+	( cd "$HELPERS_DEST_DIR" ;
+		ar rc ${NAME}_${VERSION}-${BUILD}_${ARCH}.deb "$PKG_DIR"/debian-binary "$PKG_DIR"/control.tar.gz "$PKG_DIR"/data.tar.gz
+		if [[ $? -eq 0 ]] ; then
+			echo $GREEN"Done"$NORMAL
+			echo $BLUE"Package Creation - "$GREEN"Successful!"$NORMAL" Package location:"
+			echo "$HELPERS_DEST_DIR"/${NAME}_${VERSION}-${BUILD}_${ARCH}.deb
+		else
+			echo $RED"Failed!"$NORMAL
+			echo "Failed to create debian package"
+			exit 1
+		fi
+		echo $BLUE"Installing Debian package - "$NORMAL
+		dpkg -i "$HELPERS_DEST_DIR"/${NAME}_${VERSION}-${BUILD}_${ARCH}.deb
+		if [[ $? -eq 0 ]] ; then
+			echo $BLUE"Installing Debian package - "$GREEN"Done"$NORMAL
+			echo "$HELPERS_DEST_DIR"/${NAME}_${VERSION}-${BUILD}_${ARCH}.deb
+		else
+			echo $BLUE"Installing Debian package - "$RED"Failed!"$NORMAL
+			exit 1
+		fi
+	)
+}
+
+#For an rpm system, create an *.rpm package
+create_rpm(){
+	# delete any existing rpm package
+	${RM} -f "$HELPERS_DEST_DIR"/${NAME}-${VERSION}-${BUILD}.${ARCH}.rpm
+	# if the admin doesn't have these rpm config files, create them
+	
+	# create a unique rpmmacros file for this build
+	echo "# This rpmmacros file was created by src2pkg" > "$HELPERS_DEST_DIR/rpmmacros"
+	echo "%_topdir	$HELPERS_DEST_DIR" >> "$HELPERS_DEST_DIR/rpmmacros"
+	echo "%_buildrootdir  /usr/src/src2pkg/builds/src2pkg-helpers/PKG" >> "$HELPERS_DEST_DIR/rpmmacros"
+	echo "%_tmppath  /usr/src/src2pkg/src2pkg-helpers" >> "$HELPERS_DEST_DIR/rpmmacros"
+	
+	echo "%_rpmdir  $HELPERS_DEST_DIR" >> "$HELPERS_DEST_DIR/rpmmacros"
+	echo "%_rpmfilename	 %%{NAME}-%%{VERSION}-%%{RELEASE}.%%{ARCH}.rpm" >> "$HELPERS_DEST_DIR/rpmmacros"
+	echo "%_builddir  /usr/src/src2pkg/builds" >> "$HELPERS_DEST_DIR/rpmmacros"
+	echo "%_sourcedir  $HELPERS_DEST_DIR" >> "$HELPERS_DEST_DIR/rpmmacros"
+	echo "%_specdir  $HELPERS_DEST_DIR" >> "$HELPERS_DEST_DIR/rpmmacros"
+	echo "%_srcrpmdir  $HELPERS_DEST_DIR" >> "$HELPERS_DEST_DIR/rpmmacros"
+	
+	echo "%__spec_clean_template  /bin/true ;" >> "$HELPERS_DEST_DIR/rpmmacros"
+	echo "%__spec_clean_post  /bin/true " >> "$HELPERS_DEST_DIR/rpmmacros"
+	echo "% __spec_clean_cmd  /bin/rm -f  " >> "$HELPERS_DEST_DIR/rpmmacros"
+	echo "%_clean  /bin/rm -f" >> "$HELPERS_DEST_DIR/rpmmacros"
+	echo "%__rm  /bin/rm" >> "$HELPERS_DEST_DIR/rpmmacros"
+	echo "" >> "$HELPERS_DEST_DIR/rpmmacros"
+	
+	#echo "%_topdir    $CWD" >> "$HELPERS_DEST_DIR/rpmmacros"
+	echo "" >> "$HELPERS_DEST_DIR/rpmmacros"
+	
+	# also use a unique rcfile
+	echo "" > "$HELPERS_DEST_DIR/rpmrc"
+	echo "include:  /usr/lib/rpm/rpmrc" >> "$HELPERS_DEST_DIR/rpmrc"
+	echo "macrofiles: $HELPERS_DEST_DIR/rpmmacros" >> "$HELPERS_DEST_DIR/rpmrc"
+	echo "" >> "$HELPERS_DEST_DIR/rpmrc"
+
+	# this tells rpmrc where to place the final package:
+	export HELPERS_DEST_DIR
+
+	SPEC_PATH="$HELPERS_DEST_DIR"/src2pkg-helpers.spec
+	echo -n $BLUE"Creating rpm package - "$NORMAL
+	${CAT} > "$SPEC_PATH" << EOF
+Summary:   Helper programs and libraries for src2pkg
+Name:      $NAME
+Version:   $VERSION
+Release:   $BUILD
+License:   GPL
+BuildArch: $ARCH
+Packager:  Gilbert Ashley <amigo@ibiblio.org>
+Group:     Development/Tools
+BuildRoot: $PKG_DIR
+Provides:  libsentry.so
+Requires:  toolchain
+
+%description
+EOF
+	while read LINE ; do
+	if [[ ${LINE:0:${#NAME}} = "$NAME" ]] ; then
+		LINE=$(echo ${LINE#*:})
+		[[ "$LINE" != "" ]] && echo $LINE >> "$SPEC_PATH"
+	fi
+	done < "$HELPERS_DEST_DIR"/pkg-desc
+	echo >> "$SPEC_PATH" 
+	echo '%post' >> "$SPEC_PATH" 
+	${CAT}  "$HELPERS_DEST_DIR"/postinst >> "$SPEC_PATH"
+	echo "" >> "$SPEC_PATH"
+	
+	( cd "$PKG_DIR"
+	# create list of items in the package
+	find * > ../file.list
+	# start the files section
+	echo "%files" >> "$SPEC_PATH"
+	# dirs must be identified as such
+	while read LINE ; do
+		if [[ -d "${PKG_DIR}/${LINE}" ]] ; then
+			echo -n "%dir " >> "$SPEC_PATH"
+		fi
+		echo "\"/${LINE}\"" >> "$SPEC_PATH"
+	done < ../file.list
+	${RM} -f ../file.list
+	)
+
+	(cd "$HELPERS_DEST_DIR"
+	rpmbuild -bb "$HELPERS_DEST_DIR"/src2pkg-helpers.spec \
+		--rcfile="$HELPERS_DEST_DIR"/rpmrc \
+		--macros="$HELPERS_DEST_DIR"/rpmmacros \
+		--buildroot /usr/src/src2pkg/builds/src2pkg-helpers/PKG #&> /dev/null
+	if [ $? = 0 ] ; then
+		echo $GREEN"Done"$NORMAL
+		echo $BLUE"Finished rpm package is:"$NORMAL
+		echo "$HELPERS_DEST_DIR/${NAME}-${VERSION}-${BUILD}.${ARCH}.rpm"
+	else
+		echo $RED"Failed! "$NORMAL
+		echo "Failed to create package: ${NAME}-${VERSION}-${BUILD}.${ARCH}.rpm"
+		exit 1
+	fi
+
+	echo -n $BLUE"Installing or upgrading rpm package - "$NORMAL
+	rpm --upgrade --nodeps --force "$HELPERS_DEST_DIR"/${NAME}-${VERSION}-${BUILD}.${ARCH}.rpm #&> /dev/null
+	if [ $? = 0 ] ; then
+		echo $GREEN"Done "$NORMAL"src2pkg is now ready to use."
+	else
+		echo $RED"Failed! "$NORMAL
+		echo "Failed to install package: ${NAME}-${VERSION}-${BUILD}.${ARCH}.rpm"
+		exit 1
+	fi
+	)
+}
+# end create_rpm
+
+# For slitaz, create a *.tazpkg
+create_taz() {
+	# remove any exisiting tazpkg
+	${RM} -f "$HELPERS_DEST_DIR"/${NAME}-${VERSION}-${BUILD}.tazpkg
+	echo -n $BLUE"Creating tazpkg package - "$NORMAL
+
+  ( cd "$PKG_DIR"
+	# move existing content into a subdir named 'fs'
+	${MKDIR} fs
+	find * -maxdepth 1 \( -type d ! -name install -a ! -name fs \) -exec ${MV} {} fs/ \; &> /dev/null
+	echo "Helper programs and library for src2pkg" > description.txt
+	${CAT} > receipt <<EOT
+PACKAGE="${NAME}"
+VERSION="${VERSION}"
+CATEGORY="development"
+SHORT_DESC="Helper programs and library for src2pkg"
+WEB_SITE="http://amigolinux.org"
+MAINTAINER="Gilbert Ashley <amigo@ibiblio.org>"
+DEPENDS=""
+EOT
+	${CAT} >> receipt <<EOM
+
+post_install()
+{
+chroot \$1/ sh - << EOT
+cd /
+EOM
+${CAT} "$HELPERS_DEST_DIR"/doinst.sh | sed -e 's/\\/\\\\/g' | sed -e 's/\$/\\$/g' >> receipt
+${CAT} >> receipt <<EOM2
+EOT
+}
+EOM2
+
+	( cd fs ;
+		find * -type f -print > ../files.list
+		find * -type l -print >> ../files.list
+	)
+	# make relative paths absolute
+	while read LINE ; do
+		echo "/${LINE}" >> files.list.tmp
+	done < files.list
+	${MV} -f files.list.tmp files.list
+	
+	while read file; do
+		[ -L "fs/$file" ] && continue
+		[ -f "fs/$file" ] || continue
+		MD5SUM=$(md5sum "fs/$file")
+		MD5SUM="${MD5SUM/ fs\// }"
+		echo $MD5SUM
+	done < files.list > md5sum
+	
+	UNPACKED_SIZE=$(du -chs fs receipt files.list md5sum description.txt 2> /dev/null |tail -n1 | white_out )
+	UNPACKED_SIZE=${UNPACKED_SIZE%* total}
+	find fs -print | cpio --quiet -o -H newc | gzip > fs.cpio.gz
+	${RM} -rf fs
+
+	PACKED_SIZE="$(du -chs fs.cpio.gz receipt files.list md5sum description.txt 2> /dev/null |tail -n 1|white_out )"
+	PACKED_SIZE="$(echo ${PACKED_SIZE%* total})"
+	
+	echo "# SliTaz package receipt." > receipt.tmp
+	echo "# generated by src2pkg" >> receipt.tmp
+	echo "PACKED_SIZE=$PACKED_SIZE" >> receipt.tmp
+	echo "UNPACKED_SIZE=$UNPACKED_SIZE" >> receipt.tmp
+	${CAT} receipt >> receipt.tmp
+	${MV} -f receipt.tmp receipt
+	# build the final package
+	find . -print | cpio --quiet -o -H newc > "$HELPERS_DEST_DIR"/${NAME}-${VERSION}-${BUILD}.tazpkg
+  )
+
+  ( cd "$HELPERS_DEST_DIR" ;
+	if [[ -f ${NAME}-${VERSION}-${BUILD}.tazpkg ]] ; then
+		echo $GREEN"Done"$NORMAL
+		echo $BLUE"Package Creation - "$GREEN"Successful!"$NORMAL" Package location:"
+		echo "$HELPERS_DEST_DIR"/${NAME}-${VERSION}-${BUILD}.tazpkg
+	else
+		echo $RED"Failed!"$NORMAL
+		echo "Failed to create tazpkg package"
+		exit 1
+	fi
+	echo -n $BLUE"Installing tazpkg package - "$NORMAL
+	tazpkg install "$HELPERS_DEST_DIR"/${NAME}-${VERSION}-${BUILD}.tazpkg --forced &> /dev/null
+	if [[ $? -eq 0 ]] ; then
+		echo $GREEN"Done "$NORMAL"src2pkg is now ready to use."
+	else
+		echo $RED"Failed!"$NORMAL
+		echo "Failed to install debian package"
+		exit 1
+	fi
+  )
+}
+
+# For Puppy, create a PET package
+create_pet() {
+	# delete any existing pet package
+	TAR_NAME=${NAME}-${VERSION}-${ARCH}-${BUILD}
+	${RM} -f "$HELPERS_DEST_DIR"/"$TAR_NAME".pet
+	echo -n $BLUE"Creating pet package - "$NORMAL
+	if [[ -f /etc/DISTRO_SPECS ]] ; then
+		echo "${NAME}-${VERSION}|${NAME}|${VERSION}|${BUILD}|BuildingBlock|||${NAME}-${VERSION}-${BUILD}.pet|unknown|||||" > "$PKG_DIR"/pet.specs
+	else
+		echo PETMENUDESCR="" > "$PKG_DIR"/${NAME}.pet.specs
+		echo PETOFFICIALDEPS="''" >> "$PKG_DIR"/${NAME}.pet.specs
+		echo PETREGISTER="'yes'" >> "$PKG_DIR"/${NAME}.pet.specs
+	fi
+	
+	${CP} "$HELPERS_DEST_DIR"/doinst.sh "$PKG_DIR"/pinstall.sh
+	${MV} "$PKG_DIR" "$TEMP_DIR"/src2pkg-helpers-${VERSION}-${ARCH}-${BUILD}
+	
+  (cd "$TEMP_DIR"
+	tar --owner=root --group=root -cf "$TAR_NAME".tar "$TAR_NAME" &> /dev/null
+	gzip "$TAR_NAME".tar
+	MD5SUM="$(md5sum $TAR_NAME.tar.gz | cut -f 1 -d ' ')"
+	echo -n "$MD5SUM" >> "$TAR_NAME".tar.gz
+	${MV} "$TAR_NAME".tar.gz "$HELPERS_DEST_DIR"/"$TAR_NAME".pet
+	if [ $? = 0 ] ; then
+		echo $GREEN"Done "$NORMAL
+		echo $BLUE"Finished pet package is:"$NORMAL
+		echo "$HELPERS_DEST_DIR/${NAME}-${VERSION}-${ARCH}-${BUILD}.pet"
+	else
+		echo $RED"Failed! "$NORMAL"Failed to create package: ${NAME}-${VERSION}-${ARCH}-${BUILD}.pet"
+		exit 1
+	fi
+	# change the name back
+  )
+	${MV} "$TEMP_DIR"/src2pkg-helpers-${VERSION}-${ARCH}-${BUILD} "$PKG_DIR"
+	# install the package
+  (cd "$HELPERS_DEST_DIR"
+	echo -n $BLUE"Installing pet package - "$NORMAL
+	petget "$HELPERS_DEST_DIR"/"$TAR_NAME".pet &> /dev/null
+	if [ $? = 0 ] ; then
+		echo $GREEN"Done "$NORMAL"src2pkg is now ready to use."
+	else
+		echo $RED"Failed! "$NORMAL
+		echo "Failed to install package: ${NAME}-${VERSION}-${ARCH}-${BUILD}.pet"
+		exit 1
+	fi
+  )
+}
+
+
+generic_install() {
+# for systems which don't have pkgtools, rpm, dpkg, petget or tazpkg
+	ERR=
+	echo -n $BLUE"Installing src2pkg-helpers generically - "
+	${MKDIR} -p /usr/libexec/src2pkg/bin || ERR=1
+	${CP} -a --force "$PKG_DIR"/usr/libexec/src2pkg/bin/* /usr/libexec/src2pkg/bin || ERR=1
+	${MKDIR} -p /usr/libexec/src2pkg/lib || ERR=1
+	${CP} -a --force "$PKG_DIR"/usr/libexec/src2pkg/lib/* /usr/libexec/src2pkg/lib || ERR=1
+	cd / || ERR=1
+	sh "$HELPERS_DEST_DIR"/doinst.sh || ERR=1
+	if [[ $ERR -ne 1 ]] ; then
+		echo $GREEN"Done"$NORMAL
+		echo "src2pkg is now ready to use."
+	else
+		echo $RED"Failed!"$NORMAL
+		echo "Failed to install debian package"
+		exit 1
+	fi
+}
+# end generic_install
+
+# end functions
+#############################################
+# Execution starts here:
+if [[ "$UPDATE" = "1" ]] ; then 
+  echo $CYAN"  Notice - "$NORMAL"Updating src2pkg-helpers:"
+  echo "  Your installed version of src2pkg-helpers needs to"
+  echo "  be updated. src2pkg will now compile, package"
+  echo "  and install the new version of src2pkg-helpers."
+  echo ""
+  echo "  TEMP_DIR=$TEMP_DIR"
+  echo "  Starting build in 5 seconds"
+else
+  echo $CYAN"  Notice - "$NORMAL"Creating src2pkg-helpers:"
+  echo "  src2pkg uses a shared library and a few programs"
+  echo "  when creating packages. For best compatibility,"
+  echo "  these binaries will be compiled on your system."
+  echo "  They are then installed in a private directory."
+  echo "  When done, src2pkg is ready for use."
+  echo ""
+  echo "  TEMP_DIR=$TEMP_DIR"
+  echo "  Starting build in 5 seconds"
+fi
+sleep 5
+
+# use src2pkg's own get_flags function for getting the ARCH
+. /usr/libexec/src2pkg/FUNCTIONS
+get_flags
+
+if [[ "$ARCH" = "x86_64" ]] ; then
+	CFLAGS="-m64 -O2 -fPIC -pipe"
+	LIBDIRSUFFIX="64"
+else
+	CFLAGS="-O2 -pipe"
+	LIBDIRSUFFIX=""
+fi
+export CFLAGS="$CFLAGS"
+export LDFLAGS="-Wl,-L/lib$LIBDIRSUFFIX,-L/usr/lib$LIBDIRSUFFIX"
+
+# clean up old dirs
+if [[ -d "$TEMP_DIR" ]] ; then
+ ${RM} -rf "$TEMP_DIR"
+fi
+${MKDIR} -p "$TEMP_DIR"
+
+unpack_sources
+
+### make the library
+cd $SRC_DIR
+cd libsentry-$LIBSENTRY_VERSION ;
+echo -n $BLUE"Creating libsentry - "$NORMAL
+make &> /dev/null
+if [[ $? -eq 0 ]] ; then
+	${MKDIR} -p "$PKG_DIR"/usr/libexec/src2pkg/lib
+	${CP} -f libsentry.so "$PKG_DIR"/usr/libexec/src2pkg/lib
+	${CHMOD} 755 "$PKG_DIR"/usr/libexec/src2pkg/lib/libsentry.so
+	# create a file which we can use to show the VERSION
+	${MKDIR} -p "$PKG_DIR"/usr/libexec/src2pkg/bin
+	echo ${SRC2PKG_HELPERS_VERSION} > "$PKG_DIR"/usr/libexec/src2pkg/bin/version
+	echo $GREEN"OK"$NORMAL
+else
+	echo $RED"Ooops! "$NORMAL"Can't live without it..."
+	exit 1
+fi
+
+# build the sources
+build_sources
+
+# allow specifying the SYSTEM_TYPE
+if [[ "$SYSTEM_TYPE" = "" ]] ; then
+	# or detect if not given
+	if [[ -f /etc/kiss-version ]] ; then
+		SYSTEM_TYPE="tpkg"
+	elif [[ $(which makepkg 2> /dev/null) ]] && [[ $(which upgradepkg 2> /dev/null) ]] ; then
+		SYSTEM_TYPE="tgz"
+	elif [[ $(which petget 2> /dev/null) ]] ; then
+		#elif [[ -f /etc/puppyversion ]] || [[ -f /etc/DISTRO_SPECS ]] 
+		SYSTEM_TYPE="pet"
+	elif [[ $(which rpm 2> /dev/null) ]] && [[ $(which rpmbuild 2> /dev/null) ]]; then
+		SYSTEM_TYPE="rpm"
+	elif [[ $(which dpkg 2> /dev/null) ]] ; then
+		SYSTEM_TYPE="deb"
+	elif [[ $(which tazpkg 2> /dev/null) ]] ; then
+		SYSTEM_TYPE="tazpkg"
+	else
+		SYSTEM_TYPE="generic"
+	fi
+fi
+
+case "$SYSTEM_TYPE" in
+	tgz)
+		${MKDIR} -p "$PKG_DIR"/usr/doc/src2pkg-helpers-${VERSION}
+		${CP} "$SRC_DIR"/README "$PKG_DIR"/usr/doc/src2pkg-helpers-${VERSION}
+	;;
+	*)
+		${MKDIR} -p "$PKG_DIR"/usr/share/doc/src2pkg-helpers-${VERSION}
+		${CP} "$SRC_DIR"/README "$PKG_DIR"/usr/share/doc/src2pkg-helpers-${VERSION}
+	;;
+esac
+
+case $SYSTEM_TYPE in
+	"deb") create_deb ;;
+	"pet") create_pet ;;
+	"rpm") create_rpm ;;
+	"tazpkg") create_taz ;;
+	"tgz") create_tgz ;;
+	"tpkg") create_tpkg ;;
+	"generic") generic_install ;;
+esac
+
+! [[ $DEBUG ]] && ${RM} -rf "$TEMP_DIR"

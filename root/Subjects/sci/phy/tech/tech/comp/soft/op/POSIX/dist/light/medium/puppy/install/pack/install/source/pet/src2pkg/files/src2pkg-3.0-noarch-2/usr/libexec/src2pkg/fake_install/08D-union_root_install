@@ -1,0 +1,163 @@
+# This file is part of the src2pkg program:
+# Copyright 2005-2013 Gilbert Ashley <amigo@ibilio.org>
+# src2pkg is released under the GNU General Public License Version 2
+
+# This method installs all files into a 'false root' directory, the PKG_DIR,
+# but uses unionfs-fuse and chroot rather than sentry.  This usually works when
+# using DESTDIR and JAIL is not supported by the Makefiles and is less
+# intrusive than installing to the real root directory, backing up overwritten
+# files and then restoring them
+
+## free_union
+free_union() {
+umount -l "$UNION_DIR/OBJ_DIR" &> /dev/null
+umount -l "$UNION_DIR"/tmp &> /dev/null
+umount -l "$UNION_DIR"/var/tmp &> /dev/null
+umount -l "$UNION_DIR"/sys &> /dev/null
+umount -l "$UNION_DIR"/proc &> /dev/null
+umount -l "$UNION_DIR"/dev &> /dev/null
+umount -l "$UNION_DIR" &> /dev/null
+fusermount -u "$UNION_DIR" &> /dev/null
+}
+## User cancelled at a 'sensitive' spot, so scold them!
+trap_union_int() {
+  echo
+  echo $RED"   *** OUCH!!! *** "$NORMAL"Dangerous cancellation"
+  echo "   Please don't cancel while fake_install is running."
+  echo "   Cleaning up hanging mounts on unionfs."
+  free_union
+  rmdir "$UNION_DIR" || echo $YELLOW"Warning - "$NORMAL"Unable to remove UNION_DIR!"
+  ( cd "$PKG_BUILDS_DIR"
+	(cd $EXCL_DIR_NAME/var && rmdir tmp)
+	(cd $EXCL_DIR_NAME && rmdir *)
+	rmdir $EXCL_DIR_NAME 
+  )
+  FAILED="CANCELLED"
+  case $AUDIO_NOTIFICATION in
+	BEEP)	echo -ne '\a';sleep .5;echo -ne '\a' ;;
+	SAY)
+		case $TTS_ENGINE in
+			flite) flite "Dangerous cancellation" 2> /dev/null ;;
+			festival) echo "Dangerous cancellation" |festival --tts 2> /dev/null ;;
+		esac
+		;;
+	PLAY)	play /usr/share/src2pkg/sounds/ouch &> /dev/null ;;
+  esac
+  exit
+}
+
+install_to_union_root() {
+echo $BLUE"Installing in UNION chroot - "$NORMAL"Using: '$INSTALL_COMMAND $INSTALL_RULE'"$NORMAL
+UNION_DIR_NAME=$NAME-$VERSION-union-$BUILD$SIG
+UNION_DIR="$PKG_BUILDS_DIR"/$UNION_DIR_NAME
+EXCL_DIR_NAME=$NAME-$VERSION-excl-$BUILD$SIG
+EXCL_DIR="$PKG_BUILDS_DIR"/$EXCL_DIR_NAME
+
+mkdir -p "$PKG_DIR"
+
+# don't do full recursive delete - losing important files if one of the
+# excludes doesn't properly umount is a Very Bad Thing.
+rmdir "$UNION_DIR" 2> /dev/null
+rm -rf "$EXCL_DIR"
+mkdir -p "$UNION_DIR"
+mkdir -p "$EXCL_DIR"
+
+# create mount-points for dirs we will be binding
+mkdir -p "$EXCL_DIR"/dev
+mkdir -p "$EXCL_DIR"/proc
+mkdir -p "$EXCL_DIR"/sys
+mkdir -p "$EXCL_DIR"/var/tmp
+mkdir -p "$EXCL_DIR"/tmp
+
+
+case "$UNIONFS_TYPE" in
+   "unionfs")
+      mount -t unionfs -o dirs="$PKG_DIR"=rw:/=ro:"$EXCL_DIR"=ro unionfs "$UNION_DIR"
+   ;;
+   "unionfs-fuse")
+      unionfs-fuse -o cow "$PKG_DIR"=RW:/=RO:"$EXCL_DIR"=RO "$UNION_DIR"
+   ;;
+esac
+
+# set the trap_union_int to be sure we don't leave mounts hanging if interrupted
+trap trap_union_int 2
+
+# bind the system dirs in the union root
+mount --bind /dev "$UNION_DIR"/dev
+mount --bind /proc "$UNION_DIR"/proc
+mount --bind /sys "$UNION_DIR"/sys
+mount --bind /var/tmp "$UNION_DIR"/var/tmp
+mount --bind /tmp "$UNION_DIR"/tmp
+
+# create an explicit and uniquely-named OBJ_DIR under the UNION_DIR. We need to do this because if the
+# original OBJ_DIR is on a separate filesystem it won't be there under the UNION_DIR unless it is explicitly
+# bind-mounted. We create a unique directory so we can safely and easily remove it afterwards.
+# We do this in the UNION_DIR because it is RW -sometimes install create new files so we need OBJ_DIR writable
+#mkdir -p "$EXCL_DIR"/OBJ_DIR
+mkdir -p "$UNION_DIR"/OBJ_DIR
+# bind the $OBJ_DIR in the union root
+mount --bind "$OBJ_DIR" "$UNION_DIR"/OBJ_DIR
+
+# we could use fakeroot for this step, but we'll need to also use it later when checking and correcting ownerships and perms
+if [[ $LOG_COMMANDS = "YES" ]] ; then
+	#
+	if ! [[ $LOG_DIR ]] ; then
+		LOG_DIR="$OBJ_DIR"
+	elif [[ "$LOG_DIR" != "$CWD" ]] && [[ "${LOG_DIR:0:1}" != "/" ]] ; then
+		echo $YELLOW"Warning! "$NORMAL"LOG_DIR is set to an invalid path."
+		echo "         It must be set to \$CWD or an absolute path."
+	fi
+	echo $BLUE"Logging output to: "$NORMAL"LOG_DIR/$NAME-make-install.log"
+	( chroot "$UNION_DIR" /bin/sh -c "cd OBJ_DIR && ${INSTALL_COMMAND} ${INSTALL_RULE} &> $NAME-make-install.log ; exit" )
+	if ! [[ -f "$LOG_DIR"/$NAME-make-install.log ]] ; then
+		cp "$OBJ_DIR"/$NAME-make-install.log "$LOG_DIR"/
+	fi
+elif [[ $QUIET = "YES" ]] ; then
+	( chroot "$UNION_DIR" /bin/sh -c "cd OBJ_DIR && ${INSTALL_COMMAND} ${INSTALL_RULE} &> /dev/null ; exit" )
+else
+	( chroot "$UNION_DIR" /bin/sh -c "cd OBJ_DIR && ${INSTALL_COMMAND} ${INSTALL_RULE} ; exit" )
+fi
+RETVAL=$?
+
+# unmount the OBJ_DIR
+umount -l "$UNION_DIR/OBJ_DIR"
+# after unmounting the $UNION_DIR/OBJ_DIR, remove
+# the dir so it doesn't get included in the package
+# ( cd "$UNION_DIR" && rm -rf OBJ_DIR )
+rmdir "$UNION_DIR"/OBJ_DIR || echo $YELLOW"Warning - "$NORMAL"Unable to remove OBJ_DIR!"
+# unmount the system dirs from the union root
+umount -l "$UNION_DIR"/tmp
+umount -l "$UNION_DIR"/var/tmp
+umount -l "$UNION_DIR"/sys
+umount -l "$UNION_DIR"/proc
+umount -l "$UNION_DIR"/dev
+
+if fusermount -u "$UNION_DIR" ; then
+	true
+else 
+	echo $YELLOW"Warning - "$NORMAL"Forcing umount of UNION_DIR!"
+	umount -l "$UNION_DIR"
+fi
+
+rmdir "$UNION_DIR" || echo $YELLOW"Warning - "$NORMAL"Unable to remove UNION_DIR!"
+
+( cd "$PKG_BUILDS_DIR" && rm -rf $EXCL_DIR_NAME )
+
+# Delete all metadata - really shouldn't be thrown away like this
+case "$UNIONFS_TYPE" in
+	"unionfs")
+	find "$PKG_DIR" -name ".wh.*" -exec rm "{}" ";"
+	;;
+	"unionfs-fuse")
+	rm -rf "$PKG_DIR/.unionfs/"
+	;;
+esac
+
+# some tentative error handling
+if [ $RETVAL -gt 0 ] ; then
+	# FIXME: what post-processing needs to happen?
+	echo "Failed"
+	FAILED="CHROOT install in $FUNCNAME"
+fi
+
+}

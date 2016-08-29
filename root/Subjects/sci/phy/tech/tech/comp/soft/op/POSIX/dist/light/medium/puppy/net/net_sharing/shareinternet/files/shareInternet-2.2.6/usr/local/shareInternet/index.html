@@ -1,0 +1,51 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+
+<head>
+	<title>ShareInternet</title>
+	<meta http-equiv="content-type" content="text/html;charset=utf-8" />
+	<meta name="generator" content="Geany 0.12" />
+</head>
+
+<body>
+<h2>ShareInternet - Share Internet Interface with local Interface V2.2.5</h2>
+<P>ShareInternet is an application to help in running Puppy as a router. It is designed to be versatile, in that it is agnostic about, but not insensitive to, the types of interfaces that are used. It is meant to be an icon on the desktop that, once you have activated the appropriate interfaces, you click on it and through traffic can flow. A later click on the same icon and through traffic will stop.</P>
+<P>When it's icon is clicked, it starts the firewall, suitably configured to protect the Internet interface, but leave the local interfaces alone. The firewall also provides a NAT service so that there are no up-stream routing difficulties. Then it starts dnsmasq suitably configured to provide a dhcp service on the local interface(s).</P>
+<P>Once shareInternet is installed, "/root/my-applications/shareInternet" can to be dragged to the desktop to provide an icon. Of course it is also possible to use the icon in "/root/my-applications" directly.</P>
+<P>To have ShareInternet started automatically at boot time, delete the "#" from the beginning of the "#[ -x /usr/local/shareInternet/startWithX ] && /usr/local/shareInternet/startWithX &" line in "/root/Startup/shareInternet.sh".</P>
+<P>ShareInternet can work with any combination of ethernet, wifi, or ppp interfaces. Interfaces are not configured into ShareInternet, it works with whatever interfaces are active.<br>
+So, all the interfaces you intend to use must be "UP", before ShareInternet is started. This can cause problems when ShareInternet is started automatically. Some wifi interfaces apparently take a long time to activate, in this case configure a "BOOT_DELAY".</P>
+<P>When ShareInternet is run, it configures the interface that connects to the network that contains the default gateway, as the Internet interface. All other interfaces are considered to be local interfaces.</P>
+<h3>ShareInternet config files:</h3>
+<P>The file "<b>/root/.shareInternet/share.conf</b>" defines various directories and settings, used by ShareInternet.<br>
+#BOOT_DELAY="10"; If set, defines the seconds to delay before actually starting ShareInternet. The delay can be used to make sure that all interfaces have enough time to be UP, before ShareInternet is actually started. This is only used if ShareInternet is run using the "startWithX" script. The default is unset.</P>
+<P>The file "<b>/root/.shareInternet/dnsmasq.conf</b>" defines some settings that change the way dnsmasq does dhcp.<br>
+DHCP_START="100" defines the starting host part for lease IP addresses.<br>
+DHCP_END="200" defines the ending host part for lease IP addresses.<br>
+DHCP_TIME="60000" defines the timeout of the lease in seconds.<br>
+So, if the IP address of the down stream interface is 192.168.111.1, then the above settings mean that dnsmasq will handout IP addresses starting with 192.168.111.100 and ending with 192.168.111.200.</P>
+<P>Any scripts in directory "<b>/root/.shareInternet/iptaplesExtraRules</b>" are executed after the firewall is initialised. It is expected that these scripts will contain commands to add rules to the firewall using the "iptables" utility. The example files provided, contain only comments.</P>
+<h3>Recommendations for configuring your interfaces:</h3>
+<P>The Internet interface needs three things; an IP that is valid on the network it connects to, the IP address of the gateway/router on that network, and the IP address of at least 1 DNS server appropriate for that network.<br>
+Both ppp and dhcp automatically provide all this for you.</P>
+<P>The local interfaces need only an IP address that is in a different network than every other interface.<br>
+This should be a static configuration, with no gateway or DNS defined. On any local network Puppy is the gateway.</P>
+<h3>Changes in v2.2.5:</h3>
+<P>Removed dnsmasq from the pet. If dnsmasq is not present in the current puppy, then it must be installed separately. This means that shareInternet should work on virtually any puppy.<br>
+Moved the Rox app to "/root/my-applications".<br>
+Fixed the "serverExample".</P>
+<h3>Changes in v2.2.4:</h3>
+<P>Fixed a bug in decting the default route.<br>
+Upgraded dnsmasq to v2.55, compiled on pup-431.</P>
+<h3>Changes in v2.2.3:</h3>
+<P>The firewall is now configured to follow a changing upstream IP address.</P>
+<h3>Changes in v2.2:</h3>
+<P>Removed dependency on, and conflict with, "/etc/rc.firewall". ShareInternet now ignores "/etc/rc.firewall" and uses it's own firewall code.<br>
+Upgraded dnsmasq to v2.51, compiled on pup-431.</P>
+<h3>Changes in v2.0:</h3>
+<P>Now automatic, just activate at least two interfaces, and start it. It works out everything by itself.</P>
+<P><b>If upgrading to v2.0:</b><br>
+It is recommended that you make a fresh start by deleting the directory "/root/.shareInternet" before running V2.0</P>
+</body>
+</html>

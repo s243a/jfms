@@ -1,0 +1,68 @@
+#!/bin/bash
+## src2pkg script for: 	squid
+## src2pkg Copyright 2005-2007 Gilbert Ashley <amigo@ibilio.org>
+## portions of this script are from the SlackBuild from SlackBuilds.org
+## Copyright 2006-2007  David Somero (dsomero@hotmail.com)
+BASE_URL='http://distro.ibiblio.org/pub/linux/distributions/amigolinux/download/Utils/squid-2.6.STABLE17'
+SOURCE_NAME='squid-2.6.STABLE17.tar.gz'
+NAME='squid'
+ALT_VERSION='2.6.stable17'
+ARCH='i486'
+BUILD='1'
+PRE_FIX='usr'
+# Any extra options go here
+EXTRA_CONFIGS='--sysconfdir=/etc/squid --localstatedir=/var/log/squid \
+	--datadir=/usr/share/squid --enable-snmp'
+
+EXTRA_SOURCES='doinst.sh
+slack-desc
+rc.squid.new
+HOWTO.Slackware
+'
+
+# STD_FLAGS='-O2 -march=i486 -mtune=i686'
+DOCLIST='CONTRIBUTORS COPYING COPYRIGHT CREDITS ChangeLog INSTALL QUICKSTART README RELEASENOTES.html SPONSORS'
+# Get the functions and configs
+. /usr/libexec/src2pkg/FUNCTIONS ;
+
+# do_all_processes can substitute these 16 steps:
+
+pre_process
+find_source
+make_dirs
+unpack_source
+fix_source_perms
+configure_source
+compile_source
+fake_install
+
+mkdir -p $PKG_DIR/etc/rc.d
+cp $CWD/rc.squid.new  $PKG_DIR/etc/rc.d/rc.squid.new
+
+mv $PKG_DIR/etc/squid/mime.conf $PKG_DIR/etc/squid/mime.conf.new
+mv $PKG_DIR/etc/squid/squid.conf $PKG_DIR/etc/squid/squid.conf.new
+mv $PKG_DIR/etc/squid/cachemgr.conf $PKG_DIR/etc/squid/cachemgr.conf.new
+
+mkdir -p $PKG_DIR/var/log/squid/cache
+
+fix_pkg_perms
+
+chown -R nobody:nobody $PKG_DIR/var/log/squid
+
+strip_bins
+create_docs
+
+cp $CWD/HOWTO.Slackware $PKG_DIR/usr/doc/$NAME-$VERSION
+
+compress_man_pages
+make_description
+make_doinst
+make_package
+post_process
+
+# src2pkg - Copyright 2005-2007  Gilbert Ashley <amigo@ibiblio.org>
+## See the documentation for more help and examples. Below are some of
+# the most common Extras and Options for easy cut-and-paste use.
+# EXTRA_CONFIGS='' PRE_FIX='' DOCLIST=''
+# MAKE_COMMAND='' INSTALL_LINE='' 
+# SHELL_INSTALL='YES' CORRECT_PERMS='NO'

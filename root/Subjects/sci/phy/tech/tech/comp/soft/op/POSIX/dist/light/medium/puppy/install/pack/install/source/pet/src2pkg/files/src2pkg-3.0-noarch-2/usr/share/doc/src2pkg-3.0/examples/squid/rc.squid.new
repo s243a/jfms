@@ -1,0 +1,20 @@
+#!/bin/sh
+#
+# Start the Squid proxy server
+#
+if [ "$1" = "stop" ]; then
+    echo "Stopping squid..."
+    /usr/sbin/squid -k shutdown
+elif [ "$1" = "restart" ]; then
+    echo "Restarting squid..."
+    /usr/sbin/squid -k shutdown
+    sleep 1
+    /usr/sbin/squid
+elif [ "$1" = "start" ]; then
+    echo "Starting squid: /usr/sbin/squid"
+    /usr/sbin/squid -D
+else
+    echo "usage $0 start|stop|restart"
+fi
+
+

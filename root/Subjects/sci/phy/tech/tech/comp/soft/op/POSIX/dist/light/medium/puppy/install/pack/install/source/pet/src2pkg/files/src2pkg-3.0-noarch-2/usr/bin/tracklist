@@ -1,0 +1,579 @@
+#!/bin/bash
+# /usr/bin/tracklist
+# tracklist version 0.6
+# Copyright 2006-2014 Gilbert Ashley <amigo@ibiblio.org>
+# tracklist logs commands using libsentry
+# and then produces a FILELIST of files, links
+# and  directories created by the command.
+# It also lists items which were moved,
+# removed or had their mode or permissions changed
+
+## version 0.4 (Sept 12, 2008)
+# * add the PATH to the src2pkg bins in /usr/libexec/src2pkg/bin
+#    this makes for better tracking as these are old versions from coreutils-5.2.1
+#    newer versions of chown and (maybe) chmod cannot be accurately tracked with libsentry
+# * add tracking of links and chown & chmod operations
+# * added INSTW_EXCLUDE routine to ignore /dev,/proc,/tmp,/var/tmp
+# * export INSTW_TRANSL=0 to make sure that fstrans is off
+# * added command-line options to show usage and version
+# * added command-line options to set debug level and silence output of commands
+## version 0.5 (Dec 28 2008)
+# * added --meta and --brief options
+# * -m or --meta lists all info in metadata format
+# * -b or --brief lists only files, directories and links created
+# tracklist should accurately track operations performed with these commands:
+# cat, chmod, cp, ginstall, groups, install, link, ln, mkdir, mv, rm, rmdir, touch, unlink
+# If the src2pkg mini-coreutils are present in /usr/libexec/src2pkg/bin, then chown
+# can also be tracked. If those binaries are not present, tracking chown will fail on
+# most modern systems which use glibc>=2.4 and coreutils>5.2.1
+# It should be possible to track mknod with tracklist, but this is untested
+# and unimplemented, so far.
+## version 0.6
+# * added the -e or --excludes option to be able to exclude paths from the file listing
+#   Probably not really advisable to use it except in special cases
+# * changed parser to use two words for short options which require an argument
+#   and one word for the long form '-o /path' or '--output=/path'
+#   This syntax is more like what you'd expect.
+
+TL_VERSION=0.6
+
+# show program usage
+show_usage() {
+echo
+echo "Usage: ${0##*/} [OPTION] COMMAND ARGUMENTS"
+echo "${0##*/} [-h|-v] [--help|--version]"
+echo "${0##*/} [--debug=(1-4)] COMMAND ARGUMENTS"
+echo ""
+echo "tracklist logs the operations performed by other commands."
+echo "It uses libsentry to track the creation, removal and,"
+echo "moving (renaming) of directories, files and links."
+echo "It also tracks operations performed to change the"
+echo "permissions and ownership of directories, files or links."
+echo ""
+echo "  -d  --debug=(1-4)  Preserve debug and intermediate logfiles."
+echo "  -b  --brief     List only files, directories and links."
+echo "  -e  --excludes=  A list of directories to exclude from list."
+echo "  -o  --output=   Name/path of output file for file list."
+echo "  -m  --meta     Print output in metadata format."
+echo "  -q, --quiet    Supress normal output of tracked commands."
+echo "  -r  --root=     Temporary root directory for the debug file."
+echo "  -h  --help     display this help and exit"
+echo "  -v  --version  output version information and exit"
+echo ""
+echo "The most common usage is to track the output of 'make install':"
+echo "'tracklist make install'"
+echo "But it can track other commands as well. Note that a single"
+echo "command without arguments will not work. For example:"
+echo "'tracklist ./install.sh' will fail. To track the output from"
+echo "such a shell script, use: 'tracklist sh ./install.sh'."
+echo ""
+echo "tracklist can log the creation, removal and renaming of"
+echo "directories, files and links performed by the commands:"
+echo "cat, cp, (g)install, link, ln, mkdir, mv, rm, rmdir,"
+echo "touch and unlink. It also tracks the changes from the"
+echo "commands chmod and groups. It can also track file"
+echo "ownership modifications, but only if using the binary"
+echo "program chown from coreutils<=5.2.1 (supplied with src2pkg)."
+echo ""
+echo "tracklist uses libsentry to log system calls. libsentry"
+echo "is a modified version of the installwatch library."
+echo "After creating the basic logfile, tracklist parses the log"
+echo "into a more readable form and saves it in $HOME/FILELIST,"
+echo "or in the file specified with the '-o' or --output option."
+echo "Using a debug level 4 will preserve all of the"
+echo "intermediate logfiles with names like FILELIST.dirs,"
+echo "FILELIST.rm -also in your $HOME directory. Using a"
+echo "higher value with '--debug=?' increases the detail"
+echo "in the real debug file which is named 'dbgfile'."
+echo ""
+echo "--excludes is a comma-separated list of directories which"
+echo "should be excluded from the file and directory listings."
+echo "The list is passed as a regex to tracklist, so you can"
+echo "use '^' or '$' to specify to only exclude directories that"
+echo "start or end with the corresponding string."
+echo ""
+echo "Options which take an argument (like --output) have two"
+echo "forms of usage -the long form: --output=/path/to/file"
+echo "or the short form: -o /path/to/file"
+echo ""
+echo "Examples:"
+echo "tracklist -b --root /tmp/tracklist make install"
+echo "Run the command 'make install' and then list"
+echo "only the files dirs and links created and use"
+echo "/tmp/tracklist as the temporary directory."
+echo ""
+echo "tracklist -m -o FILES sh ./install.sh"
+echo "List  output in metadata format in the file FILES in the"
+echo "current directory and run the command 'sh ./install.sh'"
+exit
+}
+
+show_version() {
+echo "${0##*/}"" Version $TL_VERSION"
+exit
+}
+
+white_out() {
+while read GAGA ; do
+  echo $GAGA
+done
+}
+
+# set this as the default
+DEBUG=0
+
+unset INSTW_ROOTPATH
+unset INSTW_TRANSL
+unset INSTW_BACKUP
+unset INSTW_LOGFILE
+unset INSTW_DBGFILE
+unset INSTW_DBGLVL
+unset INSTW_EXCLUDE
+
+# show usage if no argument is given
+# show usage if '-h' or  '--help' is the first argument
+# show version if '-v' or  '--version' is the first argument
+if ! [[ $1 ]] ; then
+	show_usage
+else
+	for WORD in "$@" ; do
+	case $WORD in
+		"-h"|"--help") show_usage ;;
+		"-v"|"--version") show_version ;;
+		-d)
+			DEBUG=$2
+			shift 2 ;;
+		--debug=*)
+			DEBUG=${WORD:8}
+			shift ;;
+		-b|--brief)
+			BRIEF_OUTPUT=1
+			META_OUTPUT=1
+			shift ;;
+		-e)
+			EXCLUDES=$2
+			EXCLUDES="$(echo $EXCLUDES |tr ',' '|')"
+			shift 2 ;;
+		--excludes=*)
+			EXCLUDES=${WORD:11}
+			EXCLUDES="$(echo $EXCLUDES |tr ',' '|')"
+			shift ;;
+		-m|--meta)
+			META_OUTPUT=1 ; shift ;;
+		-o)
+			OUTPUT_FILE=$2
+			shift 2 ;;
+		--output=*)
+			OUTPUT_FILE=${WORD:9}
+			shift ;;
+		-r)
+			INSTW_ROOTPATH=$1
+			shift 2 ;;
+		--root=)
+			INSTW_ROOTPATH=${WORD:7}
+			shift ;;
+		-q|--quiet)
+			QUIET=1
+			shift ;;
+	esac
+	done
+fi
+
+if [[ "x$OUTPUT_FILE" = "x" ]] ; then
+	OUTPUT_FILE=$HOME/FILELIST
+fi
+
+if [[ ${OUTPUT_FILE:0:1} != "/"  ]] || [[ ${OUTPUT_FILE:0:2} = "./"  ]] ; then
+	OUTPUT_FILE=$(pwd)/$OUTPUT_FILE
+fi
+if touch $OUTPUT_FILE ; then
+	touch $OUTPUT_FILE.tmp
+	true
+else
+	echo "Unable to create output file: $OUTPUT_FILE"
+	echo "Please specify a path where you have write priviledges."
+	exit 1
+fi
+
+make_temp() {
+ INSTW_ROOTPATH=$1
+ TMP_DIR=$(mktemp -d -p "$INSTW_ROOTPATH")
+ chmod 0700 $TMP_DIR
+ if [[ ! -d $TMP_DIR ]] ; then
+	echo "Unable to create safe temporary directory."
+	exit 1
+ fi
+}
+
+  # we must have a root path defined
+if [[ "x${INSTW_ROOTPATH}" = "x" ]] ; then
+	make_temp "/tmp"
+	if [[ $QUIET != 1 ]] ; then
+		echo
+		echo "INFO : Using a default root directory : ${INSTW_ROOTPATH}"
+		echo
+	fi
+
+else
+	make_temp "$INSTW_ROOTPATH"
+	if [[ $QUIET != 1 ]] ; then
+		echo
+		echo "Creating temporary root directory : ${INSTW_ROOTPATH}"
+		echo
+	fi
+fi
+if [[ ! -d "${INSTW_ROOTPATH}" ]]; then
+	echo
+	echo "The root directory is mandatory ."
+	echo
+	usage
+	exit 1
+fi
+if [[ "${INSTW_ROOTPATH:((${#INSTW_ROOTPATH}-1)):1}" = "/" ]]; then
+	INSTW_ROOTPATH="${INSTW_ROOTPATH%/}"
+fi
+
+export INSTW_ROOTPATH
+
+# anything left over should be the command and arguments
+if [[ $1 ]] && [[ $2 ]] ; then
+	INSTALL_COMMAND=$1
+	shift
+	INSTALL_RULE="$@"
+else
+	echo "tracklist needs at least a command plus one argument!"
+	exit 1
+fi
+
+CWD="$(pwd)"
+# use our own copies of utilities if available -this increases the chances of catching everything
+export PATH=/usr/libexec/src2pkg/bin:$PATH
+
+# make sure we start with fresh log files
+rm -f $OUTPUT_FILE
+rm -f $OUTPUT_FILE.orig
+rm -f $OUTPUT_FILE.tmp
+# these shouldn't be present unless debug level 4 was used last time
+# or if operations were aborted last time before finishing
+rm -f $OUTPUT_FILE.dirs
+rm -f $OUTPUT_FILE.links
+rm -f $OUTPUT_FILE.files
+rm -f $OUTPUT_FILE.chown
+rm -f $OUTPUT_FILE.chmod
+rm -f $OUTPUT_FILE.rename
+rm -f $OUTPUT_FILE.rmdir
+rm -f $OUTPUT_FILE.rm
+
+# ANSI COLORS
+CRE="[K"
+NORMAL="[0;39m"
+# RED: Failure or error message
+RED="[1;31m"
+# GREEN: Success message
+GREEN="[1;32m"
+# YELLOW: Warnings
+YELLOW="[1;33m"
+# BLUE: Summary messages
+BLUE="[1;34m"
+# CYAN: Current Process
+CYAN="[1;36m"
+if [[ $QUIET != 1 ]] ; then
+	echo $BLUE"Now Running 'sentry $INSTALL_COMMAND $INSTALL_RULE'"$NORMAL
+fi
+
+# this doesn't seem to work any other way
+INSTW_EXCLUDE="/dev,/proc,/tmp,/var/tmp,${INSTW_EXCLUDE}"
+OIFS="$IFS"
+IFS=','
+INSTW_EXCLUDE=$(for name in $INSTW_EXCLUDE; do
+	echo $name
+	done | sort -u |
+	while read elem; do
+		echo -n "$elem,"
+	done)
+export INSTW_EXCLUDE
+IFS="$OIFS"
+
+# turn the translation feature off
+INSTW_TRANSL=0
+export INSTW_TRANSL
+
+cd $CWD;
+
+if [[ $QUIET = 1 ]] ; then
+ ( /usr/bin/sentry --logfile=$OUTPUT_FILE.tmp --dbglvl=$DEBUG --root=$TMP_DIR $INSTALL_COMMAND $INSTALL_RULE &> /dev/null );
+else
+ ( /usr/bin/sentry --logfile=$OUTPUT_FILE.tmp --dbglvl=$DEBUG --root=$TMP_DIR $INSTALL_COMMAND $INSTALL_RULE );
+fi
+## 
+if [[ $? != 0 ]] ; then
+  rm -f $OUTPUT_FILE.tmp
+  if [[ $QUIET != 1 ]] ; then
+	FAILED="$INSTALL_COMMAND $INSTALL_RULE"
+	echo $RED"COMMAND FAILED: "$NORMAL "$FAILED"
+  fi
+  exit 1
+fi
+
+#sleep 1
+#cd $HOME
+if [[ $(cat $OUTPUT_FILE.tmp |grep -v '$OUTPUT_FILE') = "" ]] ; then
+  # 'make install' produced no errors but also produced no output
+  echo $RED"FATAL! "$NORMAL"Running '$INSTALL_COMMAND $INSTALL_RULE' with sentry produced no files list. "
+  echo "This may be the result of an empty or faulty install rule. "$RED"Exiting..."$NORMAL
+  rm -f $OUTPUT_FILE.tmp
+  FAILED="NO FILES"
+else
+  if [[ $QUIET != 1 ]] ; then
+	echo $BLUE"Tracking "$GREEN"Successful!"$NORMAL
+	echo -n $BLUE"Processing file list... "$NORMAL
+  fi
+  #cd $HOME
+  # get rid of pesky lines with /dev/null and /dev/tty in them
+  cat $OUTPUT_FILE.tmp |egrep -v '(/dev/null|/dev/tty)' > $OUTPUT_FILE.tmp2
+  # rm -f $OUTPUT_FILE.tmp
+  mv $OUTPUT_FILE.tmp2 $OUTPUT_FILE.tmp
+  
+  if [[ "$EXCLUDES" != "" ]] ; then
+    # extract a list of the dirs created
+    cat $OUTPUT_FILE.tmp |grep 'mkdir' |grep -v '#File exists' |cut -f3 |egrep -v "($EXCLUDES)" >> $OUTPUT_FILE.dirs
+    # extract a  list of symlinks created
+    cat $OUTPUT_FILE.tmp |grep 'symlink'| cut -f 4 | egrep -v "#File exists" |egrep -v "($EXCLUDES)" >> $OUTPUT_FILE.links
+    # extract a list of the files created
+    cat $OUTPUT_FILE.tmp  |grep 'open' |grep '#success'  |cut -f3 |grep -v '#File exists' |grep -v "$OUTPUT_FILE*" |egrep -v "($EXCLUDES)" >> $OUTPUT_FILE.files
+    # extract a list of chown operations
+    cat $OUTPUT_FILE.tmp  |grep '^0'|grep chown |grep '#success' |cut -f3-5 |egrep -v "($EXCLUDES)" >> $OUTPUT_FILE.chown
+    # extract a list of chmod operations
+    cat $OUTPUT_FILE.tmp  |grep '^0'|grep chmod |grep '#success' |cut -f3,4 |egrep -v "($EXCLUDES)" >> $OUTPUT_FILE.chmod
+    # extract a list of moved files
+    cat $OUTPUT_FILE.tmp  |grep '^0'|grep rename |grep '#success' |cut -f3,4 |egrep -v "($EXCLUDES)" >> $OUTPUT_FILE.rename
+    # extract a list of removed directories
+    cat $OUTPUT_FILE.tmp  |grep '^0'|grep rmdir |grep '#success' |cut -f3 |egrep -v "($EXCLUDES)" >> $OUTPUT_FILE.rmdir
+    # extract a list of removed files
+    cat $OUTPUT_FILE.tmp  |grep '^0'|grep unlink |grep '#success' |cut -f3 |egrep -v "($EXCLUDES)" >> $OUTPUT_FILE.rm
+  else
+    # extract a list of the dirs created
+    cat $OUTPUT_FILE.tmp |grep 'mkdir' |grep -v '#File exists' |cut -f3 >> $OUTPUT_FILE.dirs
+    # extract a  list of symlinks created
+    cat $OUTPUT_FILE.tmp |grep 'symlink'| cut -f 4 | egrep -v "#File exists" >> $OUTPUT_FILE.links
+    # extract a list of the files created
+    cat $OUTPUT_FILE.tmp  |grep 'open' |grep '#success'  |cut -f3 |grep -v '#File exists' |grep -v "$OUTPUT_FILE*" >> $OUTPUT_FILE.files
+    # extract a list of chown operations
+    cat $OUTPUT_FILE.tmp  |grep '^0'|grep chown |grep '#success' |cut -f3-5 >> $OUTPUT_FILE.chown
+    # extract a list of chmod operations
+    cat $OUTPUT_FILE.tmp  |grep '^0'|grep chmod |grep '#success' |cut -f3,4 >> $OUTPUT_FILE.chmod
+    # extract a list of moved files
+    cat $OUTPUT_FILE.tmp  |grep '^0'|grep rename |grep '#success' |cut -f3,4 >> $OUTPUT_FILE.rename
+    # extract a list of removed directories
+    cat $OUTPUT_FILE.tmp  |grep '^0'|grep rmdir |grep '#success' |cut -f3 >> $OUTPUT_FILE.rmdir
+    # extract a list of removed files
+    cat $OUTPUT_FILE.tmp  |grep '^0'|grep unlink |grep '#success' |cut -f3 >> $OUTPUT_FILE.rm
+  fi
+  # if debugging is being used, preserve the original log output
+  if [[ $DEBUG = 0 ]] ; then
+	rm -f $OUTPUT_FILE.tmp
+  else
+	rm -f $OUTPUT_FILE.orig
+	mv $OUTPUT_FILE.tmp $OUTPUT_FILE.orig
+  fi
+  
+  if [[ $META_OUTPUT != 1 ]] ; then
+	echo "Location: $CWD" > $OUTPUT_FILE
+	echo "Command: $INSTALL_COMMAND $INSTALL_RULE" >> $OUTPUT_FILE
+	echo "" >> $OUTPUT_FILE
+  fi
+  # process list of directories created
+  if [[ -f $OUTPUT_FILE.dirs ]] && [[ $(cat $OUTPUT_FILE.dirs) != "" ]] ; then
+	for dir in $(cat $OUTPUT_FILE.dirs) ; do
+		if [[ -d "$dir" ]] ; then
+		  echo $dir >> $OUTPUT_FILE.tmp
+		else
+		 echo '*** '$dir >> $OUTPUT_FILE.tmp
+		fi
+	done
+	rm -f $OUTPUT_FILE.dirs
+	cat $OUTPUT_FILE.tmp |sort -u | uniq >> $OUTPUT_FILE.dirs
+	rm -f $OUTPUT_FILE.tmp
+	if [[ $META_OUTPUT = 1 ]] ; then
+		while read line ; do
+			echo D+:$line >> $OUTPUT_FILE
+		done < $OUTPUT_FILE.dirs
+	else
+		echo "Directories created:" >> $OUTPUT_FILE
+		cat $OUTPUT_FILE.dirs >> $OUTPUT_FILE
+		echo "" >> $OUTPUT_FILE
+	fi
+  fi
+  # process list of files created
+  if [[ -f $OUTPUT_FILE.files ]] && [[ $(cat $OUTPUT_FILE.files) != "" ]] ; then
+	for file in $(cat $OUTPUT_FILE.files) ; do
+		if [[ -f "$file" ]] ; then
+		  echo $file >> $OUTPUT_FILE.tmp
+		else
+		  echo '*** '$file >> $OUTPUT_FILE.tmp
+		fi
+	done
+	rm -f $OUTPUT_FILE.files
+	cat $OUTPUT_FILE.tmp |sort -u | uniq >> $OUTPUT_FILE.files
+	rm -f $OUTPUT_FILE.tmp
+	if [[ $META_OUTPUT = 1 ]] ; then
+		while read line ; do
+			echo F+:$line >> $OUTPUT_FILE
+		done <$OUTPUT_FILE.files
+	else
+		echo "Files created:" >> $OUTPUT_FILE
+		cat $OUTPUT_FILE.files >> $OUTPUT_FILE
+		echo "" >> $OUTPUT_FILE
+	fi
+  fi
+  # process list of links created
+  if [[ -f $OUTPUT_FILE.links ]] && [[ $(cat $OUTPUT_FILE.links) != "" ]] ; then
+	for link in $(cat $OUTPUT_FILE.links) ; do
+		if [[ -L "$link" ]] ; then
+		 echo $link >> $OUTPUT_FILE.tmp
+		else
+		echo '*** '$link >> $OUTPUT_FILE.tmp
+		fi
+	done
+	rm -f $OUTPUT_FILE.links
+	cat $OUTPUT_FILE.tmp |sort -u | uniq >> $OUTPUT_FILE.links
+	rm -f $OUTPUT_FILE.tmp
+	if [[ $META_OUTPUT = 1 ]] ; then
+		while read line ; do
+			echo L+:$line >> $OUTPUT_FILE
+		done <$OUTPUT_FILE.links
+	else
+		echo "Links created:" >> $OUTPUT_FILE
+		cat $OUTPUT_FILE.links >> $OUTPUT_FILE
+		echo "" >> $OUTPUT_FILE
+	fi
+  fi
+  # process list of items whose ownership was changed
+  if [[ -f $OUTPUT_FILE.chown ]] && [[ $(cat $OUTPUT_FILE.chown) != "" ]] ; then
+	for item in $(cat $OUTPUT_FILE.chown) ; do
+		if [[ -e "$item" ]] ; then
+		 echo $item >> $OUTPUT_FILE.tmp
+		else
+		 echo '*** '$item >> $OUTPUT_FILE.tmp
+		fi
+	done
+	rm -f $OUTPUT_FILE.tmp
+	if [[ $META_OUTPUT = 1 ]] ; then
+		while read line ; do
+			echo O+:$line >> $OUTPUT_FILE
+		done <$OUTPUT_FILE.chown
+	else
+		echo "chown operations (item, owner, group)(-1 is root):" >> $OUTPUT_FILE
+		cat $OUTPUT_FILE.chown >> $OUTPUT_FILE
+		echo "" >> $OUTPUT_FILE
+	fi
+  fi
+  # process list of items whose permissions was changed
+  if [[ -f $OUTPUT_FILE.chmod ]] && [[ $(cat $OUTPUT_FILE.chmod) != "" ]] ; then
+	for item in $(cat $OUTPUT_FILE.chmod) ; do
+		if [[ -e "$item" ]] ; then
+		 echo $item >> $OUTPUT_FILE.tmp
+		else
+		 echo '*** '$item >> $OUTPUT_FILE.tmp
+		fi
+	done
+	rm -f $OUTPUT_FILE.tmp
+	if [[ $META_OUTPUT = 1 ]] ; then
+		while read line ; do
+			echo P+:$line >> $OUTPUT_FILE
+		done <$OUTPUT_FILE.chmod
+	else
+		echo "chmod operations (item, perms):" >> $OUTPUT_FILE
+		cat $OUTPUT_FILE.chmod >> $OUTPUT_FILE
+		echo "" >> $OUTPUT_FILE
+	fi
+  fi
+  # process list of items which were moved (renamed)
+  if [[ -f $OUTPUT_FILE.rename ]] && [[ $(cat $OUTPUT_FILE.rename) != "" ]] ; then
+	for item in $(cat $OUTPUT_FILE.rename) ; do
+		if [[ -e "$item" ]] ; then
+		 echo $item >> $OUTPUT_FILE.tmp
+		else
+		 echo '*** '$item >> $OUTPUT_FILE.tmp
+		fi
+	done
+	rm -f $OUTPUT_FILE.tmp
+	if [[ $META_OUTPUT = 1 ]] ; then
+		while read line ; do
+			echo M-:$line >> $OUTPUT_FILE
+		done <$OUTPUT_FILE.rename
+	else
+		echo "Items renamed(mv) (orig, new):" >> $OUTPUT_FILE
+		cat $OUTPUT_FILE.rename >> $OUTPUT_FILE
+		echo "" >> $OUTPUT_FILE
+	fi
+  fi
+  # process list of directories which were removed
+  if [[ -f $OUTPUT_FILE.rmdir ]] && [[ $(cat $OUTPUT_FILE.rmdir) != "" ]] ; then
+	for dir in $(cat $OUTPUT_FILE.rmdir) ; do
+	 echo $dir >> $OUTPUT_FILE.tmp
+	done
+	rm -f $OUTPUT_FILE.tmp
+	if [[ $META_OUTPUT = 1 ]] ; then
+		while read line ; do
+			echo RD-:$line >> $OUTPUT_FILE
+		done <$OUTPUT_FILE.rmdir
+	else
+		echo "Directories removed:" >> $OUTPUT_FILE
+		cat $OUTPUT_FILE.rmdir >> $OUTPUT_FILE
+		echo "" >> $OUTPUT_FILE
+	fi
+  fi
+  # process list of files which were removed
+  if [[ -f $OUTPUT_FILE.rm ]] && [[ $(cat $OUTPUT_FILE.rm) != "" ]] ; then
+	for file in $(cat $OUTPUT_FILE.rm) ; do
+	 echo $file >> $OUTPUT_FILE.tmp
+	done
+	rm -f $OUTPUT_FILE.tmp
+	if [[ $META_OUTPUT = 1 ]] ; then
+		while read line ; do
+			echo RF-:$line >> $OUTPUT_FILE
+		done <$OUTPUT_FILE.rm
+	else	echo "Files removed:" >> $OUTPUT_FILE
+		cat $OUTPUT_FILE.rm >> $OUTPUT_FILE
+		echo "" >> $OUTPUT_FILE
+	fi
+  fi
+  
+  if [[ $META_OUTPUT != 1 ]] && [[ $(grep '^\*\*\*' $OUTPUT_FILE ) ]] ; then
+	echo "Note: Items marked with "'"***"'" may no longer exist." >> $OUTPUT_FILE
+  fi
+  if [[ $BRIEF_OUTPUT = 1 ]] ; then
+	egrep '^(D+|F+|L+)' $OUTPUT_FILE |grep -v '\*\*\*' |cut -f2 -d ':' |cut -f1 -d ' ' >> $OUTPUT_FILE.brief
+	#mv $OUTPUT_FILE.brief $OUTPUT_FILE
+	sort $OUTPUT_FILE.brief > $OUTPUT_FILE
+	rm -f $OUTPUT_FILE.brief
+  fi
+  # remove all the temporary files unless you need to debug something
+  # use DEBUG=4 to save these files
+  if [[ $DEBUG -lt 4 ]] ; then
+   rm -f $OUTPUT_FILE.dirs
+   rm -f $OUTPUT_FILE.links
+   rm -f $OUTPUT_FILE.files
+   rm -f $OUTPUT_FILE.chown
+   rm -f $OUTPUT_FILE.chmod
+   rm -f $OUTPUT_FILE.rename
+   rm -f $OUTPUT_FILE.rmdir
+   rm -f $OUTPUT_FILE.rm
+  fi
+  # remove the debug file unless we are debugging
+  if [[ $DEBUG = 0 ]] ; then
+   rm -rf $TMP_DIR
+  fi
+  if [[ $QUIET != 1 ]] ; then
+	echo $GREEN"Done!"$NORMAL
+  fi
+  unset LD_PRELOAD
+  
+fi
+
+if [[ $QUIET != 1 ]] ; then
+echo $BLUE"Summary of operations listed in $OUTPUT_FILE:"$NORMAL
+cat $OUTPUT_FILE
+fi
+

@@ -1,0 +1,27 @@
+
+- Gilbert Ashley <amigo@ibiblio.org>
+
+This package has been compiled to install and run from
+/usr/gcc-3.4.6 instead of /usr/bin.
+This allows you to have multiple compilers available just
+by changing your PATH.
+
+To use this compiler instead of the regular compiler in your
+PATH, just prepend the path to this compiler to your regular
+path:
+
+PATH=/usr/gcc-3.4.6/bin:$PATH
+
+In this directory is a small shell script called GCC346 which you
+can place in your path. It will set up the above environment
+so you can just give the make command like this:
+
+GCC336 make
+
+You can check to be sure that your path is being setup correctly
+by giving the command: `GCC346 which gcc`. This should return:
+/usr/gcc-3.4.6/bin/gcc  and not /usr/bin/gcc.
+
+If you need strict linking to the compiler libraries you can also
+set the LD_LIBRARY_PATH variable like this:
+LD_LIBRARY_PATH=/usr/gcc-3.4.6/lib

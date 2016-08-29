@@ -1,0 +1,18 @@
+
+This directory contains an example configuration file and src2pkg
+build script for reproducing the standard Slackware huge-smp kernel.
+This config file is the same as used for the standard Slackware
+kernel-2.6.24.5-huge-smp package.
+
+You may be using some other version, so you'll need to start your
+own configuration using this file and then run 'make oldconfig'
+in the sources in order to select/deselect features for a 
+later or earlier version. Then copy the resulting hidden '.config'
+file to this directory and name it config-huge-smp-mine or
+other suitable name.
+
+See the general directions in the directory above this one 
+for how to use src2pkg to build a kernel package.
+
+Have fun!
+Gilbert Ashley <amigo@ibiblio.org>

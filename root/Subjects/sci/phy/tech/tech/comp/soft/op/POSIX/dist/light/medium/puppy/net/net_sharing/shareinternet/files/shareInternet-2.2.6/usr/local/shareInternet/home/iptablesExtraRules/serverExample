@@ -1,0 +1,33 @@
+#!/bin/bash
+
+# Firewall setup.
+#
+#[ -f /root/.shareInternet/firewall.conf ] || exit 1
+#. /root/.shareInternet/firewall.conf
+
+# Do you want to do port forwaring to an internal server?
+# Set the server IP here and sort out the port stuff later in this file.
+#
+#SERVER_IP=10.42.42.42
+
+# Forwarding outside ports to an internal server.
+
+# SSH:
+#iptables -A PREROUTING -t nat -p tcp -d ${OUTSIDE_IP} --dport 22 -j DNAT --to ${SERVER_IP}:22 
+#iptables -A FORWARD -p tcp -d ${SERVER_IP} --dport 22 -o ${INSIDE_DEVICE} -j ACCEPT
+
+# Web:
+#iptables -A PREROUTING -t nat -p tcp -d ${OUTSIDE_IP} --dport 80 -j DNAT --to ${SERVER_IP}:80 
+#iptables -A FORWARD -p tcp -d ${SERVER_IP} --dport 80 -o ${INSIDE_DEVICE} -j ACCEPT
+# This rule helps the "I can't reach my web server from the inside" problem.
+#iptables -A POSTROUTING -t nat -p tcp -d ${SERVER_IP} --dport 80 -s ${INSIDE_NETWORK}/${INSIDE_NETMASK} -j SNAT --to ${OUTSIDE_IP}
+
+# FTP:
+#iptables -A PREROUTING -t nat -p tcp -d ${OUTSIDE_IP} --dport 21 -j DNAT --to ${SERVER_IP}:21 
+#iptables -A FORWARD -p tcp -d ${SERVER_IP} --dport 21 -o ${INSIDE_DEVICE} -j ACCEPT
+
+# SMTP (Internal mail server):
+#iptables -A PREROUTING -t nat -p tcp -d ${OUTSIDE_IP} --dport 25 -j DNAT --to ${SERVER_IP}:25 
+#iptables -A FORWARD -p tcp -d ${SERVER_IP} --dport 25 -o ${INSIDE_DEVICE} -j ACCEPT
+# This rule helps the "I can't reach my server from the inside" problem.
+#iptables -A POSTROUTING -t nat -p tcp -d ${SERVER_IP} --dport 25 -s ${INSIDE_NETWORK}/${INSIDE_NETMASK} -j SNAT --to ${OUTSIDE_IP}

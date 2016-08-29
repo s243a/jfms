@@ -1,0 +1,262 @@
+# This file is part of the src2pkg program:
+# Copyright 2005-2013 Gilbert Ashley <amigo@ibilio.org>
+# src2pkg is released under the GNU General Public License Version 2
+
+### post_process
+post_process() {
+
+if [[ $ALLOW_USER_EXTENSIONS = "YES" ]] ; then
+ # check if the user has any pre-execution extensions to this file and run them, if so.
+ [[ -f "$HOME"/.src2pkg/extensions/16.pre ]] && . "$HOME"/.src2pkg/extensions/16.pre
+fi
+
+if [[ "$FAILED" = "" ]] && [[ ! $USER_CANCELLED ]] ; then
+  if [[ ! $RESUME ]] || [[ $RESUME = $FUNCNAME ]] || [[ $HAVE_RESUMED ]] ; then
+	[[ $RESUME = $FUNCNAME ]] && HAVE_RESUMED=1 && echo $CYAN"Notice - "$BLUE"Resuming build at: "$NORMAL "$FUNCNAME"
+	if [[ $PAUSE = "BEFORE" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+		echo $MAGENTA"Notice - "$BLUE"Pausing before: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+		read
+	fi
+  
+	unset CFLAGS
+	unset CXXFLAGS
+	unset LDFLAGS
+	unset DESTDIR
+	# The following produces a detailed report of the build
+	if [[ $MAKE_REPORT = "YES" ]] ; then
+		echo $BLUE"Creating REPORT: "$NORMAL"$SHORT_NAME.REPORT"
+		REPORT_FILE="$CWD/$SHORT_NAME.REPORT"
+		echo "Build Log for ""$SHORT_NAME" > "$REPORT_FILE"
+		echo "" >> "$REPORT_FILE"
+		echo -n "Uncompressed Package Size:" >> "$REPORT_FILE"
+		echo "$(du $PKG_DIR -ch |grep total |cut -f1)"" bytes" >> "$REPORT_FILE"
+		echo "TGZ Package Contents:" >> "$REPORT_FILE"
+		${TAR} -t --use-compress-program $PKG_COMPRESSOR -f "$PKG_DEST_DIR"/$PKG_NAME >> "$REPORT_FILE"
+		echo "" >> "$REPORT_FILE"
+		echo "Permissions from PKG_DIR:" >> "$REPORT_FILE"
+		cd "$PKG_DIR" && ls -lR |grep -v total >> "$REPORT_FILE"
+		echo "" >> "$REPORT_FILE"
+		#echo "src2pkg script:" >> "$REPORT_FILE"
+		#cat $CWD/$EXEC_NAME >> "$REPORT_FILE"
+		#echo "" >> "$REPORT_FILE"
+		if [[ -e "$PKG_DIR"/install/doinst.sh ]] ; then
+			echo "doinst.sh contents:" >> "$REPORT_FILE"
+			cat "$PKG_DIR"/install/doinst.sh >> "$REPORT_FILE"
+			echo "" >> "$REPORT_FILE"
+		fi
+		# chk_pkg_deps() {
+		echo "Package dependencies:" >> "$REPORT_FILE"
+		cd "$PKG_DIR" ;
+		if [[ "$(find . | xargs -r file | grep ELF | cut -f 1 -d : | xargs -r _ldd)" != "" ]] ; then
+			echo $CYAN"Notice- "$NORMAL"The package depends on the following installed libraries:" >> "$REPORT_FILE"
+			find . | xargs -r file | grep ELF | cut -f 1 -d : | xargs -r _ldd >> "$REPORT_FILE"
+		fi
+	fi
+	
+	#Create a DATABASE file. This is a replica of what installpkg puts in /var/log/packages when the package is installed
+	if [[ $MAKE_DATABASE = "YES" ]] ; then
+		echo $BLUE"Creating DATABASE: "$NORMAL"$SHORT_NAME.DATABASE"
+		DATABASE_FILE="$CWD"/$SHORT_NAME.DATABASE
+		make_database
+	fi
+	# cleanup build files if asked for -trackinstall sets this to PKG but lets be redundant
+	if [[ $CLEANUP ]] ; then
+		cd $CWD
+		[[ $TRACK_INSTALL ]] && CLEANUP="PKG"
+		echo -n $BLUE"Deleting build directories - "$NORMAL
+		if [[ $CLEANUP = "SRC" ]] || [[ $CLEANUP = "ALL" ]] ; then
+			if [[ -d "$SRC_DIR" ]] ; then
+				echo -n "SRC_DIR "
+				cd "$SRC_BUILDS_DIR" ;
+				rm -rf $SRC_DIR_NAME
+			fi
+			if [[ -d "$OBJ_DIR" ]] ; then
+				echo -n "OBJ_DIR "
+				cd "$SRC_BUILDS_DIR" ;
+				rm -rf $OBJ_DIR_NAME
+			fi
+		fi
+		if [[ $CLEANUP = "PKG" ]] || [[ $CLEANUP = "ALL" ]] ; then
+			if [[ -d "$PKG_DIR" ]] ; then
+				echo -n "PKG_DIR "
+				cd "$PKG_BUILDS_DIR" ;
+				rm -rf $PKG_DIR_NAME
+			fi
+			if [[ -d "$PKG_BUILDS_DIR/$DEVEL_PKG_NAME" ]] ; then
+				( cd "$PKG_BUILDS_DIR" && rm -rf "$DEVEL_PKG_NAME" )
+			fi
+			if [[ -d "$PKG_BUILDS_DIR/$I18N_PKG_NAME" ]] ; then
+				( cd "$PKG_BUILDS_DIR" && rm -rf "$I18N_PKG_NAME" )
+			fi
+			if [[ -d "$PKG_BUILDS_DIR/$SOLIBS_PKG_NAME" ]] ; then
+				( cd "$PKG_BUILDS_DIR" && rm -rf "$SOLIBS_PKG_NAME" )
+			fi
+		fi
+		echo $GREEN"Done"$NORMAL
+		# clean up temp files in the CWD
+		[[ -f "$CWD"/new.doinst.sh ]] && rm -f "$CWD"/new.doinst.sh
+		[[ -f "$CWD"/new.$PKG_DESC ]] && rm -f "$CWD"/new.$PKG_DESC
+		[[ -f "$CWD"/new.$PKG_REQUIRED ]] && rm -f "$CWD"/new.$PKG_REQUIRED
+		[[ -f "$CWD"/new.$PKG_PROVIDES ]] && rm -f "$CWD"/new.$PKG_PROVIDES
+		[[ -f "$CWD"/new.$NAME.desktop ]] && rm -f "$CWD"/new.$NAME.desktop
+		[[ -f "$CWD"/new.$ORIG_NAME.desktop ]] && rm -f "$CWD"/new.$ORIG_NAME.desktop
+		[ -f "$CWD"/re-read.tmp ] && rm -f "$CWD"/re-read.tmp
+		# remove left-over log files
+		[[ -f "$LOG_DIR"/$NAME-configure.log ]] && rm -f "$LOG_DIR"/$NAME-configure.log
+		[[ -f "$LOG_DIR"/$NAME-make.log ]] && rm -f "$LOG_DIR"/$NAME-make.log
+		[[ -f "$LOG_DIR"/$NAME-make-install.log ]] && rm -f "$LOG_DIR"/$NAME-make-install.log
+		[[ -f "$LOG_DIR"/$NAME-build.log ]] && rm -f "$LOG_DIR"/$NAME-build.log
+	  
+		if [[ "$DONT_CLOBBER_SCRIPT" != "1" ]] ; then
+			[[ -f "$CWD"/$NAME.src2pkg.auto ]] && rm -f "$CWD"/$NAME.src2pkg.auto
+		fi
+		
+		if [[ -d $CWD/$NAME-$VERSION-patches ]] ; then
+			if [[ -f $CWD/$NAME-$VERSION-patches.tar.bz2 ]] || \
+				[[ -f $PATCHES/$NAME-$VERSION-patches.tar.bz2 ]] ; then
+					echo -n $BLUE"Removing $NAME-$VERSION-patches directory - "$NORMAL
+					(cd $CWD && rm -rf $NAME-$VERSION-patches)
+					echo $GREEN"Done"$NORMAL
+			fi
+		fi
+		if [[ -d $CWD/$NAME-patches ]] ; then
+			if [[ -f $CWD/$NAME-patches.tar.bz2 ]] || \
+				[[ -f $PATCHES/$NAME-patches.tar.bz2 ]] ; then
+					echo -n $BLUE"Removing $NAME-patches directory - "$NORMAL
+					(cd $CWD && rm -rf $NAME-patches)
+					echo $GREEN"Done"$NORMAL
+			fi
+		fi
+		if [[ -d $CWD/Resources ]] ; then
+			if [[ -f $CWD/Resources.tar.bz2 ]] ; then
+				if [[ $COMMON_DIR = 1 ]] ; then
+					# don't do this if we are a group?
+					:
+				else
+					echo -n $BLUE"Removing Resources directory - "$NORMAL
+					(cd $CWD && rm -rf Resources)
+					echo $GREEN"Done"$NORMAL
+				fi
+			fi
+		fi
+		
+	fi
+	case $AUDIO_NOTIFICATION in
+		BEEP)	echo -e '\a' ;;
+		#SAY)	flite "Finished building $NAME $VERSION" 2> /dev/null ;;
+		SAY)	flite "build successful" 2> /dev/null ;;
+		PLAY)	play /usr/share/src2pkg/sounds/success &> /dev/null ;;
+	esac
+	ERROR=0
+  elif [[ $USER_CANCELLED ]] ; then
+    echo $RED"Exiting! "$NORMAL"User cancelled operation."
+    case $AUDIO_NOTIFICATION in
+		BEEP)	echo -ne '\a';sleep .5;echo -ne '\a' ;;
+		# SAY)	flite "Cancelled building of $NAME $VERSION" 2> /dev/null ;;
+		SAY)	
+			case $TTS_ENGINE in
+				flite) flite "build cancelled" 2> /dev/null ;;
+				festival) echo "build cancelled" |festival --tts 2> /dev/null ;;
+			esac
+			;;
+		PLAY)	play /usr/share/src2pkg/sounds/cancel &> /dev/null ;;
+	esac
+	ERROR=2
+  elif [[ $FAILED = "CANCELLED" ]] ; then
+	# this cancellation case is not active anymore as
+	#  src2pkg exits directly after doing emergency restore
+	echo $RED"Exiting! "$NORMAL
+	case $AUDIO_NOTIFICATION in
+		BEEP)	echo -ne '\a';sleep .5;echo -ne '\a' ;;
+		#SAY)	flite "Dangerous cancellation building $NAME $VERSION" 2> /dev/null ;;
+		SAY)	
+			case $TTS_ENGINE in
+				flite) flite "dangerous cancellation" 2> /dev/null ;;
+				festival) echo "dangerous cancellation" |festival --tts 2> /dev/null ;;
+			esac
+			;;
+		PLAY)	play /usr/share/src2pkg/sounds/ouch &> /dev/null ;;
+	esac
+	ERROR=1
+  else
+	echo $(basename "$0") $RED"FAILURE "$NORMAL"$FAILED"
+	case $AUDIO_NOTIFICATION in
+		BEEP)	echo -ne '\a';sleep .5;echo -ne '\a';sleep .5;echo -e '\a' ;;
+		#SAY)	flite "Failed building $NAME $VERSION" 2> /dev/null ;;
+		SAY)
+			case $TTS_ENGINE in
+				flite) flite "build failed" 2> /dev/null ;;
+				festival) echo "build failed" |festival --tts 2> /dev/null ;;
+			esac
+			;;
+		PLAY)	play /usr/share/src2pkg/sounds/failure &> /dev/null ;;
+	esac
+	ERROR=1
+  fi
+fi
+
+if [[ $ALLOW_USER_EXTENSIONS = "YES" ]] ; then
+	# check if the user has any post-execution extensions to this file and run them, if so.
+	[[ -f "$HOME"/.src2pkg/extensions/16.post ]] && . "$HOME"/.src2pkg/extensions/16.post
+fi
+case $ERROR in
+	0) exit 0 ;;
+	1) exit 1 ;;
+	2) exit 2 ;;
+	#*) echo $ERROR ; exit 0 ;;
+esac
+}
+# End post_process
+
+make_database() {
+
+case $PKG_FORMAT in
+	tgz) PKG_COMPRESSOR=gzip ;;
+	tbz) PKG_COMPRESSOR=bzip2 ;;
+	tlz) PKG_COMPRESSOR=lzma ;;
+	txz) PKG_COMPRESSOR=xz ;;
+esac
+
+case "$PKG_FORMAT" in
+	tgz|tbz|tlz|txz)
+		COMPRESSED="$(du -sk $PACKAGE | cut -f 1)K"
+		$PKG_COMPRESSOR -dc $PACKAGE | dd 1> /dev/null 2> $SRC_DIR/tmpsize
+		UNCOMPRESSED="$(tail -n 1 $SRC_DIR/tmpsize | cut -f 1 -d ' ')"
+		if [[ $UNCOMPRESSED -gt 1024 ]] ; then
+			UNCOMPRESSED="$(expr $UNCOMPRESSED / 1024)K"
+		else
+			UNCOMPRESSED="$UNCOMPRESSED bytes"
+		fi
+		rm -f $SRC_DIR/tmpsize
+	;;
+	*)
+		COMPRESSED="$(du -sk $PACKAGE | cut -f 1)K"
+		UNCOMPRESSED="unknown-uncompressed-size"
+	;;
+esac
+
+echo "PACKAGE NAME:     $NAME-$VERSION" > "$DATABASE_FILE"
+echo "COMPRESSED PACKAGE SIZE:     $COMPRESSED" >> "$DATABASE_FILE"
+echo "UNCOMPRESSED PACKAGE SIZE:     $UNCOMPRESSED" >> "$DATABASE_FILE"
+echo "PACKAGE LOCATION: $PKG_NAME" >> "$DATABASE_FILE"
+echo "PACKAGE DESCRIPTION:" >> "$DATABASE_FILE"
+cat "$PKG_DIR"/install/$PKG_DESC | grep -v '#'  >> "$DATABASE_FILE"
+echo "FILE LIST:" >> "$DATABASE_FILE"
+${TAR} -t --use-compress-program $PKG_COMPRESSOR -f "$PACKAGE" >> "$DATABASE_FILE"
+
+# get the uncompressed size if we don't have it yet (bzip2 and lzma don't report this, so we have to calculate it)
+if [ "$PKG_FORMAT" != "tgz" ] ; then
+	START_LINE_NUMBER=$(grep -n '^\./' $ROOT/$ADM_DIR_NAME/packages/$SHORT_NAME |cut -f1 -d:)
+	START_LINE_NUMBER=$(expr $START_LINE_NUMBER + 1)
+	UNCOMPRESSED=0
+	for FILE in $(cat "$DATABASE_FILE" |tail -n +$START_LINE_NUMBER) ; do
+		if [ -f $ROOT/$FILE ] ; then
+			FILESIZE=$(du $ROOT/$FILE | white_out| cut -f 1 -d ' ')
+			UNCOMPRESSED=$(expr $UNCOMPRESSED + $FILESIZE)
+		fi
+	done
+	UNCOMPRESSED="`expr $UNCOMPRESSED` K"
+	sed -i "s/unknown-uncompressed-size/$UNCOMPRESSED/" "$DATABASE_FILE" 1> /dev/null 2> /dev/null
+fi
+
+}

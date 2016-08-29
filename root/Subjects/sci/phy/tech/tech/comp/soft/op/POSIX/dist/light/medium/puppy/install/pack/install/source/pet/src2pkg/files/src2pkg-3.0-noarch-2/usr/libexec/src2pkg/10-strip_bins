@@ -1,0 +1,77 @@
+# This file is part of the src2pkg program:
+# Copyright 2005-2013 Gilbert Ashley <amigo@ibilio.org>
+# src2pkg is released under the GNU General Public License Version 2
+
+# Strip ELF Binaries and Libraries
+strip_bins() {
+if [[ $ALLOW_USER_EXTENSIONS = "YES" ]] ; then
+ # check if the user has any pre-execution extensions to this file and run them, if so.
+ [[ -f "$HOME"/.src2pkg/extensions/10.pre ]] && . "$HOME"/.src2pkg/extensions/10.pre
+fi
+
+if [[ "$FAILED" = "" ]] && [[ ! $USER_CANCELLED ]] ; then
+  if [[ ! $RESUME ]] || [[ $RESUME = $FUNCNAME ]] || [[ $HAVE_RESUMED ]] ; then
+	[[ $RESUME = $FUNCNAME ]] && HAVE_RESUMED=1 && echo $CYAN"Notice - "$BLUE"Resuming build at: "$NORMAL "$FUNCNAME"
+	if [[ $PAUSE = "BEFORE" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+		echo $MAGENTA"Notice - "$BLUE"Pausing before: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+		read
+	fi
+  
+	if [[ $STRIP_BINS = "YES" ]] ; then
+	    cd "$PKG_DIR" ; 
+	    if [[ -s $SRC_DIR/$NAME-ELF-bins ]] ; then
+			echo -n $BLUE"Stripping ELF binaries - "$NORMAL"Using: $BIN_STRIP_COMMAND "
+			while read FILE ; do
+				$BIN_STRIP_COMMAND $PKG_DIR/$FILE 2> /dev/null
+			done < $SRC_DIR/$NAME-ELF-bins 
+			echo $GREEN"Done"$NORMAL
+	    fi
+	fi
+
+	if [[ $STRIP_LIBS = "YES" ]] ; then
+	    cd "$PKG_DIR" ;
+	    if [[ -s "$SRC_DIR"/$NAME-static-libs ]] ; then
+			echo -n $BLUE"Stripping static archives - "$NORMAL"Using: $STATIC_LIB_STRIP_COMMAND "
+			while read FILE ; do
+				$STATIC_LIB_STRIP_COMMAND $PKG_DIR/$FILE 2> /dev/null
+			done < $SRC_DIR/$NAME-static-libs
+			echo $GREEN"Done"$NORMAL
+	    fi
+	    if [[ -s $SRC_DIR/$NAME-ELF-libs ]] ; then
+			echo -n $BLUE"Stripping shared libraries - "$NORMAL"Using: $LIB_STRIP_COMMAND "
+			while read FILE ; do
+				$LIB_STRIP_COMMAND $PKG_DIR/$FILE 2> /dev/null
+			done < $SRC_DIR/$NAME-ELF-libs
+			echo $GREEN"Done"$NORMAL
+	    fi
+	fi
+	if [[ $STRIP_HARD = "YES" ]] ; then
+		cd "$PKG_DIR" ;
+		echo -n $CYAN"   Notice - "$NORMAL"Hard-stripping binaries and libs - "
+		# Strip .comment and .note sections (the latter only if it is not allocated)
+		for FILE in $(cat $SRC_DIR/$NAME-ELF-bins $SRC_DIR/$NAME-ELF-libs $SRC_DIR/$NAME-static-libs 2> /dev/null) ; do
+		    note="-R .note"
+		    if objdump -h $FILE | grep '^[ 	]*[0-9]*[ 	]*.note[ 	]' -A 1 | \
+				grep ALLOC >/dev/null; then
+				note=
+		    fi
+		    strip -R .comment $note $FILE || :
+		    strip -R .compact_rel $note $FILE || :
+		done
+		echo $GREEN"Done"$NORMAL
+	fi
+	
+	if [[ $PAUSE = "AFTER" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+		echo $MAGENTA"Notice - "$BLUE"Pausing after: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+		read
+	fi
+  fi
+fi
+
+if [[ $ALLOW_USER_EXTENSIONS = "YES" ]] ; then
+ # check if the user has any post-execution extensions to this file and run them, if so.
+ [[ -f "$HOME"/.src2pkg/extensions/10.post ]] && . "$HOME"/.src2pkg/extensions/10.post
+fi
+
+}
+# end strip_bins

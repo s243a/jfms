@@ -1,0 +1,55 @@
+#!/bin/bash
+# Copyright 2009-2013 Gilbert Ashley <amigo@ibiblio.org>
+# re-written from an idea by
+# Ricardo Garcia Gonzalez.
+# His version needed bash-4, awk, cat, cut, grep and tr -plus objdump
+# This only needs bash >=3.0 and objdump :-)
+# I added the "not found" report
+# version 0.1
+# version 0.2 added a commented-out alternative method using readelf
+
+if [[ -n $1 ]] ; then
+  declare MY_LIBS="$(objdump -p $@ |grep NEEDED)"
+  # results look like this:
+  #'   NEEDED               libc.so.6'
+  
+  # Hmm, we can get similar output using:
+  # readelf -d $@ |grep '(NEEDED)'
+  # which returns something like this:
+  #'0x00000001 (NEEDED)                     Shared library: [libc.so.6]'
+  # declare MY_LIBS=$(readelf -d $@ |grep '(NEEDED)'|cut -f2 -d'[' |cut -f1 -d ']')
+  
+  
+  # Library directories.
+  LIBDIRS=${LD_LIBRARY_PATH//:/ }"/lib$LIBDIRSUFFIX /usr/lib$LIBDIRSUFFIX"
+  if [[ -r /etc/ld.so.conf ]] ; then
+	while read LINE ; do
+		LIBDIRS=${LIBDIRS}" $LINE"
+	done < /etc/ld.so.conf
+  fi
+
+  #LIBDIRS=${LIBDIRS}${LD_LIBRARY_PATH//:/ } 
+
+  for LINE in $(echo $MY_LIBS) ; do
+	HAVE_LIB=0
+	if [[ $LINE != "NEEDED" ]] ; then
+		for LIBDIR in $LIBDIRS ; do
+			if [[ -e "$LIBDIR/$LINE" ]] ; then
+				# don't use '-x' which requires the lib to be executable
+				HAVE_LIB=1
+				echo "$LIBDIR/$LINE"
+				# for an output more like the real ldd:
+				# echo "$LINE => $LIBDIR/$LINE"
+				break
+			else
+				continue
+			fi
+		done
+		if [[ $HAVE_LIB != 1 ]] ; then
+			echo "$LINE"" not found"
+			# for an output more like the real ldd:
+			# echo "$LINE => not found"
+		fi
+	fi
+  done
+fi

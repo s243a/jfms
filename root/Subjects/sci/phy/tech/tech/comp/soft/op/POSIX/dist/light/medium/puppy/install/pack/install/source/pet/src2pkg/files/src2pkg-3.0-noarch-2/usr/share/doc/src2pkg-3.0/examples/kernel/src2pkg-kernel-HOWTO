@@ -1,0 +1,258 @@
+
+		sr2pkg kernel HOWTO
+	
+	This document is designed to explain, in detail, how to
+	create packages of your custom kernel and kernel-modules.
+	Please read the README files inside each subdirectory for
+	more concise information regarding each type of build.
+	Two example directories are supplied -one for building
+	the standard kernel-modules package, and one for building
+	the 'huge-smp' kernel, which is the kernel that normally
+	is installed when installing Slackware.
+	
+ Using this method to package your kernel and modules allows you
+to carry out all steps while logged in as a normal non-privileged
+user. Of course, installation of the packages must be done as root
+as well as configuring your bootloader to boot the new kernel.
+
+ This method is also non-intrusive. If you follow the directions
+below and create a unique name for your kernel/modules package,
+no existing files will be overwritten when you install the packages
+and removing them can be safely done without leaving your system
+unbootable.
+
+There are several directories here which contain different example
+scripts and kernel config files. Here's a brief description of them:
+* 'kernel' -this directory contains the script and config file for
+producing a 'standard' Slackware kernel-VERSION-huge-smp package
+* 'kernel-modules' -this directory contains the script and config file for
+producing a 'standard' Slackware kernel-modules-smp-VERSION package
+Both of the above add the suffix 'mine' to the standard package
+name string to avoid your standard kernel or modules package from
+being overwritten or removed by installpkg/upgradepkg.
+* 'kernel_and_modules' -this is probably the best script and config
+file for most users to start with. This script will build a single
+package which contains both the kernel and modules. Because of the
+naming there is no danger of your present kernel or modules being
+overwritten when installing the resulting package.
+* 'kernel-tiny' -this directory provides a configuration for building
+a very small linux kernel -maybe small enough to fit on a floppy
+Each directory has a README file with more details. You should
+read each one before deciding which is most appropriate for you.
+Then read the following directions carefully for best results.
+
+
+Feedback, comments and questions about these scripts are welcome.
+They should be sent to Gilbert Ashley <amigo@ibiblio.org>
+
+1. General notes
+2. Deciding which kernel to use
+3. Creating a configuration file
+4. Modifying the scripts to match the kernel version
+5. Running the build scripts
+6. For the impatient - Quick directions for building a kernel/modules package
+
+1. ===== General notes
+  If you've never built a kernel before, you should first build one
+using the exact same version and configuration as the kernel you
+are currently running. This will give you a feel for how the
+process works, how long it takes, and what the message output
+looks like during a successful kernel compilation.
+
+ If you follow the directions here carefully, you should be able to
+create a kernel package which can be safely installed and removed
+with the Slackware pkgtools, without the new package overwriting
+or removing any files contained in the standard kernel or modules
+package. This will allow you to test the new kernel without making
+your system unbootable. If for some reason your new kernel doesn't
+boot, you can always reboot your system using the default kernel
+or whichever one you are currently using.
+
+2. ===== Deciding which kernel to use
+ Most first-time or novice users who try compiling their own kernel
+only want to upgrade the kernel to a newer version than what was
+originally installed with their system, using the same configuration
+options as with the original kernel. This is, by far, much easier
+than trying to work out the configuration options from scratch. Even
+when you want to start customizing your kernel to fit your unique
+needs, it is easier to start with a configuration which works and
+gradually remove or add features until you have it like you want.
+
+ Even when just upgrading to a newer kernel version using an old
+configuration, you will be presented with some questions regarding
+new features which were not available in the original version.
+Usually it is best to simply accept the suggested defaults when
+configuring the new kernel, unless one of the new features is the
+reason you are upgrading in the first place.
+
+3. ==== Creating a configuration file
+ Creating a basic configuration file which is known to work is easy.
+You can either use a copy of one of the standard Slackware config
+files or print one out from the kernel you are presently running.
+Slackware kernels from the 2.6 branch include a feature which stores
+the configuration options inside the kernel itself. These are stored
+in a virtual file which can be viewed under the /proc directory.
+running the command 'zcat /proc/config.gz' will show the options
+for the running kernel. You can capture these options into a file
+with the command:
+zcat /proc/config.gz > config
+This creates the file 'config' which contains the options. You can
+then use this file to specify the options for your new kernel. Or
+you can use it as a base from which to modify the options for your
+custom kernel. See Appendix A for notes on creating a custom config file.
+
+Though a standard Slackware installation installs the 'huge-smp' kernel,
+it is important to note that the kernel-modules package is created
+using the configuration file for the generic-smp kernel. The generic-smp
+config file causes the kernel to be compiled with very few 'hard-linked'
+features. Instead, most features are compiled as modules. This means
+that the generic-smp config file creates a fairly complete set of
+kernel modules.
+
+So, for our example builds, we'll use the standard generic-smp config
+file to create the kernel-modules package. And since the huge-smp kernel
+is the 'standard' kernel, we'll use the config file for it to create
+our kernel package. These configuration files are found in the respective
+'huge-smp' and 'modules' directories -each named simply 'config'. In
+the next section we'll talk about how to rename these config files to
+match your new package names, but it should be noted that they can also
+be used as-is. In order for the configuration files to be used, they get
+copied into the unpacked kernel sources and renamed '.config'. The dot
+means that the files are 'hidden' inside the sources, but the name '.config'
+is important since that is the file name that the kernel configuration
+process will look for.
+
+4. ===== Modifying the scripts to match the kernel version
+ It's very important to give a unique name to your new kernel and
+kernel-modules packages. This will keep existing files and directories
+from being overwritten or removed when you use installpkg to install 
+the new packages or removepkg to remove them.
+
+ For example, if you are building a new package of the huge-smp kernel,
+you might use the name huge-smp-mine. Near the top of the src2pkg script
+you'll see a line like this:
+KNAME='huge-smp-mine'
+You can edit this to whatever you want, but it is best to avoid using the
+same name as any kernels already installed on your system. The standard
+kernels have names like 'huge', 'huge-smp', 'generic', 'generic-smp'.
+Avoid using exactly the same name. KNAME is only the last part of the name
+and gets appended to the main part of the package name 'kernel' or 
+'kernel-modules'.
+
+It is not necessary, but it helps to avoid confusion if you use the same 
+name for the configuartion file. As written, the src2pkg script looks for
+a file named config-$KNAME-$VERSION first. If not found, it looks for one
+named config-$KNAME. If not found, it finally looks for one named simply
+'config'. (VERSION is, of course, the version number of the kernel.)
+
+The scripts will automatically create a slack-desc file for the package
+and insert it into the package. The description is pretty generic, but
+you can hand-edit the script so that it says something different, or
+simply create a slack-desc file for the package and place it beside
+the src2pkg script and the kernel sources. Be sure that the file has 
+bewteen 9-13 lines, each of which begins with the name of the package,
+followed by a colon (:).
+The name has to match exactly or src2pkg will reject the file and create
+an even more generic one. In the case of our example, the name of the
+package would be 'kernel-huge-smp-mine', so each line should begin with:
+kernel-huge-smp-mine:
+
+You also need to edit the src2pkg file to reflect the kernel version
+which you are trying to build. The example scripts are for building
+the kernel linux-2.6.23. Be sure to change the line:
+SOURCE_NAME='linux-2.6.23.tar.bz2'
+to the correct version number for the kernel you are building.
+If you are using a kernel patch which upgrades to a higher version number,
+you'll also need to uncomment and correct the line which reads:
+#ALT_VERSION=2.6.23.6
+to the correct upgraded version number. In this example case, if we used
+the kernel upgrade patch named 'patch-2.6.23.6.bz2' to upgrade the
+kernel to version 2.6.23.6. Note that you'd also need to rename the patch.
+src2pkg can automatically apply patches for you, but they must be named
+something.patch, something.patch.gz or something.patch.bz2. So, in this case,
+you'd need to rename the patch from patch-2.6.23.6.bz2 to patch-2.6.23.6.patch.bz2
+or any other name that has 'patch' as part of the suffix.
+
+5. =====
+ Once edited, running the build is really simple. Simply create an empty directory
+to work in where you have write privileges. Copy or move the kernel sources
+into the directory. Copy or move the src2pkg build script into the directory and
+do the same for your config file.
+
+Then, cd into the directory or browse to it and open a terminal there. Start the
+build by typing the command 'src2pkg -X'. Go have a coffee or take a nap.
+Compiling a kernel or modules usually takes quite a while. Once finished,
+src2pkg will tell you where the finished package is located.
+
+6. =====
+ For the really impatient, just create a new directory to work in where you have
+write privileges. Then copy or move the chosen example src2pkg script for the kernel
+or modules into the new directory, along with the kernel sources you want
+to build. Edit this line in the src2pkg script:
+SOURCE_NAME='linux-2.6.23.tar.bz2'
+to reflect the correct version number for the kernel sources you are building.
+Then, from the command-line or in an xterm, issue the command 'src2pkg -X'.
+When finished, src2pkg will tell you where the new package is located.
+
+Appendix A ===== Creating a custom config file
+ This should only be done when you are comfortable with all the steps
+for configuring, compiling and installing standard kernels and when
+you are familiar with configuration of your bootloader (lilo or grub)
+so that you can boot and test your new kernel configuration.
+As mentioned before, it is best to start with a config file which is
+known to work and slowly add or remove options until the configuration
+matches your needs or wishes.
+
+ Creating a custom config file invloves some manual work which can be
+done inside freshly-unpacked sources, or inside the source directory
+left over from a previous compile -whether or not you used src2pkg.
+To do so with freshly-unpacked sources, simply choose a convenient spot
+to unpack the linux kernel sources in. The command:
+tar -xvf linux-2.6.x.tar.bz2
+will unpack the sources(assuming you substitute the proper version number).
+Then, copy the standard config file into the sources and give it the proper
+name(it should be named '.config').
+
+(If you are using sources which have already been compiled, then the file will
+already exist. Run the command 'make clean' inside the sources to remove old 
+files from the previous compile or configuration.)
+
+Now, run the command 'make oldconfig' inside the sources. This will update
+the '.config' file, if needed. That is, if you are using a config file from
+a kernel which is older than the one you are creating the new config file for,
+the command will add any new features which were not available with the old
+kernel version. For each new feature, the configuration will pause and wait
+for your input as to whether the new feature you be built as a 'hard-linked'
+feature, as a module, or not built at all. It is usually best to just accept
+the suggested default by pressing ENTER each time the configuration pauses.
+Otherwise, each option can be asnwerd with a 'y' to hard-link the feature,
+with a 'n' to disable the feature, or with an 'm' (when available) to compile
+the fetaure as a module.
+
+When finished, the 'make oldconfig' will have updated the '.config' file. But,
+if you are wanting to add or remove specific features, you'll want to run a 
+more user-friendly configuration command which makes it easier to enable or
+disable features and show some help messages about each feature. Most users
+will do this by running the command 'make menuconfig'. This command starts
+configuration again, but using an text-based GUI which makes it much easier
+to use than 'make oldconfig'. (There are other 'real' GUI interfaces also,
+like 'make xconfig', but their usage is similar).
+
+'make menuconfig' presents you with a terminal-based screen which lets you scroll
+through the options using the up/down cursor keys. Options can be enabled
+or disabled by scrolling to them until the line is highlighted and then using
+the spacebar to select or deselect them. Pressing the spacebar multiple times
+will change the selection from 'x'(for 'y' hardlinked) to 'm'(for module) or 
+to ' ' ('blank' for 'n' no/disable).
+Use the right/left cursor keys to choose 'Select', 'Exit' or 'Help' to finish
+your selection, cancel it or see a help screen about the feature.
+
+Once you have enabled or disabled the desired features, choose 'Exit' from
+the bottom of the toplevel display screen(the one that say 'General setup'
+at the top. Afterwards, answer yes to the question 'Do you wish to save your
+new kernel configuration?'. This will save your changes to the '.config' file.
+Now, you should copy the '.config' file into the directory where you are using
+src2pkg to create the kernel or kernel-modules package. Be sure to rename the
+file properly as 'config' (no beginning dot), or with the name config-$KNAME
+or config-$KNAME-$VERSION. See the regular instructions above in section 4
+for more detail about the naming scheme used by the example src2pkg scripts.

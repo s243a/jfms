@@ -1,0 +1,118 @@
+# slackware-specific packaging functions
+
+# tiny_make_package
+tiny_make_package() {
+	PACKAGE_NAME=$1
+	TARGET_NAME=$(dirname "$PACKAGE_NAME")
+	PACKAGE_NAME=$(basename "$PACKAGE_NAME")
+	SHORT_NAME=$(basename "$PACKAGE_NAME" ".$PKG_FORMAT")
+	umask 022
+	echo ""
+	
+	if [[ "$EUID" = "0" ]] ; then
+		${TAR} cvf "$SHORT_NAME".tar .
+	else
+		${TAR} --owner=root --group=root -cvf "$SHORT_NAME".tar .
+	fi
+	echo ""
+	
+	if [[ "$PKG_FORMAT" = "tgz" ]] ; then
+		LONG_NAME=$SHORT_NAME.tar.gz
+		echo "Compressing $SHORT_NAME.tar using gzip..."
+		gzip -9 $SHORT_NAME.tar
+	elif [[ "$PKG_FORMAT" = "tbz" ]] ; then
+		LONG_NAME=$SHORT_NAME.tar.bz2
+		echo "Compressing $SHORT_NAME.tar using bzip2..."
+		bzip2 $SHORT_NAME.tar
+	elif [[ "$PKG_FORMAT" = "tlz" ]] ; then
+		LONG_NAME=$SHORT_NAME.tar.lzma
+		echo "Compressing $SHORT_NAME.tar using lzma..."
+		lzma $SHORT_NAME.tar
+	elif [[ "$PKG_FORMAT" = "txz" ]] ; then
+		LONG_NAME=$SHORT_NAME.tar.xz
+		echo "Compressing $SHORT_NAME.tar using xz(lzma-2)..."
+		xz $SHORT_NAME.tar
+	elif [[ "$PKG_FORMAT" = "tpkg" ]] ; then
+		LONG_NAME=$SHORT_NAME.tar.xz
+		echo "Compressing $SHORT_NAME.tar using xz(lzma-2)..."
+		xz $SHORT_NAME.tar
+	fi
+	
+	echo "Renaming $LONG_NAME to $PACKAGE_NAME..."
+	mv "$LONG_NAME" "$PACKAGE_NAME"
+	
+	if [[ ! "$TARGET_NAME" = "." ]]; then
+		echo "Moving $PACKAGE_NAME to $TARGET_NAME"
+		mv "$PACKAGE_NAME" "$TARGET_NAME"
+	fi
+}
+
+# Internal Routines
+mini_installpkg_slack() {
+THIS_PACKAGE="$1"
+THIS_PACKAGE_BASENAME="${THIS_PACKAGE##*/}"
+THIS_PACKAGE_SHORT_NAME="${THIS_PACKAGE_BASENAME%.*}"
+echo $BLUE"Installing package "$NORMAL"${THIS_PACKAGE_BASENAME}"
+case "$PKG_FORMAT" in
+	tgz) PKG_COMPRESSOR=gzip ;;
+	tbz) PKG_COMPRESSOR=bzip2 ;;
+	tlz) PKG_COMPRESSOR=lzma ;;
+	txz) PKG_COMPRESSOR=xz ;;
+esac
+# ( cd  ; ${TAR} -xzlUpvf - ) < $PACKAGE 2> /dev/null
+# ( cd  ; ${TAR} -xlUpv --use-compress-program $PKG_COMPRESSOR -f - ) < $PACKAGE 2> /dev/null
+${TAR} -xlUpv -C / --use-compress-program $PKG_COMPRESSOR -f "$THIS_PACKAGE" 2> /dev/null
+
+DATABASE_FILE=$ADM_DIR_NAME/packages/"$THIS_PACKAGE_SHORT_NAME"
+make_database
+if [[ -f install/$PKG_POSTINST ]] ; then
+	echo "Executing install script for $SHORT_NAME..."
+	( cd / ; sh install/$PKG_POSTINST -install; )
+fi
+
+if [[ -x /sbin/ldconfig ]] && [[ $ROOT = "" ]] ; then
+    /sbin/ldconfig
+fi
+
+if [[ -d install ]] ; then
+		if [[ -r install/$PKG_POSTINST ]]; then
+			cp install/$PKG_POSTINST $ADM_DIR_NAME/scripts/"$THIS_PACKAGE_SHORT_NAME"
+			chmod 755 $ADM_DIR_NAME/scripts/"$THIS_PACKAGE_SHORT_NAME"
+		fi
+    ( cd /install 2> /dev/null && rm -f $PKG_POSTINST slack-* pkg-* *desc *required *provides *suggests *conflicts 1> /dev/null 2>&1 )
+    rmdir /install 1> /dev/null 2>&1
+fi
+}
+
+make_slack_pkg() {
+	# create the package
+	rm -f "$PACKAGE"
+	echo -n $BLUE"Creating package: "$NORMAL"${PACKAGE##*/} - "
+	if [[ $QUIET = "YES" ]] ; then
+		cd "$PKG_DIR" ;
+		tiny_make_package "$PACKAGE" &> /dev/null
+	else
+		cd "$PKG_DIR" ;
+		echo ""
+		tiny_make_package "$PACKAGE"
+	fi
+	if [[ -f "$PACKAGE" ]] ; then
+		echo $GREEN"Done"$NORMAL
+		if [[ "$CREATE_MD5_CHECKSUM" = "YES" ]]; then
+			echo $BLUE"Creating md5 checksum - "$NORMAL"$(basename $PACKAGE).md5"
+			cd "$PKG_DEST_DIR"
+			md5sum $(basename "$PACKAGE") > "$PACKAGE".md5
+		fi
+		echo $BLUE"Package Creation - "$GREEN"Successful! "$NORMAL"Package Location:"
+		echo "$PACKAGE"
+	else
+		echo $RED"FAILED! "$NORMAL
+		echo "Creation of ${PACKAGE##*/} has failed."
+		FAILED="PACKAGE CREATION in: $FUNCNAME"
+	fi
+	[[ $REALLY_INSTALL = "YES" ]] && really_install "$PACKAGE"
+	if [[ $PAUSE = "AFTER" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+		echo $MAGENTA"Notice - "$BLUE"Pausing after: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+		read
+	fi
+}

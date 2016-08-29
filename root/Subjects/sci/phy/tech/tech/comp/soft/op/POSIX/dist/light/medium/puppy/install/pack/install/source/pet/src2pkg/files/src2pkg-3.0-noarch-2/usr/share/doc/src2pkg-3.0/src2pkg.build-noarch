@@ -1,0 +1,596 @@
+#!/bin/bash
+##  src2pkg.build-noarch
+## This script builds the 'noarch' src2pkg package,
+## including the libsentry library and tar-1.13 sources. Once you
+## have built the package is installed, it must be run once
+## as 'root' with the command 'src2pkg --setup'. Then you can build other
+## packages from source using the src2pkg/trackinstall tools.
+## src2pkg --setup can also be run during the installation of
+## the package if you choose. either way, this serves to compile
+## the libsentry library and tar program which src2pkg uses.
+
+CWD=$(pwd)
+# use /tmp if you can't write to the current working directory
+TEMP_DIR="$CWD"
+export PKG_DEST_DIR="$TEMP_DIR"
+
+NAME="src2pkg"
+VERSION="3.0"
+BUILD="2"
+ARCH='noarch'
+
+TAR_VERSION=1.13c
+SRC2PKG_HELPERS_VERSION=1.6
+
+NORMAL="[0;39m"
+# RED: Failure or error message
+RED="[1;31m"
+# GREEN: Success message
+GREEN="[1;32m"
+# BLUE: Summary messages
+BLUE="[1;34m"
+
+PKG_DIR=$TEMP_DIR/${NAME}-${VERSION}-${ARCH}-${BUILD}
+PACKAGE=$TEMP_DIR/${NAME}-${VERSION}-${ARCH}-${BUILD}.txz
+
+[[ -d $PKG_DIR ]] && echo "Removing existing PKG_DIR" && rm -rf $PKG_DIR
+[[ -e $PACKAGE ]] && echo "Removing existing Slackware package" && rm -rf $PACKAGE
+[[ -e ${NAME}-${VERSION}-${ARCH}-${BUILD}.pet ]] && echo "Removing existing PET package" && rm -f "$TEMP_DIR/${NAME}-${VERSION}-${ARCH}-${BUILD}".pet
+[[ -e "$TEMP_DIR/$NAME"_"$VERSION-$BUILD"_all.deb ]] && echo "Removing existing DEB package" && rm -rf  "$TEMP_DIR/$NAME"_"$VERSION-$BUILD"_all.deb
+[[ -e "$TEMP_DIR/$NAME-$VERSION-$BUILD".noarch.rpm ]] && echo "Removing existing RPM package" && rm -rf  "$TEMP_DIR/$NAME-$VERSION-$BUILD".noarch.rpm
+[[ -e "$TEMP_DIR/$NAME-$VERSION".tazpkg ]] && echo "Removing existing SLITAZ package" && rm -rf  "$TEMP_DIR/$NAME-$VERSION".tazpkg
+[[ -e "$TEMP_DIR/${NAME}_${VERSION}-${ARCH}-${BUILD}".tpkg ]] && echo "Removing existing KISS package" && rm -rf "$TEMP_DIR/${NAME}_${VERSION}-${ARCH}-${BUILD}".tpkg 
+echo ""
+
+cd $TEMP_DIR ;
+
+# build and use our own static copy of tar for consistent results if not available
+# This is just for building the src2pkg noarch package, not for the package itself
+cd $TEMP_DIR ;
+if ! [[ $(which tar-1.13 2> /dev/null) ]] ; then
+	echo "Creating a local static copy of the tar program."
+	echo ""
+	echo "Unpacking tar..."
+	tar xjf $CWD/src2pkg-helpers/tar-$TAR_VERSION.tar.bz2
+	( cd tar-$TAR_VERSION
+	echo -n "Configuring tar..."
+	if [[ $ARCH = "x86_64" ]] ; then
+	 CFLAGS="-O2 -fPIC" ./configure --disable-nls --with-ncursesw --enable-widec &> /dev/null
+	else
+	 CFLAGS='-O2' ./configure --disable-nls --with-ncursesw --enable-widec &> /dev/null
+	fi
+	if [[ $? -eq 0 ]] ; then
+	 echo $GREEN"Done"$NORMAL
+	else
+	 echo "tar-1.13 failed to configure... exiting."
+	 exit
+	fi
+	
+	echo -n "Compiling tar-1.13..."
+	make &> /dev/null
+	if [[ $? -eq 0 ]] ; then
+	 echo $GREEN"Done\n"$NORMAL
+	 TAR=$TEMP_DIR/tar-$TAR_VERSION/src/tar
+	else
+	 echo "tar-1.13 failed to compile. Using: $(which tar) instead."
+	 TAR=$(which tar)
+	fi
+	)
+else
+	TAR=$(which tar-1.13)
+fi
+
+# create the package tree and all directories
+echo "Creating Package Tree..."
+mkdir -p $PKG_DIR
+chown root:root $PKG_DIR
+chmod 755 $PKG_DIR
+# make all the dirs at once so we can chmod them all at once:
+mkdir -p $PKG_DIR/install
+mkdir -p $PKG_DIR/etc/src2pkg
+mkdir -p $PKG_DIR/usr/bin
+mkdir -p $PKG_DIR/usr/man/man1
+mkdir -p $PKG_DIR/usr/doc/$NAME-$VERSION
+mkdir -p $PKG_DIR/usr/share/icons
+mkdir -p $PKG_DIR/usr/share/src2pkg/sounds
+mkdir -p $PKG_DIR/usr/share/src2pkg/common-licenses
+# private lib and bin dirs
+mkdir -p $PKG_DIR/usr/libexec/src2pkg
+mkdir -p $PKG_DIR/usr/libexec/src2pkg/lib
+mkdir -p $PKG_DIR/usr/libexec/src2pkg/bin
+# usr/src
+#mkdir -p $PKG_DIR/usr/src/src2pkg/src2pkg
+mkdir -p $PKG_DIR/usr/src/src2pkg/src2pkg-helpers
+# create a repo skeleton in /usr/src/src2pkg
+mkdir -p $PKG_DIR/usr/src/src2pkg/builds
+mkdir -p $PKG_DIR/usr/src/src2pkg/packages
+mkdir -p $PKG_DIR/usr/src/src2pkg/scripts
+mkdir -p $PKG_DIR/usr/src/src2pkg/sources
+# chown and chmod all the directories in the package
+chown -R root:root $PKG_DIR
+chmod -R 755 $PKG_DIR
+
+cp -a $CWD/Resources/libexec/* $PKG_DIR/usr/libexec/src2pkg
+chown root:root $PKG_DIR/usr/libexec/src2pkg/*
+chmod 644 $PKG_DIR/usr/libexec/src2pkg/*
+# reset these two dirs
+chmod 755 $PKG_DIR/usr/libexec/src2pkg/lib
+chmod 755 $PKG_DIR/usr/libexec/src2pkg/bin
+chmod 755 $PKG_DIR/usr/libexec/src2pkg/fake_install
+chmod 755 $PKG_DIR/usr/libexec/src2pkg/make_package
+
+# src2pkg
+cp -a $CWD/Resources/bin/src2pkg $PKG_DIR/usr/bin
+
+# src2pkg-dnd
+cp -a $CWD/Resources/bin/src2pkg-dnd $PKG_DIR/usr/bin
+
+# trackinstall
+cp -a $CWD/Resources/bin/trackinstall $PKG_DIR/usr/bin
+
+# disrpm
+#cp -a $CWD/Resources/bin/disrpm $PKG_DIR/usr/bin
+# Use exploderpm instead
+cp -a $CWD/Resources/bin/exploderpm $PKG_DIR/usr/bin
+
+# tracklist can be run by non-root users so place it in /usr/bin
+cp -a $CWD/Resources/bin/tracklist $PKG_DIR/usr/bin
+
+# install the libsentry wrapper
+cp -a $CWD/Resources/bin/sentry $PKG_DIR/usr/bin
+
+# install the sb2sp utility
+cp -a $CWD/Resources/bin/sb2sp $PKG_DIR/usr/bin
+
+# install our private copy of gettextize
+cp -a $CWD/Resources/bin/gettextize $PKG_DIR/usr/libexec/src2pkg/bin
+
+# install our 'fake' ldd program
+cp -a $CWD/Resources/bin/_ldd $PKG_DIR/usr/libexec/src2pkg/bin
+
+# install tpm helpers
+# cp -a $CWD/Resources/bin/tpm-gen-file-lists $PKG_DIR/usr/libexec/src2pkg/bin
+# cp -a $CWD/Resources/bin/tpm-gen-requires $PKG_DIR/usr/libexec/src2pkg/bin
+# No, leave these as part of tpm itself.
+
+chown root:root $PKG_DIR/usr/bin/*
+chmod 755 $PKG_DIR/usr/bin/*
+
+# config files
+cp -a $CWD/Resources/etc/* $PKG_DIR/etc/src2pkg
+chown root:root $PKG_DIR/etc/src2pkg/*
+chmod 644 $PKG_DIR/etc/src2pkg/*
+
+# docs
+cp -a $CWD/Resources/doc/* $PKG_DIR/usr/doc/$NAME-$VERSION
+cp -a $PKG_DIR/etc/src2pkg/src2pkg.conf.new $PKG_DIR/usr/doc/$NAME-$VERSION/src2pkg.conf.example
+chown -R root:root $PKG_DIR/usr/doc/$NAME-$VERSION/*
+chmod 755 $PKG_DIR/usr/doc/$NAME-$VERSION
+# place a copy of this script in the docs also
+cp ${0} $PKG_DIR/usr/doc/$NAME-$VERSION
+chmod 644 $PKG_DIR/usr/doc/$NAME-$VERSION/$(basename ${0})
+
+find $PKG_DIR/usr/doc/$NAME-$VERSION -type d -exec chmod 755 {} \;
+find $PKG_DIR/usr/doc/$NAME-$VERSION -type f -exec chmod 644 {} \;
+
+# src2pkg icons
+cp -a $CWD/Resources/share/icons/* $PKG_DIR/usr/share/icons/
+chown -R root:root $PKG_DIR/usr/share/icons
+find $PKG_DIR/usr/share/icons -type f -exec chmod 644 {} \;
+
+# src2pkg sounds
+cp -a $CWD/Resources/share/sounds/* $PKG_DIR/usr/share/src2pkg/sounds
+chown root:root $PKG_DIR/usr/share/src2pkg/sounds/*
+chmod 644 $PKG_DIR/usr/share/src2pkg/sounds/*
+
+# src2pkg common-licenses
+cp -a $CWD/Resources/share/common-licenses/* $PKG_DIR/usr/share/src2pkg/common-licenses
+chown root:root $PKG_DIR/usr/share/src2pkg/common-licenses/*
+chmod 644 $PKG_DIR/usr/share/src2pkg/common-licenses/*
+
+# src2pkg locales list
+cp -a $CWD/Resources/share/all-locales.txt $PKG_DIR/usr/share/src2pkg
+chown root:root $PKG_DIR/usr/share/src2pkg/all-locales.txt
+chmod 644 $PKG_DIR/usr/share/src2pkg/all-locales.txt
+
+# config.guess and config.sub
+cp -a $CWD/Resources/share/config.guess $PKG_DIR/usr/share/src2pkg
+cp -a $CWD/Resources/share/config.sub $PKG_DIR/usr/share/src2pkg
+chown root:root $PKG_DIR/usr/share/src2pkg/config.*
+chmod 644 $PKG_DIR/usr/share/src2pkg/config.*
+
+# the desktop file
+mkdir -p $PKG_DIR/usr/share/applications
+cp -a $CWD/Resources/share/src2pkg-dnd.desktop $PKG_DIR/usr/share/applications
+chown root:root $PKG_DIR/usr/share/applications/src2pkg-dnd.desktop
+chmod 644 $PKG_DIR/usr/share/applications/src2pkg-dnd.desktop
+
+# manpage(s)
+cp -a $CWD/Resources/man/* $PKG_DIR/usr/man/man1
+chown -R root:root $PKG_DIR/usr/man/man1/*
+chmod 644 $PKG_DIR/usr/man/man1/*
+gzip $PKG_DIR/usr/man/man1/*
+chown -R root:root $PKG_DIR/usr/man/man1/*
+chmod 644 $PKG_DIR/usr/man/man1/*
+
+# slack-desc and doinst.sh
+cp -a $CWD/slack-desc $PKG_DIR/install
+cp $CWD/doinst.sh $PKG_DIR/install
+
+# Now add the src2pkg-helpers  sources to the package
+cp -a $CWD/src2pkg-helpers/src2pkg-helpers-$SRC2PKG_HELPERS_VERSION.tar.bz2 $PKG_DIR/usr/src/src2pkg/src2pkg-helpers
+cp -a $CWD/src2pkg-helpers/src2pkg-helpers.src2pkg $PKG_DIR/usr/src/src2pkg/src2pkg-helpers
+cp -a $CWD/src2pkg-helpers/slack-desc $PKG_DIR/usr/src/src2pkg/src2pkg-helpers
+cp -a $CWD/src2pkg-helpers/doinst.sh $PKG_DIR/usr/src/src2pkg/src2pkg-helpers
+chmod 644 $PKG_DIR/usr/src/src2pkg/src2pkg-helpers/*
+
+# now copy the setup script which is run by 'src2pkg --setup'
+cp -a $CWD/src2pkg-helpers/src2pkg.setup $PKG_DIR/usr/src/src2pkg/src2pkg-helpers
+chown root:root $PKG_DIR/usr/src/src2pkg/src2pkg-helpers/src2pkg.setup
+chmod 755 $PKG_DIR/usr/src/src2pkg/src2pkg-helpers/src2pkg.setup
+
+#######################################
+# create a slackware package
+echo $BLUE"Creating Slackware *.txz Package..."$NORMAL
+cd "$PKG_DIR" ;
+
+# use our new tar-1.13 so the package is created properly, if tar-1.13 is 
+# not available on the system. Other versions may cause problems.
+$TAR cvf ${NAME}-${VERSION}-${ARCH}-${BUILD}.tar .
+echo $BLUE"Compressing archive..."$NORMAL
+xz ${NAME}-${VERSION}-${ARCH}-${BUILD}.tar
+mv ${NAME}-${VERSION}-${ARCH}-${BUILD}.tar.xz ../${NAME}-${VERSION}-${ARCH}-${BUILD}.txz
+
+echo $BLUE"Finished Package is:"$NORMAL
+echo "$PACKAGE"
+echo ""
+
+#######################################
+
+#######################################
+# create a KISS package (only the name of the slack-desc is changed)
+echo "Creating KISS Package..."
+cd "$PKG_DIR" ;
+# now that we have built the slackware package,
+# move the documents and man-pages to locations
+# which comply with the LSB FSH standards.
+mkdir -p "$PKG_DIR"/usr/share/doc
+mv "$PKG_DIR"/usr/doc/$NAME-$VERSION "$PKG_DIR"/usr/share/doc
+rmdir "$PKG_DIR"/usr/doc
+mv "$PKG_DIR"/usr/man "$PKG_DIR"/usr/share
+#######################################
+# use pkg-desc name for description files
+mv install/slack-desc install/pkg-desc
+mv usr/src/src2pkg/src2pkg-helpers/slack-desc usr/src/src2pkg/src2pkg-helpers/pkg-desc
+# install a nicer default conf for kiss.
+cat $CWD/Resources/doc/src2pkg.conf.kiss > etc/src2pkg/src2pkg.conf.new
+
+# use our new tar-1.13 so the package is created properly, if tar-1.13 is 
+# not available on the system. Other versions may cause problems.
+$TAR cvf ${NAME}_${VERSION}-${ARCH}-${BUILD}.tar .
+echo $BLUE"Compressing archive..."$NORMAL
+xz ${NAME}_${VERSION}-${ARCH}-${BUILD}.tar
+mv ${NAME}_${VERSION}-${ARCH}-${BUILD}.tar.xz ../${NAME}_${VERSION}-${ARCH}-${BUILD}.tpkg
+
+echo $BLUE"Finished Package is:"$NORMAL
+echo "${NAME}_${VERSION}-${ARCH}-${BUILD}.tpkg"
+echo ""
+
+#######################################
+# create a pet package -don't bother readjusting document
+# and man-page paths as Puppy has no standards anyway...
+echo $BLUE"Creating Pet Package..."$NORMAL
+cd "$CWD" ;
+
+echo PETMENUDESCR="''" > ${NAME}-${VERSION}-${ARCH}-${BUILD}/$NAME.pet.specs
+echo PETOFFICIALDEPS="''" >> ${NAME}-${VERSION}-${ARCH}-${BUILD}/$NAME.pet.specs
+echo PETREGISTER="'yes'" >> ${NAME}-${VERSION}-${ARCH}-${BUILD}/$NAME.pet.specs
+cp ${NAME}-${VERSION}-${ARCH}-${BUILD}/install/doinst.sh ${NAME}-${VERSION}-${ARCH}-${BUILD}/pinstall.sh
+rm -rf ${NAME}-${VERSION}-${ARCH}-${BUILD}/install
+# install a pet-friendly conf file
+cat $CWD/Resources/doc/src2pkg.conf.puppy > ${NAME}-${VERSION}-${ARCH}-${BUILD}/etc/src2pkg/src2pkg.conf.new
+
+tar --owner=root --group=root -cf "${NAME}-${VERSION}-${ARCH}-${BUILD}".tar "${NAME}-${VERSION}-${ARCH}-${BUILD}"
+gzip "${NAME}-${VERSION}-${ARCH}-${BUILD}".tar
+MD5SUM="$(md5sum ${NAME}-${VERSION}-${ARCH}-${BUILD}.tar.gz | cut -f 1 -d ' ')"
+echo -n "$MD5SUM" >> "${NAME}-${VERSION}-${ARCH}-${BUILD}".tar.gz
+mv "${NAME}-${VERSION}-${ARCH}-${BUILD}".tar.gz "${NAME}-${VERSION}-${ARCH}-${BUILD}".pet
+	
+echo $BLUE"Finished Package is:" $NORMAL
+echo "${NAME}-${VERSION}-${ARCH}-${BUILD}".pet
+echo ""
+
+rm -rf "$PKG_DIR"/pinstall.sh "$PKG_DIR"/src2pkg.pet.specs
+
+#######################################
+# create an rpm package
+echo $BLUE"Creating rpm package..."$NORMAL
+cat > "src2pkg.spec" << EOF
+Summary:   Package-creation software
+Name:      $NAME
+Version:   $VERSION
+Release:   $BUILD
+License:   GPL
+BuildArch: noarch
+Packager:  Gilbert Ashley
+Group:     Development/Tools
+BuildRoot: $PKG_DIR
+Provides:  unknown
+Requires:  unknown
+
+%description
+EOF
+while read LINE ; do
+	if [[ ${LINE:0:${#NAME}} = "$NAME" ]] ; then
+		LINE=$(echo ${LINE#*:})
+		[[ "$LINE" != "" ]] && echo $LINE >> "src2pkg.spec"
+	fi
+done < "$CWD"/slack-desc
+echo >> "src2pkg.spec" 
+echo '%post' >> "src2pkg.spec" 
+cat  "postinst" >> "src2pkg.spec"
+
+# re-install the original (slackware-style) conf file
+cat $CWD/Resources/etc/src2pkg.conf.new > "$PKG_DIR"/etc/src2pkg/src2pkg.conf.new
+# need to create tailored one for rpm's
+# cat $CWD/Resources/doc/src2pkg.rpm.conf > etc/src2pkg/src2pkg.conf.new
+
+# add the postinst for use by rpm and for deb package below
+cat "$CWD"/src2pkg-helpers/postinst > "$PKG_DIR"/usr/src/src2pkg/src2pkg-helpers/postinst
+# remove before generating file.list
+rm -f "$PKG_DIR"/usr/src/src2pkg/src2pkg-helpers/doinst.sh
+
+# create list of items in the package
+( cd $PKG_DIR && find * > "$CWD/file.list" )
+# dirs must be identified as such
+echo "" >> "src2pkg.spec"
+echo "%files" >> "src2pkg.spec"
+while read LINE ; do
+	if [[ -d "${PKG_DIR}/${LINE}" ]] ; then
+		echo -n "%dir " >> "src2pkg.spec"
+	fi
+	echo "\"/${LINE}\"" >> "src2pkg.spec"
+done < "$CWD"/file.list
+
+rm -f "$CWD"/file.list
+
+
+# create a unique rpmmacros file for this build
+echo "# rpmmacros created by src2pkg for $THIS_RPM build" > "$CWD/rpmmacros"
+echo "%_topdir	$CWD" >> "$CWD/rpmmacros"
+echo "%_buildrootdir  $PKG_DEST_DIR" >> "$CWD/rpmmacros"
+echo "%_tmppath	 $CWD" >> "$CWD/rpmmacros"
+
+echo "%_rpmdir	$PKG_DEST_DIR" >> "$CWD/rpmmacros"
+echo "%_rpmfilename  %%{NAME}-%%{VERSION}-%%{RELEASE}.%%{ARCH}.rpm" >> "$CWD/rpmmacros"
+echo "%_builddir  $CWD" >> "$CWD/rpmmacros"
+echo "%_sourcedir  $CWD" >> "$CWD/rpmmacros"
+echo "%_specdir  $CWD" >> "$CWD/rpmmacros"
+echo "%_srcrpmdir  $PKG_DEST_DIR" >> "$CWD/rpmmacros"
+
+echo "%__spec_clean_template    /bin/true ;" >> "$CWD/rpmmacros"
+echo "%__spec_clean_post	/bin/true " >> "$CWD/rpmmacros"
+echo "% __spec_clean_cmd	/bin/rm -f  " >> "$CWD/rpmmacros"
+echo "%_clean	/bin/rm -f" >> "$CWD/rpmmacros"
+echo "%__rm /bin/rm" >> "$CWD/rpmmacros"
+
+#echo "%_topdir    $CWD" >> "$CWD/rpmmacros"
+echo "" >> "$CWD/rpmmacros"
+
+# also use a unique rcfile
+echo "" > "$CWD/rpmrc"
+echo "include:  /usr/lib/rpm/rpmrc" >> "$CWD/rpmrc"
+echo "macrofiles: $CWD/rpmmacros" >> "$CWD/rpmrc"
+echo "" >> "$CWD/rpmrc"
+
+# even though buildroot is in both the spec file and the rpmmacros file
+	# it must also be given on the command to keep SuSE's rpmbuild happy
+	rpmbuild -bb "$CWD/src2pkg.spec" \
+		--rcfile="$CWD"/rpmrc \
+		--macros="$CWD"/rpmmacros \
+		--buildroot "$PKG_DIR" &> /dev/null
+
+echo $BLUE"Finished package is:"$NORMAL
+echo "${NAME}-${VERSION}-${BUILD}.noarch.rpm"
+rm -f "$CWD"/src2pkg.spec
+rm -f "$CWD"/rpmrc
+rm -f "$CWD"/rpmmacros
+
+echo
+
+
+#######################################
+# create a deb package
+echo $BLUE"Creating debian Package..."$NORMAL
+cd "$CWD" ;
+
+# need to create tailored src2pkg.conf for debs
+# cat $CWD/Resources/doc/src2pkg.deb.conf > etc/src2pkg/src2pkg.conf.new
+
+# INSTALLED_SIZE="$(du $PKG_DIR -ch |grep total |cut -f1)"" bytes"
+
+DISK_USAGE_OUTPUT=$(du -cks --apparent-size $PKG_DIR)
+# and read it char-by-char until we reach a non-digit character
+offset=0 UNPACKED_SIZE=
+while [[ ${DISK_USAGE_OUTPUT:$offset:1} = [0-9] ]] ; do
+	CHAR=${DISK_USAGE_OUTPUT:$offset:1}
+	UNPACKED_SIZE=${UNPACKED_SIZE}${CHAR}
+	(( offset++ ))
+done
+
+echo "Package: src2pkg" > "$CWD"/control
+echo "Version: $VERSION-$BUILD" >> "$CWD"/control
+echo "Architecture: all" >> "$CWD"/control
+echo "Installed-Size: ${UNPACKED_SIZE}K" >> "$CWD"/control
+echo "Maintainer: Gilbert Ashley" >> "$CWD"/control
+echo "Description: src2pkg is package-creation software which" >> "$CWD"/control
+echo "   can create various kinds of installable packages." >> "$CWD"/control
+echo "Homepage: amigolinux.org" >> "$CWD"/control
+
+( cd "$PKG_DIR" && find * -type f -exec md5sum {} \; > "$CWD"/md5sums )
+(cd $PKG_DIR ;
+	rm -f /tmp/data.tar.gz
+	tar -c --use-compress-program "gzip" -f /tmp/data.tar.gz .
+	rm -rf usr etc
+)
+mv /tmp/data.tar.gz "$PKG_DIR"/data.tar.gz
+echo "2.0" > "$PKG_DIR/debian-binary"
+# mkdir -p "$PKG_DIR"/control
+cat "$CWD"/control > "$PKG_DIR"/control
+cat "$CWD"/md5sums > "$PKG_DIR"/md5sums
+cat "$CWD"/postinst > "$PKG_DIR"/postinst
+rm -f "$CWD"/md5sums
+rm -f "$CWD"/control
+(cd "$PKG_DIR" ;
+	tar --owner=root --group=root -c -z control md5sums postinst -f control.tar.gz 
+	rm -f control md5sums postinst
+)
+
+PKG_NAME="${NAME}_${VERSION}-${BUILD}_all.deb"
+
+ar rc "${PKG_NAME}" "$PKG_DIR/debian-binary" "$PKG_DIR/control.tar.gz" "$PKG_DIR/data.tar.gz"
+echo $BLUE"Finished package is:"$NORMAL
+echo "${PKG_NAME}"
+echo
+
+#######################################
+# create a slitaz .tazpkg package
+
+white_out() {
+  while read GAGA ; do
+    echo $GAGA
+  done
+}
+
+pkg_desc_to_text() {
+FILE="$1"
+while read LINE ; do
+	offset=$(( ${#NAME} + 1 ))
+	if [[ ${LINE:0:$offset} = "$NAME:" ]] ; then
+		LINE=$(echo ${LINE#*:})
+		if [[ "$LINE" != "" ]] && [[ "$LINE" != " " ]] ; then
+			echo $LINE
+		fi
+	fi
+done < "$FILE"
+}
+
+echo $BLUE"Creating slitaz Package..."$NORMAL
+PKG_NAME=$NAME-$VERSION.tazpkg
+# cleanup/restore debianized package content
+( cd $PKG_DIR
+tar -xzf data.tar.gz
+rm -f data.tar.gz debian-binary control.tar.gz
+# rm -rf control
+)
+
+# need to create tailored one for taz
+# cat $CWD/Resources/doc/src2pkg.taz.conf > etc/src2pkg/src2pkg.conf.new
+
+PACKAGE="$PKG_DEST_DIR"/${NAME}-${VERSION}.tazpkg
+rm -f "$PACKAGE"
+
+( cd $PKG_DIR
+mkdir fs
+find * -maxdepth 1 \( -type d ! -name fs \) -exec mv {} fs/ \; &> /dev/null
+cat > receipt <<EOT
+PACKAGE="${NAME}"
+VERSION="$VERSION"
+CATEGORY="development"
+SHORT_DESC="Package-creation and conversion software"
+WEB_SITE="http://amigolinux.org"
+MAINTAINER="<amigo@ibiblio.org>"
+DEPENDS=""
+EOT
+
+cat >> receipt <<EOM
+
+post_install()
+{
+chroot \$1/ sh - << EOT
+cd /
+EOM
+
+cat $TEMP_DIR/doinst.sh | sed -e 's/\\/\\\\/g' | sed -e 's/\$/\\$/g' >> receipt
+
+cat >> receipt <<EOM
+EOT
+}
+EOM
+
+( cd fs ;
+	find * -type f -print > ../files.list
+	find * -type l -print >> ../files.list
+)
+# make relative paths absolute
+while read LINE ; do
+	echo "/${LINE}" >> files.list.tmp
+done < files.list
+mv -f files.list.tmp files.list
+
+while read file; do
+	[ -L "fs/$file" ] && continue
+	[ -f "fs/$file" ] || continue
+	case "$file" in
+	/lib/modules/*/modules.*|*.pyc) continue;;
+	esac
+	# md5sum "fs/$file" | sed 's/  fs/  /'
+	MD5SUM=$(md5sum "fs/$file")
+	#MD5SUM=${MD5SUM#* }
+	MD5SUM="${MD5SUM/ fs\// }"
+	echo $MD5SUM
+done < files.list > md5sum
+
+pkg_desc_to_text $TEMP_DIR/slack-desc > description.txt
+
+# The output from 'du' is weird to deal with so get just one line
+DISK_USAGE_OUTPUT=$(du -cks --apparent-size fs receipt files.list md5sum description.txt 2> /dev/null |tail -n1)
+# and read it char-by-char until we reach a non-digit character
+offset=0 UNPACKED_SIZE=
+while [[ ${DISK_USAGE_OUTPUT:$offset:1} = [0-9] ]] ; do
+	CHAR=${DISK_USAGE_OUTPUT:$offset:1}
+	UNPACKED_SIZE=${UNPACKED_SIZE}${CHAR}
+	(( offset++ ))
+done
+
+find fs -print | cpio --quiet -o -H newc | gzip > fs.cpio.gz
+rm -rf fs
+
+# The output from 'du' is *still* weird...
+DISK_USAGE_OUTPUT=$(du -cks --apparent-size fs.cpio.gz receipt files.list md5sum description.txt 2> /dev/null |tail -n1)
+# and read it char-by-char until we reach a non-digit character
+offset=0 PACKED_SIZE=
+while [[ ${DISK_USAGE_OUTPUT:$offset:1} = [0-9] ]] ; do
+	CHAR=${DISK_USAGE_OUTPUT:$offset:1}
+	PACKED_SIZE=${PACKED_SIZE}${CHAR}
+	(( offset++ ))
+done
+
+echo "# SliTaz package receipt." > receipt.tmp
+echo "# generated by src2pkg" >> receipt.tmp
+echo "PACKED_SIZE=${PACKED_SIZE}K" >> receipt.tmp
+echo "UNPACKED_SIZE=${UNPACKED_SIZE}K" >> receipt.tmp
+cat receipt >> receipt.tmp
+mv -f receipt.tmp receipt
+
+find . -print | cpio --quiet -o -H newc > "$PACKAGE"
+
+if [[ -f "$PACKAGE" ]] ; then
+	echo $BLUE"Finished package is:"$NORMAL
+	echo "$PKG_NAME"
+else
+	echo $RED"Failed!"$NORMAL
+	FAILED="Package creation in $FUNCNAME"
+fi
+
+zcat fs.cpio.gz | cpio --quiet -idm
+
+rm fs.cpio.gz
+)
+# end tazpkg
+
+if [[ $1 = "--cleanup" ]] ; then
+ cd $TEMP_DIR ;
+ rm -rf ${NAME}-${VERSION}-${ARCH}-${BUILD}
+ rm -rf tar-$TAR_VERSION
+fi

@@ -1,0 +1,25 @@
+In this directory there are some examples of one way of to build a
+package from multiple source archives or tarballs.
+
+The gtktalog example is a pretty good one to use as an example which
+you can modify to build other sources. It uses three sources and
+builds pretty fast, so it's easy to quickly see how the script works
+if you want to change things. The three programs inlcuded in the
+example build are not really related -I just chose three small
+GTK1 programs that coule be built pretty fast.
+
+The builds in this directory add some extra functions to the regular
+src2pkg script which allows you to 'recycle' some of the usual
+functions with new variables for building the extra sources. The
+extra sources are installed in the main package tree (PKG_DIR)
+instead of in their own package tree. Then the script returns to
+processing the main package content.
+
+The abiword build is a real example of how/why one might want to
+use this method to build a single package from the result of the
+builds of more than one source archive.
+
+These scripts are based on an idea and sample implementation
+by Tim Goya. As mentioned in the scripts, the extra functions
+could be easily incorporated into the main src2pkg functions.
+They could be used from within a src2pkg 'extension' as well.

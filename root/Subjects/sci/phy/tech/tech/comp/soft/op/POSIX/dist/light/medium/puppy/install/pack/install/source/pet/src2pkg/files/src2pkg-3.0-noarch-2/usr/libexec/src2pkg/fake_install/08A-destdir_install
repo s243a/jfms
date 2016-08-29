@@ -1,0 +1,146 @@
+# This file is part of the src2pkg program:
+# Copyright 2005-2013 Gilbert Ashley <amigo@ibilio.org>
+# src2pkg is released under the GNU General Public License Version 2
+
+# This method installs software using the DESTDIR variable
+# it attempts to install programs directly into the PKG_DIR
+# Success is verified using tracklist. The VERIFY command is declared in 01-pre_process
+
+install_to_destdir() {
+if [[ $PKG_DIR = "" ]] || [[ $DEST_DIR = "" ]] ; then
+   echo $RED"FAILED"$NORMAL
+   FAILED="NO DEST_DIR in: $FUNCNAME"
+else
+   
+   if ! [[ $LOG_DIR ]] ; then
+		LOG_DIR="$OBJ_DIR"
+	elif [[ "$LOG_DIR" != "$CWD" ]] && [[ "${LOG_DIR:0:1}" != "/" ]] ; then
+		echo $YELLOW"Warning! "$NORMAL"LOG_DIR is set to an invalid path."
+		echo "         It must be set to \$CWD or an absolute path."
+	fi
+   
+   if [[ $LOG_COMMANDS = "YES" ]] ; then
+      echo $BLUE"Logging output to: "$NORMAL"LOG_DIR/$NAME-make-install.log"
+   fi
+   echo $BLUE"Creating package content using:"$NORMAL
+
+   mkdir -p "$PKG_DIR"
+
+   trap trap_int 2
+   ( cd "$OBJ_DIR" ;
+   if [[ $LOG_COMMANDS = "YES" ]] ; then
+	if [[ $DEST_DIR = "PREFIX" ]] || [[ $DEST_DIR = "prefix" ]] ; then
+		echo "   ${INSTALL_COMMAND} $DEST_DIR=$PKG_DIR/$PRE_FIX ${INSTALL_RULE}"$NORMAL
+	elif [[ $DEST_DIR = "CMAKE_INSTALL_PREFIX" ]] ; then
+		echo "   ${INSTALL_COMMAND} $DEST_DIR=$PKG_DIR/$PRE_FIX ${INSTALL_RULE}"$NORMAL
+	else
+		echo "   ${INSTALL_COMMAND} $DEST_DIR=$PKG_DIR ${INSTALL_RULE}"$NORMAL
+		
+	fi
+	if ! [[ ${VERIFY} ]] ; then
+		tracklist -b -o $SRC_DIR/tracklist-files ${INSTALL_COMMAND} $DEST_DIR="${PKG_DIR}" ${INSTALL_RULE} &> "$LOG_DIR"/$NAME-make-install.log
+	else
+		${VERIFY} ${INSTALL_COMMAND} $DEST_DIR="${PKG_DIR}" ${INSTALL_RULE} > "$LOG_DIR"/$NAME-make-install.log
+	fi
+	
+   elif [[ $QUIET = "YES" ]] ; then
+	if [[ $DEST_DIR = "PREFIX" ]] || [[ $DEST_DIR = "prefix" ]] ; then
+		echo "   ${INSTALL_COMMAND} $DEST_DIR=$PKG_DIR/$PRE_FIX ${INSTALL_RULE}"$NORMAL
+	elif [[ $DEST_DIR = "CMAKE_INSTALL_PREFIX" ]] ; then
+		echo "   ${INSTALL_COMMAND} $DEST_DIR=$PKG_DIR/$PRE_FIX ${INSTALL_RULE}"$NORMAL
+	else
+		echo "   ${INSTALL_COMMAND} $DEST_DIR=$PKG_DIR ${INSTALL_RULE}"$NORMAL
+	fi
+	if ! [[ ${VERIFY} ]] ; then
+		tracklist -b -o $SRC_DIR/tracklist-files ${INSTALL_COMMAND} $DEST_DIR="${PKG_DIR}" ${INSTALL_RULE} &> /dev/null
+	else
+		${VERIFY} ${INSTALL_COMMAND} $DEST_DIR="${PKG_DIR}" ${INSTALL_RULE} &> /dev/null
+	fi
+   else
+	if [[ $DEST_DIR = "PREFIX" ]] || [[ $DEST_DIR = "prefix" ]] ; then
+		echo "   ${INSTALL_COMMAND} $DEST_DIR=$PKG_DIR/$PRE_FIX ${INSTALL_RULE}"$NORMAL
+	elif [[ $DEST_DIR = "CMAKE_INSTALL_PREFIX" ]] ; then
+		echo "   ${INSTALL_COMMAND} $DEST_DIR=$PKG_DIR/$PRE_FIX ${INSTALL_RULE}"$NORMAL
+	else
+		echo "   ${INSTALL_COMMAND} $DEST_DIR=$PKG_DIR ${INSTALL_RULE}"$NORMAL
+	fi
+	if ! [[ ${VERIFY} ]] ; then
+		tracklist -b -o $SRC_DIR/tracklist-files ${INSTALL_COMMAND} $DEST_DIR="${PKG_DIR}" ${INSTALL_RULE}
+	else
+		${VERIFY} ${INSTALL_COMMAND} $DEST_DIR="${PKG_DIR}" ${INSTALL_RULE}
+	fi
+   fi
+   )
+   
+   RET=$?
+   if [[ $RET -gt 0 ]] ; then
+	# make install itself returned a possible  error
+	[[ $DEBUG ]] && echo "Exit code: $RET"
+	# try to do a generic installation
+	echo $CYAN"Notice - "$NORMAL"Possible error running '$INSTALL_COMMAND $INSTALL_RULE'"
+	
+	if [[ $(find "${PKG_DIR}"/ -type f) != "" ]] ; then
+		echo $CYAN"NOTICE - "$NORMAL"May have been a false error as files were found."
+		#echo "We'll try ignoring it. Report this to me if it doesn't work."
+	elif [[ -x "$OBJ_DIR"/$NAME ]] || [[ -x "$OBJ_DIR"/$ORIG_NAME ]]; then
+		# echo $CYAN"Notice - "$NORMAL"Running '$INSTALL_LINE' has failed."
+		echo "But, there seems to be a matching executable in the SRC_DIR."
+		echo $BLUE"Doing generic install - "$NORMAL
+		mkdir -p "$PKG_DIR"/$PRE_FIX/bin
+		[[ -x "$OBJ_DIR"/$NAME ]] && cp -a "$OBJ_DIR"/$NAME "$PKG_DIR"/$PRE_FIX/bin
+		[[ -x "$OBJ_DIR"/$ORIG_NAME ]] && cp -a "$OBJ_DIR"/$ORIG_NAME "$PKG_DIR"/$PRE_FIX/bin
+		if [[ -e "$OBJ_DIR"/$NAME.1 ]] || [[ -e "$OBJ_DIR"/$NAME.man ]] ; then
+			echo $BLUE"Found man-page - "$NORMAL"Copying into PKG_DIR"
+			mkdir -p "$PKG_DIR"/usr/man/man1
+			[[ -e "$OBJ_DIR"/$NAME.1 ]] && cp -a "$OBJ_DIR"/$NAME.1 "$PKG_DIR"/usr/man/man1/$NAME.1
+			[[ -e "$OBJ_DIR"/$NAME.man ]] && cp -a "$OBJ_DIR"/$NAME.man "$PKG_DIR"/usr/man/man1/$NAME.1
+		fi
+	else
+		echo $RED"FATAL! "$NORMAL"Running ${INSTALL_COMMAND} ${INSTALL_RULE} has failed with error: $? "
+		echo "Try using INSTALL_LINE 'make -i install'  "$RED"Exiting..."$NORMAL
+		FAILED="Command:'${INSTALL_COMMAND} ${INSTALL_RULE}' in: $FUNCNAME"
+		post_process
+	fi
+   else
+	[[ $DEBUG ]] && echo -n $CYAN"Notice - "$NORMAL"Checking integrity of '$DEST_DIR' installation - "
+	while read line ; do
+		case $line in
+			"$SRC_DIR"*|"$PKG_DIR"*) true ;;
+			""|./*) true ;;
+			*) 
+				# if there is no leading '/', then file was created relative to SRC_DIR
+				if [[ ${line:0:1} != '/' ]] ; then
+					true
+				else
+					STRAY_FILES=1 ; echo ${line} >> "$SRC_DIR"/stray-files
+				fi
+			;;
+		esac
+	done < "$SRC_DIR"/tracklist-files
+	#echo $GREEN"Done"$NORMAL
+	if [[ $STRAY_FILES = 1 ]] ; then
+		echo
+		echo $YELLOW"Warning! "$NORMAL"These sources have broken $DEST_DIR support!"
+		echo $YELLOW"Warning! "$NORMAL"$MAKEFILE installs these files outside of $DEST_DIR:"
+		cat "$SRC_DIR"/stray-files
+		echo $CYAN"   Notice - "$NORMAL"The above-listed files will be added to the package content."
+		echo "   But, the originals will not be removed as they may have already existed."
+		if [[ $DEBUG ]] || [[ $QUIET = "NO" ]] ; then
+		  echo $CYAN"   Notice - "$NORMAL"The -JAIL or -SAFE option may avoid the problem with this package."
+		  echo $CYAN"   Notice - "$NORMAL"Otherwise, report the problem or patch the config files to fix it."
+		fi
+		echo -n $BLUE"Correcting $DEST_DIR errors - "$NORMAL
+		cd "$PKG_DIR"
+		for FILE in $(cat "$SRC_DIR"/stray-files) ; do
+			cp -a --parents $FILE .
+		done
+		[[ $DEBUG ]] && echo $GREEN"Done!"$NORMAL
+	else
+		[[ $DEBUG ]] && echo $GREEN"Done"$NORMAL
+		echo $BLUE"Installation in $DEST_DIR - "$GREEN"Successful"$NORMAL
+	fi
+	# echo $BLUE"Processing package content:"$NORMAL
+   fi
+
+fi
+}

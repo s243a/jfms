@@ -1,0 +1,46 @@
+#!/bin/bash
+
+BINDIR="/usr/local/shareInternet"
+
+error() {
+	export ERROR_DIALOG="
+	<window title=\"Error\"  icon-name=\"gtk-dialog-error\">
+	<vbox>
+	<hbox>
+	<pixmap><input file stock=\"gtk-dialog-error\"></input></pixmap>
+	<text><label>\"$1\"</label></text>
+	</hbox>
+	<hbox>
+	<button>
+	<input file stock=\"gtk-close\"></input>
+	<label>Close</label>
+	</button>
+	</hbox>
+	</vbox>
+	</window>
+	"
+	gtkdialog3 --program=ERROR_DIALOG --center
+}
+
+# if displaying readme file
+if [ "$1" == "txt" ]; then
+	"$BINDIR/shareInternet" "$1"
+	exit 0
+fi
+
+if [ -f /root/.shareInternet/flagFiles/batch_start_running.txt ]; then
+	error "ShareInternet was started at boot - still coming up."
+	exit 1
+fi
+
+if [ "$1" ]; then # if run with an argument
+	"$BINDIR/shareInternet" "$1"
+else # run it based on "sharingup.txt"
+	if [ -f /root/.shareInternet/flagFiles/sharingup.txt ]; then
+		"$BINDIR/shareInternet" stop
+	else
+		"$BINDIR/shareInternet" start
+	fi
+fi
+
+exit 0

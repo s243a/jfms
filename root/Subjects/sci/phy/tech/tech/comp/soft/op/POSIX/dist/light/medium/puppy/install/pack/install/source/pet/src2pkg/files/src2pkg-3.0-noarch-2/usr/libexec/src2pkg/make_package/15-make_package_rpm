@@ -1,0 +1,264 @@
+# rpm-specific packaging functions
+make_rpm_pkg() {
+
+cd ${PKG_BUILDS_DIR}
+	
+	# create any split packages, if needed
+	if [[ -d "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME ]] ; then
+		#rm -f "$DEVEL_PACKAGE"
+		SUMMARY="Development files for $NAME"
+		PROVIDES="Development files for $NAME"
+		( cd "$PKG_BUILDS_DIR" ; mini_create_rpm $DEVEL_PKG_NAME )
+		! [[ $DEBUG ]] && (cd "$PKG_BUILDS_DIR" && rm -rf $DEVEL_PKG_NAME)
+	fi
+	if [[ -d "$PKG_BUILDS_DIR"/$I18N_PKG_NAME ]] ; then
+		#rm -f "$I18N_PACKAGE"
+		REQUIRES=$NAME
+		SUMMARY="Language files for $NAME"
+		PROVIDES="Language files for $NAME"
+		( cd "$PKG_BUILDS_DIR" ; mini_create_rpm $I18N_PKG_NAME )
+		! [[ $DEBUG ]] && (cd "$PKG_BUILDS_DIR" && rm -rf $I18N_PKG_NAME)
+	fi
+	if [[ -d "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME ]] ; then
+		#rm -f "$SOLIBS_PACKAGE"
+		SUMMARY="Runtime shared libraries for $NAME"
+		( cd "$PKG_BUILDS_DIR" ; mini_create_rpm $SOLIBS_PKG_NAME )
+		! [[ $DEBUG ]] && (cd "$PKG_BUILDS_DIR" && rm -rf $SOLIBS_PKG_NAME)
+	fi
+	if [[ -d "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME ]] ; then
+		#rm -f "$DOCS_PACKAGE"
+		SUMMARY="Documentation for $NAME"
+		( cd "$PKG_BUILDS_DIR" ; mini_create_rpm $DOCS_PKG_NAME )
+		! [[ $DEBUG ]] && (cd "$PKG_BUILDS_DIR" && rm -rf $DOCS_PKG_NAME)
+	fi
+	# create the main package
+	# rm -f "$PACKAGE"
+	( cd ${PKG_BUILDS_DIR} && mini_create_rpm $PKG_DIR_NAME )
+	if [[ -f "$PACKAGE" ]] ; then
+		echo $BLUE"Package Creation - "$GREEN"Successful!"$NORMAL" Package location:"
+		echo "$PACKAGE"
+	else
+		FAILED="Package creation in $FUNCNAME"
+	fi
+
+}
+
+# create THIS_RPM
+mini_create_rpm() {
+
+THIS_RPM=$1
+# remove any existing package
+rm -f "$PKG_DEST_DIR"/"${THIS_RPM}".rpm
+
+# tag the NAME unless we are the main package
+case $THIS_RPM in
+	$DEVEL_PKG_NAME) TAG="-devel" ; BUILD_ARCH=$ARCH ; BUILD_ROOT="$PKG_BUILDS_DIR/$DEVEL_PKG_NAME" ;;
+	$I18N_PKG_NAME) TAG="-i18n" ; BUILD_ARCH=noarch ; BUILD_ROOT="$PKG_BUILDS_DIR/$I18N_PKG_NAME" ;;
+	$SOLIBS_PKG_NAME) TAG="-solibs" ; BUILD_ARCH=$ARCH ; BUILD_ROOT="$PKG_BUILDS_DIR/$SOLIBS_PKG_NAME" ;;
+	$DOCS_PKG_NAME) TAG="-docs" ; BUILD_ARCH=noarch ; BUILD_ROOT="$PKG_BUILDS_DIR/$DOCS_PKG_NAME" ;;
+	*) TAG= ; BUILD_ARCH=$ARCH ; BUILD_ROOT="$PKG_BUILDS_DIR/$PKG_NAME" ;;
+esac
+	
+SPEC_PATH="$CWD/${NAME}${TAG}.spec"
+
+echo -n $BLUE"Creating package:"$NORMAL" '${THIS_RPM}.rpm' - "
+
+if [[ ! -f "$SPEC_PATH" ]] ; then
+  ( cd $THIS_RPM
+	if [[ -f install/$PKG_REQUIRED ]] ; then
+		while read LINE ; do
+			if [[ ${LINE:0:1} != '#' ]] ; then
+				if [[ -z $REQUIRES ]] ; then
+					REQUIRES="${LINE%% *}"
+				else
+					REQUIRES="${REQUIRES}, ${LINE%% *}"
+				fi
+			fi
+		done < install/$PKG_REQUIRED
+	fi
+	if [[ -z $REQUIRES ]] ; then
+		REQUIRES=unknown
+	fi
+	
+	PROVIDES=
+	# need to check the output format needed here
+	if [[ -f install/$PKG_PROVIDES ]] ; then
+		while read LINE ; do
+			if [[ ${LINE:0:1} != '#' ]] ; then
+				if [[ -z $PROVIDES ]] ; then
+					PROVIDES="${LINE##*/}"
+				else
+					PROVIDES="${PROVIDES}, ${LINE##*/}"
+				fi
+			fi
+		done < install/$PKG_PROVIDES
+	elif [[ $THIS_RPM = $SOLIBS_PKG_NAME ]] || [[ $THIS_RPM = $PKG_DIR_NAME ]] ; then
+		gen_provides_list . > provides.tmp
+		while read LINE ; do
+			if [[ ${LINE:0:1} != '#' ]] ; then
+				if [[ -z $PROVIDES ]] ; then
+					PROVIDES="${LINE##*/}"
+				else
+					PROVIDES="${PROVIDES}, ${LINE##*/}"
+				fi
+			fi
+		done < provides.tmp
+		rm -f provides.tmp
+	fi
+	if [[ -z $PROVIDES ]] ; then
+		PROVIDES=unknown
+	fi
+	
+	if [[ -z $SUMMARY ]] ; then
+		if [[ -f install/$PKG_DESC ]] ; then
+			SUMMARY="$(grep -m 1 $NAME: $PKG_DIR/install/$PKG_DESC |cut -f 2- -d' ')"
+		fi
+	fi
+	if [[ -z $SUMMARY ]] ; then
+		SUMMARY="No description available"
+	fi
+	
+	if [[ -z $LICENSE ]] ; then
+		if [[ -f $PKG_DIR/install/$PKG_DESC ]] ; then
+			if [[ $(grep 'License:' $PKG_DIR/install/$PKG_DESC 2> /dev/null) ]] ; then
+				LICENSE=$(grep -m1 'License:' $PKG_DIR/install/$PKG_DESC |cut -f3 -d':')
+				LICENSE=$(echo $LICENSE)
+			fi
+		elif [[ -f "$SRC_DIR"/$NAME.spec ]] ; then
+			LICENSE=$(grep -m1 'License:' "$SRC_DIR"/$NAME.spec |cut -f2 -d':')
+			LICENSE=$(echo $LICENSE)
+		fi
+	fi
+	if [[ -z $LICENSE ]] ; then
+		LICENSE=unknown
+	fi
+	
+	if [[ -z ${PKG_GROUP} ]] ; then
+		if [[ -f "$SRC_DIR"/$NAME.spec ]] && [[ $THIS_RPM = $PKG_DIR_NAME ]] ; then
+			PKG_GROUP=$(grep -m1 'Group:' "$SRC_DIR"/$NAME.spec |cut -f2 -d':')
+			PKG_GROUP=$(echo $PKG_GROUP)
+		fi
+	fi
+	if [[ -z $PKG_GROUP ]] ; then
+		PKG_GROUP=unknown
+	fi
+	
+	# now begin writing the spec files
+	cat > "$SPEC_PATH" << EOF
+Summary:   $SUMMARY
+Name:      ${NAME}${TAG}
+Version:   $VERSION
+Release:   $BUILD
+License:   $LICENSE
+Packager:  $PACKAGER
+BuildArch: $BUILD_ARCH
+Group:     $PKG_GROUP  
+BuildRoot: $BUILD_ROOT
+Provides:  $PROVIDES
+Requires:  $REQUIRES
+
+%description
+EOF
+	# cat $PKG_DIR/install/slack-desc >> "$SPEC_PATH"
+	if [[ -f install/$PKG_DESC ]]; then
+		pkg_desc_to_text install/slack-desc >> "$SPEC_PATH"
+	else
+		case $THIS_RPM in
+			$DEVEL_PKG_NAME) echo "Development files for $NAME" >> "$SPEC_PATH" ;;
+			$I18N_PKG_NAME) echo "Language files for $NAME" >> "$SPEC_PATH" ;;
+			$SOLIBS_PKG_NAME) echo "Runtime shared libraries from $NAME" >> "$SPEC_PATH" ;;
+			$DOCS_PKG_NAME) echo "Documentation for $NAME" >> "$SPEC_PATH" ;;
+			*) echo "No description given for $NAME" >> "$SPEC_PATH" ;;
+		esac
+	fi
+	
+	# Use the doinst.sh  script if we have it
+	if [[ -f install/doinst.sh ]] ; then
+		echo >> "$SPEC_PATH" 
+		echo '%post' >> "$SPEC_PATH" 
+		cat  install/doinst.sh >> "$SPEC_PATH"
+	elif [[ $THIS_RPM = $SOLIBS_PKG_NAME ]] && [[ -f "$PKG_DIR"/install/doinst.sh ]] ; then
+		# check for needed links
+		duplicate_pkg_dir_links
+		( make_doinst_links "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME ) 1> /dev/null
+		if [[ -e "$CWD"/doinst.links ]] ; then
+			echo '%post' >> "$SPEC_PATH" 
+			cat "$CWD"/doinst.links >> "$SPEC_PATH"
+			rm -f "$CWD"/doinst.links
+			find * -type l -exec rm -f {} \;
+		fi
+		rm -f $CWD/new.doinst.sh
+	fi
+	rm -rf install
+	cat >> "$SPEC_PATH" << EOF
+
+%files
+EOF
+	# create list of items in the package
+	find * > "$CWD/file.list"
+	# dirs must be identified as such
+	while read LINE ; do
+		if [[ -d "${LINE}" ]] || [[ -L "${LINE}" ]] ; then
+			echo -n "%dir " >> "$SPEC_PATH"
+		fi
+		echo "/${LINE}" >> "$SPEC_PATH"
+	done < "$CWD/file.list"
+  )
+  # end of create spec
+else
+	# we found a spec for this package, so remove the leftover slack-type files
+	( cd "$THIS_RPM" && rm -rf install )
+	SaveOurSpec=1
+fi
+
+rm -f "$CWD/file.list"
+
+# create a unique rpmmacros file for this build
+echo "# rpmmacros created by src2pkg for $THIS_RPM build" > "$CWD/rpmmacros"
+echo "%_topdir	$CWD" >> "$CWD/rpmmacros"
+echo "%_buildrootdir  $PKG_DEST_DIR" >> "$CWD/rpmmacros"
+echo "%_tmppath	 $CWD" >> "$CWD/rpmmacros"
+
+echo "%_rpmdir	$PKG_DEST_DIR" >> "$CWD/rpmmacros"
+echo "%_rpmfilename  %%{NAME}-%%{VERSION}-%%{RELEASE}.%%{ARCH}.rpm" >> "$CWD/rpmmacros"
+echo "%_builddir  $PKG_BUILDS_DIR" >> "$CWD/rpmmacros"
+echo "%_sourcedir  $SOURCES_DIR" >> "$CWD/rpmmacros"
+echo "%_specdir  $CWD" >> "$CWD/rpmmacros"
+echo "%_srcrpmdir  $PKG_DEST_DIR" >> "$CWD/rpmmacros"
+
+echo "%__spec_clean_template    /bin/true ;" >> "$CWD/rpmmacros"
+echo "%__spec_clean_post	/bin/true " >> "$CWD/rpmmacros"
+echo "% __spec_clean_cmd	/bin/rm -f  " >> "$CWD/rpmmacros"
+echo "%_clean	/bin/rm -f" >> "$CWD/rpmmacros"
+echo "%__rm /bin/rm" >> "$CWD/rpmmacros"
+
+#echo "%_topdir    $CWD" >> "$CWD/rpmmacros"
+echo "" >> "$CWD/rpmmacros"
+
+# also use a unique rcfile
+echo "" > "$CWD/rpmrc"
+echo "include:        /usr/lib/rpm/rpmrc" >> "$CWD/rpmrc"
+echo "macrofiles: $CWD/rpmmacros" >> "$CWD/rpmrc"
+echo "" >> "$CWD/rpmrc"
+
+
+( cd $PKG_DEST_DIR
+	# even though buildroot is in both the spec file and the rpmmacros file
+	# it must also be given on the command to keep SuSE's rpmbuild happy
+	rpmbuild -bb "$SPEC_PATH" \
+		--rcfile="$CWD"/rpmrc \
+		--macros="$CWD"/rpmmacros \
+		--buildroot "$PKG_DIR" &> /dev/null
+
+	if [[ -f "$PKG_DEST_DIR/$THIS_RPM.rpm" ]] ; then
+		echo $GREEN"Done"$NORMAL
+	else
+		echo $RED"Failed!"$NORMAL
+	fi
+)
+
+! [[ $AUTO_SCRIPT ]] && ! [[ $SaveOurSpec ]] && ! [[ $DEBUG ]] && rm -f "$SPEC_PATH"
+! [[ $DEBUG ]] && rm -f "$CWD/rpmmacros"
+! [[ $DEBUG ]] && rm -f "$CWD/rpmrc"
+
+}

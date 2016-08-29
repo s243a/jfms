@@ -1,0 +1,11 @@
+
+This package of Webmin includes a handy configuration porgram
+called 'webmin-setup' which should be run after installation
+of the package in order to set the username and password for
+webmin administration. Since Webmin is used from within your
+browser, the webmin-setup program also lets you set which
+port to run the service on and makes it easier to setup webmin
+for automatic startup each time you boot your computer.
+
+The program can be re-run at any time (as root user) if you
+want to change any of the configuration options.

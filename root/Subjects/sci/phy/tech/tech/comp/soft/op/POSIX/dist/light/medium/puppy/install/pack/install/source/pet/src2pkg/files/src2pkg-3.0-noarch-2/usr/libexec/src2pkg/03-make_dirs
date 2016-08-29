@@ -1,0 +1,186 @@
+# This file is part of the src2pkg program:
+# Copyright 2005-2013 Gilbert Ashley <amigo@ibilio.org>
+# src2pkg is released under the GNU General Public License Version 2
+
+### make_dirs
+make_dirs() {
+if [[ $ALLOW_USER_EXTENSIONS = "YES" ]] ; then
+ # check if the user has any pre-execution extensions to this file and run them, if so.
+ [[ -f "$HOME"/.src2pkg/extensions/03.pre ]] && . "$HOME"/.src2pkg/extensions/03.pre
+fi
+
+if [[ "$PACKAGE" = "$SOURCE" ]] ; then
+	 echo $RED"FAILED! "$NORMAL"You appear to be trying to repackage"
+	 echo "a package with the same name from inside your PKG_DEST_DIR."
+	FAILED=" SOURCE_EQUALS_PACKAGE in: $FUNCNAME"
+fi
+
+if [[ "$FAILED" = "" ]] && [[ ! $USER_CANCELLED ]] ; then
+  if [[ ! $RESUME ]] || [[ $RESUME = $FUNCNAME ]] || [[ $HAVE_RESUMED ]] ; then
+	[[ $RESUME = $FUNCNAME ]] && HAVE_RESUMED=1 && echo $CYAN"Notice - "$BLUE"Resuming build at: "$NORMAL "$FUNCNAME"
+	if [[ $PAUSE = "BEFORE" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+		echo $MAGENTA"Notice - "$BLUE"Pausing before: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+		read
+	fi
+  
+	# check validity of directories again -even harder cause we're going to use 'rm -rf' here to cleanup
+	check_dirs2
+	# clean up any leftover directories, packages and logs. Use rm -rf as safely as possible
+	if [[ -f "$PACKAGE" ]] || [[ -d "$PKG_DIR" ]] || [[ -f "$DEVEL_PACKAGE" ]] || [[ -f "$I18N_PACKAGE" ]] ; then
+	  [[ "$QUIET" = "YES" ]] && echo -n $BLUE"Deleting old build files - "$NORMAL
+	  if [[ -f "$PKG_DEST_DIR/$PKG_NAME.$PKG_FORMAT" ]] && [[ "$PACKAGE" != "$SOURCE" ]] ; then
+	    [[ "$QUIET" = "NO" ]] && echo $BLUE"Removing existing package from previous build - "$NORMAL
+		( cd "$PKG_DEST_DIR" && rm -f "$PKG_NAME.$PKG_FORMAT" &> /dev/null )
+	  fi
+	  if [[ -f "$PKG_DEST_DIR/$DEVEL_PKG_NAME.$PKG_FORMAT" ]] ; then
+	    ( cd "$PKG_DEST_DIR" && rm -f "$DEVEL_PKG_NAME.$PKG_FORMAT" &> /dev/null )
+	  fi
+	  if [[ -f "$PKG_DEST_DIR/$I18N_PKG_NAME.$PKG_FORMAT" ]] ; then
+	    ( cd "$PKG_DEST_DIR" && rm -f "$I18N_PKG_NAME.$PKG_FORMAT" &> /dev/null )
+	  fi
+	  if [[ -f "$PKG_DEST_DIR/$DOCS_PKG_NAME.$PKG_FORMAT" ]] ; then
+	    ( cd "$PKG_DEST_DIR" && rm -f "$DOCS_PKG_NAME.$PKG_FORMAT" &> /dev/null )
+	  fi
+	  if [[ -f "$PKG_DEST_DIR/$SOLIBS_PKG_NAME.$PKG_FORMAT" ]] ; then
+	    ( cd "$PKG_DEST_DIR" && rm -f "$SOLIBS_PKG_NAME.$PKG_FORMAT" &> /dev/null )
+	  fi
+	  if [[ -d "$PKG_BUILDS_DIR/$PKG_DIR_NAME" ]] ; then
+		[[ "$QUIET" = "NO" ]] && echo $BLUE"Removing existing package build directory from previous build - "$NORMAL
+		( cd "$PKG_BUILDS_DIR" && rm -rf "$PKG_DIR_NAME" 2> /dev/null 1> /dev/null )
+	  fi
+	  if [[ -d "$PKG_BUILDS_DIR/$DEVEL_PKG_NAME" ]] ; then
+		( cd "$PKG_BUILDS_DIR" && rm -rf "$DEVEL_PKG_NAME" 2> /dev/null 1> /dev/null )
+	  fi
+	  if [[ -d "$PKG_BUILDS_DIR/$I18N_PKG_NAME" ]] ; then
+	  	( cd "$PKG_BUILDS_DIR" && rm -rf "$I18N_PKG_NAME" 2> /dev/null 1> /dev/null )
+	  fi
+	  if [[ -d "$PKG_BUILDS_DIR/$DOCS_PKG_NAME" ]] ; then
+	  	( cd "$PKG_BUILDS_DIR" && rm -rf "$DOCS_PKG_NAME" 2> /dev/null 1> /dev/null )
+	  fi
+	  if [[ -d "$PKG_BUILDS_DIR/$SOLIBS_PKG_NAME" ]] ; then
+	  	( cd "$PKG_BUILDS_DIR" && rm -rf "$SOLIBS_PKG_NAME" 2> /dev/null 1> /dev/null )
+	  fi
+	  if [[ "$OBJ_DIR_NAME" != "" ]] && [[ -d "$SRC_BUILDS_DIR/$OBJ_DIR_NAME" ]] ; then
+		[[ "$QUIET" = "NO" ]] && echo $BLUE"Removing existing object build directory from previous build - "$NORMAL
+		( cd "$SRC_BUILDS_DIR" && rm -rf "$OBJ_DIR_NAME" 2> /dev/null 1> /dev/null )
+	  fi
+	  if [[ -d "$SRC_BUILDS_DIR/$SRC_DIR_NAME" ]] ; then
+		if [[ "$SRC_DIR" = "$CWD" ]] || [[ "$SRC_BUILDS_DIR/$SRC_DIR_NAME" = "$CWD" ]] ; then
+		 [[ "$QUIET" = "NO" ]] && echo $BLUE"Skipping source build directory - "$NORMAL
+		 # be sure to skip this if SRC_DIR=CWD or we remove ourselves
+		 true
+		else
+		 [[ "$QUIET" = "NO" ]] && echo $BLUE"Removing existing source build directory from previous build - "$NORMAL
+		 ( cd "$SRC_BUILDS_DIR" && rm -rf "$SRC_DIR_NAME" 2> /dev/null 1> /dev/null )
+		fi
+	  fi
+	  # remove any logfiles leftover from fake_install. They should only exist if the build
+	  # was interrupted or if we were asked to save them
+	  [[ -e "$CWD"/FILELIST ]] && rm -f "$CWD"/FILELIST 2> /dev/null 1> /dev/null
+	  [[ -e "$CWD"/FILELIST.tmp ]] && rm -f "$CWD"/FILELIST.tmp 2> /dev/null 1> /dev/null
+	  [[ -e "$CWD"/DIRLIST ]] && rm -f "$CWD"/DIRLIST 2> /dev/null 1> /dev/null
+	  [[ -e "$CWD"/$NAME-patched-files.log ]] && rm -f "$CWD"/$NAME-patched-files.log 2> /dev/null 1> /dev/null
+	  [[ -e "$CWD"/deps_list ]] && rm -f "$CWD"/deps_list
+	  [[ -e "$CWD"/deps_list.tmp ]] && rm -f "$CWD"/deps_list.tmp
+	  [[ -e "$CWD"/libsentry.debug ]] && rm -f "$CWD"/libsentry.debug
+	  # clean up any debugging list or logs
+	  [[ -e "$CWD"/LINKLIST ]] && rm -f "$CWD"/LINKLIST 2> /dev/null 1> /dev/null
+	  [[ -e "$CWD"/FILELIST.orig ]] && rm -f "$CWD"/FILELIST.orig 2> /dev/null 1> /dev/null
+	  # clean up leftover new.* files
+	  [ -f "$CWD"/new.doinst.sh ] && rm -f "$CWD"/new.doinst.sh
+	  [ -f "$CWD"/new.$PKG_DESC ] && rm -f "$CWD"/new.$PKG_DESC
+	  [ -f "$CWD"/new.$PKG_REQUIRED ] && rm -f "$CWD"/new.$PKG_REQUIRED
+	  [ -f "$CWD"/unsatisfied_deps_list ] && rm -f "$CWD"/unsatisfied_deps_list
+	  [ -f "$CWD"/new.$PKG_PROVIDES ] && rm -f "$CWD"/new.$PKG_PROVIDES
+	  [ -f "$CWD"/new.$NAME.desktop ] && rm -f "$CWD"/new.$NAME.desktop
+	  [ -f "$CWD"/new.$ORIG_NAME.desktop ] && rm -f "$CWD"/new.$ORIG_NAME.desktop
+	  [ -f "$CWD"/provides.tmp ] && rm -f "$CWD"/provides.tmp
+	  [ -f "$CWD"/doinst.links ] && rm -f "$CWD"/doinst.links
+	  [ -f "$CWD"/re-read.tmp ] && rm -f "$CWD"/re-read.tmp
+	  [ -f "$CWD"/unfound_depends ] && rm -f "$CWD"/unfound_depends
+	  # remove left-over log files
+	  [ -f "$LOG_DIR"/$NAME-configure.log ] && rm -f "$LOG_DIR"/$NAME-configure.log
+	  [ -f "$LOG_DIR"/$NAME-make.log ] && rm -f "$LOG_DIR"/$NAME-make.log
+	  [ -f "$LOG_DIR"/$NAME-make-install.log ] && rm -f "$LOG_DIR"/$NAME-make-install.log
+	  [ -f "$LOG_DIR"/$NAME-test-make-install.log ] && rm -f "$LOG_DIR"/$NAME-test-make-install.log
+	  [ -f "$LOG_DIR"/$NAME-build.log ] && rm -f "$LOG_DIR"/$NAME-build.log
+	  # remove left-over md5sums
+	  [ -f "$PACKAGE".md5 ] && rm -f "$PACKAGE".md5
+	  # cleanup any reports left from post_process
+	  [[ -e "$DATABASE_FILE" ]] && rm -f "$DATABASE_FILE"
+	  [[ -e "$REPORT_FILE" ]] && rm -f "$REPORT_FILE"
+	  # if the -backup dir still exists something really went wrong last time -remove it
+	  if [[ -d "$BACKUP_DIR"/$NAME-$VERSION-backup-$BUILD$SIG ]] ; then
+	   cd "$BACKUP_DIR"
+	   rm -rf $NAME-$VERSION-backup-$BUILD$SIG 2> /dev/null 1> /dev/null
+	  fi
+	  [[ "$QUIET" = "YES" ]] &&  echo $GREEN"Done"$NORMAL
+	fi
+	# create new working directories
+	echo $BLUE"Creating working directories:"$NORMAL
+	# these general directories are usually already present -we don't ever remove these
+	# since by default all these are equal to /tmp.
+	[[ ! -d "$SRC_BUILDS_DIR" ]] && mkdir -p "$SRC_BUILDS_DIR"
+	[[ ! -d "$PKG_BUILDS_DIR" ]] && mkdir -p "$PKG_BUILDS_DIR"
+	[[ ! -d "$PKG_DEST_DIR" ]] && mkdir -p "$PKG_DEST_DIR"
+	# create the PKG_DIR where package content is prepared. PRE_FIX is only created later
+	# in fake_install if installation is successful. That way an empty PKG_DIR can serve as a test later.
+	if [[ ! -d "$PKG_DIR" ]] ; then
+	 cd "$PKG_BUILDS_DIR" && mkdir -p "$PKG_DIR_NAME" #&& echo "   PKG_DIR=$PKG_DIR"
+	fi
+	# Create a separate OBJ_DIR if asked for. This must be in the same directory as the sources
+	# so that we can call 'configure' using a relative path name which we know: ../$SRC_DIR_NAME/configure
+	echo "   PKG_DIR=$PKG_DIR"
+	if [[ $USE_OBJ_DIR ]] ; then
+	 cd "$SRC_BUILDS_DIR" && mkdir -p "$OBJ_DIR_NAME" && echo "   OBJ_DIR=$OBJ_DIR"
+	fi
+	# be sure and not recreate the directory you are in (running src2pkg like trackinstall where SRC_DIR=$CWD)
+	if [[ "$SOURCE_NAME" ]] && [[ "$SRC_DIR" != "$CWD" ]] ; then
+	 cd "$SRC_BUILDS_DIR"
+	 [[ ! -d "$SRC_DIR_NAME" ]] && mkdir -p "$SRC_DIR_NAME" #&& echo "   SRC_DIR=$SRC_DIR"
+	fi
+	echo "   SRC_DIR=$SRC_DIR"
+	if [[ $PAUSE = "AFTER" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+		echo $MAGENTA"Notice - "$BLUE"Pausing after: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+		read
+	fi
+  fi
+fi
+####
+
+if [[ $ALLOW_USER_EXTENSIONS = "YES" ]] ; then
+ # check if the user has any post-execution extensions to this file and run them, if so.
+ [[ -f "$HOME"/.src2pkg/extensions/03.post ]] && . "$HOME"/.src2pkg/extensions/03.post
+fi
+
+}
+# end make_dirs
+
+check_dirs2() {
+	if [[ "${SRC_BUILDS_DIR}" = "" ]] || [[ "${SRC_BUILDS_DIR}" = "/" ]] ; then
+	echo $RED"FATAL ERROR "$NORMAL"Please give a valid SRC_BUILDS_DIR."
+	exit 1
+	fi
+	if [[ "${PKG_BUILDS_DIR}" = "" ]] || [[ "${PKG_BUILDS_DIR}" = "/" ]] ; then
+	echo $RED"FATAL ERROR "$NORMAL"Please give a valid PKG_BUILDS_DIR."
+	echo "Don't give a null PKG_BUILDS_DIR or use / !"
+	exit 1
+	fi
+	# allow '/' or null prefix for builds which should install to '/'.
+	#if [[ "${PRE_FIX}" = "" ]] || [[ "${PRE_FIX}" = "/" ]] ; then
+	#echo $RED"FATAL ERROR "$NORMAL"Please give a valid PRE_FIX."
+	#echo "Don't give a null PRE_FIX or use / !"
+	#exit 1
+	#fi
+	if [[ "${SRC_DIR}" = "" ]] || [[ "${SRC_DIR}" = "/" ]] ; then
+	echo $RED"FATAL ERROR "$NORMAL"Please give a valid SRC_DIR."
+	exit 1
+	fi
+	if [[ "${PKG_DIR}" = "" ]] || [[ "${PKG_DIR}" = "/" ]] ; then
+	echo $RED"FATAL ERROR "$NORMAL"Please give a valid PKG_DIR."
+	exit 1
+	fi
+	# This shouldn't happen either
+	[[ "${PACKAGE}" = "" ]] || [[ "${PACKAGE}" = "/" ]] && echo $RED"ERROR "$NORMAL"Bad PACKAGE name!" && exit 1
+
+}

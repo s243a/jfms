@@ -1,0 +1,122 @@
+#!/bin/bash
+#
+APPDIR="$0"
+while [ -L "$APPDIR" ]; do
+    APPDIR=`readlink "$APPDIR"`
+done
+APPDIR="${APPDIR%\/*}"
+
+error() {
+	export ERROR_DIALOG="
+	<window title=\"Error\"  icon-name=\"gtk-dialog-error\">
+	<vbox>
+	<hbox>
+	<pixmap><input file stock=\"gtk-dialog-error\"></input></pixmap>
+	<text><label>\"$1\"</label></text>
+	</hbox>
+	<hbox>
+	<button>
+	<input file stock=\"gtk-close\"></input>
+	<label>Close</label>
+	</button>
+	</hbox>
+	</vbox>
+	</window>
+	"
+	gtkdialog3 --program=ERROR_DIALOG --center
+}
+
+if [ ! -f /root/.shareInternet/share.conf ]; then
+	if [ "`which dnsmasq`" != "" ]; then
+		"$APPDIR/firstTime"
+	else
+		error "'dnsmasq' not found. Please install it before running 'shareInternet'."
+		exit 1
+	fi
+fi
+
+. /root/.shareInternet/share.conf
+. /root/.shareInternet/dnsmasq.conf
+
+case $1 in
+	start)
+		if [ -f /root/.shareInternet/flagFiles/batch_start_running.txt ]; then
+			[ "$BOOT_DELAY" != "" ] && sleep $BOOT_DELAY
+		fi
+
+		XOUTIFCE="`iproute | grep default`"
+		if [ "$XOUTIFCE" == "" ]; then
+			error "No default route found, your internet interface is not configured correctly."
+			exit 1
+		fi
+		XOUTIFCE="`route -n | grep ^0\.0\.0\.0 | tr -s ' ' | cut -f 8 -d ' '`"
+
+		XOUTIP=""
+		XINIPS=""
+		XINIFCES=""
+		X_REAL_IFCES=""
+		#X_PSEUDO_IFACES=""
+		X_RI_COUNT=0
+		for X_IFCE in `ifconfig | grep Link | grep -v lo | cut -d' ' -f1`; do
+			XINIP=`ifconfig $X_IFCE | grep inet`
+			if [ "$XINIP" != "" ]; then
+				X_RI_COUNT=$[X_RI_COUNT+1]
+				[ "$X_REAL_IFCES" == "" ] && X_REAL_IFCES="$X_IFCE" || X_REAL_IFCES="$X_REAL_IFCES $X_IFCE"
+				XINIP=${XINIP#*:}
+				XINIP=${XINIP%% *}
+				if [ "$X_IFCE" == "$XOUTIFCE" ]; then
+					XOUTIP="$XINIP"
+				else
+					[ "$XINIFCES" == "" ] && XINIFCES="$X_IFCE" || XINIFCES="$XINIFCES $X_IFCE"
+					[ "$XINIPS" == "" ] && XINIPS="$XINIP" || XINIPS="$XINIPS $XINIP"
+				fi
+			#else
+			#	X_PSEUDO_IFCES="$X_PSEUDO_IFCES $X_IFCE"
+			fi
+		done
+		if [ $X_RI_COUNT -lt 2 ]; then
+			error "Must have at least 2 real interfaces, found only $X_REAL_IFCES."
+			exit 1
+		fi
+
+		echo "OUTSIDE_DEVICE=\"$XOUTIFCE\"" > /root/.shareInternet/firewall.conf
+		echo "OUTSIDE_IP=\"$XOUTIP\"" >> /root/.shareInternet/firewall.conf
+		#echo "INSIDE_DEVICES=\"$XINIFCE$X_PSEUDO_IFCES\"" >> /root/.shareInternet/firewall.conf
+		echo "INSIDE_DEVICES=\"$XINIFCES\"" >> /root/.shareInternet/firewall.conf
+		echo "INSIDE_IPS=\"$XINIPS\"" >> /root/.shareInternet/firewall.conf
+		
+		for XINIP in $XINIPS;do
+			XNET=${XINIP%.*}
+			[ -f /etc/dnsmasq.conf ] && dnsmasq -a "$XINIP" -F "$XNET.$DHCP_START,$XNET.$DHCP_END,$DHCP_TIME" -l "/tmp/dnsmasq.leases.$XNET"
+			echo "[ -f /etc/dnsmasq.conf ] && dnsmasq -a \"$XINIP\" -F \"$XNET.$DHCP_START,$XNET.$DHCP_END,$DHCP_TIME\" -l \"/tmp/dnsmasq.leases.$XNET\""
+		done
+
+		$APPDIR/firewall.sh start
+
+		touch /root/.shareInternet/flagFiles/sharingup.txt
+		rm -f /root/.shareInternet/flagFiles/batch_start_running.txt
+
+		cp -d -f "$ROXDIR/up.png" "$ROXDIR/.DirIcon"
+		rox -x "$ROXDIR"
+		;;
+
+	stop)
+		$APPDIR/firewall.sh stop
+		killall dnsmasq
+
+		rm -f /root/.shareInternet/flagFiles/sharingup.txt
+
+		cp -d -f "$ROXDIR/down.png" "$ROXDIR/.DirIcon"
+		rox -x "$ROXDIR"
+		;;
+
+	txt)
+		"defaulthtmlviewer" "file://$APPDIR/index.html" &
+		;;
+
+	*)
+		exit 1
+		;;
+esac
+
+exit 0

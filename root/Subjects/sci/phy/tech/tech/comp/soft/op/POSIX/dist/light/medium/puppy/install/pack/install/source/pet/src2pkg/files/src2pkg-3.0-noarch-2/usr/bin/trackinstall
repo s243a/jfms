@@ -1,0 +1,322 @@
+#!/bin/bash
+# /usr/bin/trackinstall
+# This file is part of the src2pkg program:
+# Copyright 2005-2014 Gilbert Ashley <amigo@ibilio.org>
+# src2pkg is released under the GNU General Public License Version 2
+
+TRACKINSTALL_VERSION="3.0"
+CWD="$(pwd)"
+cd "$CWD" && CWD="$(pwd)"
+TRACK_INSTALL=1
+
+show_usage() {
+echo ""
+echo " $(basename $0) - Build an installable package from pre-compiled sources"
+echo "		or from other content in the current directory."
+echo ""
+echo " $(basename $0) -[ABCHINPSV(VV)W] -CWD -BUMP -[abdinpv]"
+echo ""
+echo "  The following User Options take no argument:"
+echo " -A	Auto-generate a TrackBuild script if successful."
+echo " -B	Backup any files overwritten by this installation."
+echo " -I	Install the created package when finished."
+echo " -C	Place final package in the current directory."
+echo " -CWD	Use the current directory for all build locations."
+echo " -H	Place final package in your home directory."
+echo " -N	New TrackBuild script and slack-desc file only."
+echo " -P	Preserve permissions in the source directory."
+echo " -Q	Query the user interactively during configuration and package creation"
+echo " -S	Run special install commands - 'sh install.sh' by default"
+echo " -V	DEBUG -show detailed prompts for debugging."
+echo " -VV	Be verbose. Show all output from the steps."
+echo " -W	Wipe up -cleanup temporary files when finished."
+echo "  The following Build Options require an argument separated by the '=' sign:"
+echo "  Use single quotes '' around the arguments if they contain spaces."
+echo " -a	Set the architecture of the package (--arch)[-a=noarch]."
+echo " -b	Set the package build/release number (--build)[-b=4]."
+echo " -d	Specify the included documents (-doclist)[-d='README foo.HOWTO AUTHORS']."
+echo " --excludes Exclude comma-separated list of items from package. [PKG_EXCLUDES]"
+echo " -i	Set the install command line (--install)[-i='make install']."
+echo " -n	Set alternate name for the package and (--alt-name)[-n=newname]"
+echo " -p	(--pre_fix,--prefix) Set the package installation prefix. [-p=/usr/local]"
+echo " -v	Set alternate version for the package (--alt-version)[-v=0.0.0a]."
+echo " Special Options:"
+echo " -h	  (--help) Show this help page and exit."
+echo " -hh	  (--more-help) Show extended options and examples, then exit."
+echo " --version  Show the trackinstall version number and exit."
+echo " --list     Show a list of the trackinstall instruction functions."
+echo ""
+echo " Examples:"
+echo " trackinstall -C -W"
+echo "   Place final package in the current directory and delete temporary files."
+echo " trackinstall -b=2"
+echo "   Set the BUILD number to '2'."
+echo " trackinstall -i='make install install_data'"
+echo "   install with 'make install install_data (same as running 'make install' and 'make install_data')"
+echo " trackinstall -P -S -i='bash ./install.script'"
+echo "   Preserve permissions and use 'bash ./install.script' instead of 'make install'"
+echo ""
+echo "  For more usage help, run 'trackinstall -hh', 'man trackinstall' or see the documentation."
+}
+
+show_more_help() {
+echo ""
+echo " Advanced options:"
+echo " -LOG	    Log output of 'make install' to a file."
+echo " -BUMP	Increment the BUILD number by one and write the change to the script."
+echo " -DEST	Run installation using the DESTDIR variable, when available."
+echo " -JAIL	Run installation in a 'jailed' root directory."
+echo " -REAL	Run installation in the real root filesystem using backup."
+echo " -SAFE	Backup and restore files which are overwritten by the installation(root only)."
+echo " -UNION	Run installation using a unionfs/chroot, if available."
+echo " --pause=?? (before|after) Pause before or after running each function."
+echo " --pause=funcname Pause before and after the named function. (--list to see options)"
+echo " --resume=funcname  Resume build starting at named instruction function. (--list to see options)"
+echo " --splitpkg=??,??  Create separate 'devel', 'nls', 'docs' and/or 'solibs' packages."
+echo " --db-root=?? Use the database files from an alternate root."
+echo " -E	Use extended database files (slack-required and slack-supplies)"
+echo " -LANG	Delete extra language files (man-pages, locale and i18n) files."
+echo "		Be sure to configure /etc/src2pkg/DONT_PURGE.locales file first."
+echo " -L32	Use /lib32, /usr/lib32 and /usr/lib32/pkgconfig paths"
+echo " -L64	Use /lib64, /usr/lib64 and /usr/lib64/pkgconfig paths"
+echo " -L0/-LNULL/-Lnull	Use /lib, /usr/lib and /usr/lib/pkgconfig paths"
+echo " --libdirsuffix=??	Use /lib??, /usr/lib?? and /usr/lib??/pkgconfig paths"
+echo " -DEB Create the final package as a debian *.deb archive"
+echo " -PET	Create the final package as a '.pet' archive."
+echo " -PET2 Create the package as a '.pet' 'woof' archive."
+echo " -RPM	Create the final package as an '.rpm' archive."
+echo " -TAZ	 Create the final package as an '.tazpkg' archive."
+echo " -TGZ	Use gzip to compress the final package (this is the default)."
+echo " -TBZ	Use bzip2 instead of gzip to compress the final package."
+echo " -TLZ	Use lzma instead of gzip to compress the final package."
+echo " -TXZ	Use xz (lzma-2) instead of gzip to compress the final package."
+echo " -TPKG Create the package as a KISS-linux '.tpkg' archive (xz compression)."
+echo " -TPM	 Create the final package as a KISS '.tpm' archive (xz compression)."
+echo " -UPX	Use upx-ucl or upx to compress binaries inside the package."
+echo " -EPX	Use exepak to compress binaries inside the package."
+echo " -Z?	SAVE_SPACE=? Squeeze packages by using more compression:"
+echo "   	The 'Z' options are cumulative - Z4 does all of Z1, Z2 and Z3."
+echo " -Z1	Z1 Use bzip2 instead of gzip for man-pages."
+echo " -Z2	Z2 Compresses ELF binaries using upx-ucl, upx or exepak if present"
+echo " -Z3	Z3 Link to a common copy of the GPL in /usr/share/licences."
+echo " -Z4	Z4 Archive the package doc directory and remove 'info' files."
+}
+
+FUNCTION_LIST="
+fix_pkg_perms
+strip_bins
+create_docs
+compress_man_pages
+make_description
+make_doinst
+make_package
+"
+list_functions() {
+for FUNCTION in $FUNCTION_LIST ; do
+echo $FUNCTION
+done
+echo "* Note that pre_process and post_process are left out of the list."
+echo "* And, trackinstall only uses some of the available src2pkg functions."
+exit 0
+}
+
+NAMVERS=$(basename "$CWD")
+VERSION=$(echo "$NAMVERS" | rev | cut -f1 -d"-" | rev)
+NAME=$(echo "$NAMVERS" | rev | cut -f2,3,4 -d"-" | rev)
+
+# . /usr/libexec/src2pkg/FUNCTIONS
+
+if ! [[ -z $1 ]] ; then
+	if [ "$1" = "-h" -o "$1" = "--help" ] ; then
+	 show_usage
+	 exit 0
+	fi
+	if [[ "$1" = "--version" ]] ; then
+	 echo "trackinstall version-$TRACKINSTALL_VERSION"
+	 exit 0
+	fi
+	if [[ $1 = "--more-help" ]] | [[ $1 = "-hh" ]] ; then
+	 show_more_help
+	 exit 0
+	fi
+	for word in "$@" ; do
+	 case $word in
+		-A) AUTO_SCRIPT=1 ; shift ;;
+		-B) KEEP_BACKUPS="YES" ; shift ;;
+		-BUMP) INCREMENT_BUILD="YES" ; shift ;;
+		-I) REALLY_INSTALL="YES" ;;
+		-C) PKG_DEST_DIR="$CWD" ; shift ;;
+		-CWD) SOURCES_DIR="$CWD" PKG_DEST_DIR="$CWD" SRC_BUILDS_DIR="$CWD" PKG_BUILDS_DIR="$CWD" BACKUP_DIR="$CWD" ; shift ;;
+		-DESTDIR|-DEST) INSTALL_TYPE="DESTDIR" ; shift ;;
+		-E) EXTENDED_DATABASE="YES" ; shift ;;
+		-EPX) COMPRESS_BINS="YES" ; BIN_COMPRESSOR="exepak" ; shift ;;
+		-H) PKG_DEST_DIR="$HOME" ; shift ;;
+		-JAIL) INSTALL_TYPE="JAIL" ; shift ;;
+		-LANG)  PURGE_LOCALES="YES" ; shift ;;
+		-LOG) LOG_COMMANDS="YES" ; shift ;;
+		-L32) LIBDIRSUFFIX="32" ; WRITE_LIBDIRSUFFIX=1 ; shift ;;
+		-L64) LIBDIRSUFFIX="64" ; WRITE_LIBDIRSUFFIX=1 ; shift ;;
+		-L0|-LNULL|-Lnull) LIBDIRSUFFIX="NULL" ; WRITE_LIBDIRSUFFIX=1 ; shift ;;
+		--libdirsuffix=*) LIBDIRSUFFIX="${option:15}" ; WRITE_LIBDIRSUFFIX=1 ; shift ;;
+		-N) NEW_BUILD=1 ; shift ;;
+		-P) CORRECT_PERMS="NO" ; shift ;;
+		-Q) INTERACTIVE_MODE="ALL" ; shift ;;
+		-REAL) INSTALL_TYPE="REAL" ; shift ;;
+		-S) SHELL_INSTALL=1 ; shift ;;
+		-SAFE) SAFE_METHOD=YES ; INSTALL_TYPE="REAL" ; shift ;;
+		-DEB) PKG_FORMAT="deb" ; shift ;;
+		-PET) PKG_FORMAT="pet" ; shift ;;
+		-PET2) PKG_FORMAT="pet" ; PET2=1 ; shift ;;
+		-RPM) PKG_FORMAT="rpm" ; shift ;;
+		-TAZ) PKG_FORMAT="tazpkg" ; shift ;;
+		-TBZ) PKG_FORMAT="tbz" ; shift ;;
+		-TGZ) PKG_FORMAT="tgz" ; shift ;;
+		-TLZ) PKG_FORMAT="tlz" ; shift ;;
+		-TXZ) PKG_FORMAT="txz" ; shift ;;
+		-TPKG) PKG_FORMAT="tpkg" ; shift ;;
+		-TPM) PKG_FORMAT="tpm" ; shift ;;
+		-UNION) INSTALL_TYPE=UNION ; shift ;;
+		-UPX) COMPRESS_BINS="YES" ; shift ;;
+		-V) DEBUG=1 ; shift ;;
+		-VV) QUIET="NO" ; shift ;;
+		-W|--cleanup) CLEANUP="PKG" ; shift ;;
+		-Z1) SAVE_SPACE=1 ; shift ;;
+		-Z2) SAVE_SPACE=2 ; shift ;;
+		-Z3) SAVE_SPACE=3 ; COMPRESS_BINS="YES" ; shift ;;
+		-Z4) SAVE_SPACE=4 ; shift ;;
+		--db-root=*) DB_ROOT="${option:10}" ; shift ;;
+		--list) list_functions ;;
+		--resume=*) RESUME=$(echo $option |cut -f2 -d'=') ;
+					if ! [[ $(echo $FUNCTION_LIST |grep $RESUME) ]] ; then
+						echo "'$RESUME' is not a valid function name."
+						echo "Run 'src2pkg --list' to see the list of functions."
+						exit 0
+					else
+						shift
+					fi ;;
+		--pause=*) PAUSE=$(echo $option |cut -f2 -d'=') ;
+					if [[ $PAUSE = "before" ]] ; then
+						PAUSE=BEFORE ; shift
+					elif [[ $PAUSE = "after" ]] ; then
+						PAUSE=AFTER ; shift
+					else
+						echo "Invalid use of '--pause=??' option."
+						echo "Usage: '--pause=before', or: '--pause=after'"
+						exit 0
+					fi ;;
+		--splitpkg=*) SPLIT_PACKAGE="$(echo $option |cut -f2 -d'=')" ; shift ;;
+		-a=*|--arch=*) ARCH=$(echo $word |cut -f2 -d'=') ; shift ;;
+		-b=*|--build=*) BUILD=$(echo $word |cut -f2 -d'=') ; shift ;;
+		-d=*|--doclist=*) DOCLIST=$(echo $word |cut -f2 -d'=') ; shift ;;
+		--excludes=*) PKG_EXCLUDES=$(echo $option |cut -f2- -d'=') ; shift ;;
+		-i=*|--install_line=*) INSTALL_LINE=$(echo $word |cut -f2- -d'=') ; shift ;;
+		-n=*|--alt_name=*) ALT_NAME=$(echo $word |cut -f2 -d'=') ; shift ;;
+		-p=*|--pre_fix=*|--prefix=*) PRE_FIX=$(echo $option |cut -f2 -d'=') ; shift ;;
+		-v=*|--alt_version=*) ALT_VERSION=$(echo $word |cut -f2 -d'=') ; shift ;;
+		*)	echo "Using INSTALL_LINE: $@"
+			INSTALL_LINE=$@
+			break
+			;;
+	 esac
+	done
+fi
+
+. /usr/libexec/src2pkg/FUNCTIONS
+pre_process
+
+if ! [[ $NEW_BUILD ]] ; then
+	make_dirs
+	fake_install
+	fix_pkg_perms
+	strip_bins
+	create_docs
+	compress_man_pages
+	make_description
+	make_doinst
+	make_package
+	post_process
+	if [[ $FAILED = "" ]] ; then
+	 true
+	 else
+	 echo $RED"FAILED!! "$NORMAL"Creation of package $PKG_NAME has failed."
+	fi
+	if [[ $FAILED = "CANCELLED" ]] ; then
+	 echo "Operation cancelled by user. "$RED"Exiting!"$NORMAL
+	 exit
+	elif [[ $FAILED != "" ]] ; then
+	 echo $(basename "$0") $RED"ERROR "$NORMAL"in $FAILED"
+	 exit
+	fi
+fi
+# 3 write the script
+if [[ $AUTO_SCRIPT ]] || [[ $NEW_BUILD ]]; then
+	echo -n $CYAN"NOTICE- "$NORMAL"Writing build script: $NAME.TrackBuild for you... "
+	# TrackBuild
+	echo "#!/bin/bash" > "$CWD"/$NAME.TrackBuild
+	echo "## TrackBuild script for: 	$NAME" >> "$CWD"/$NAME.TrackBuild
+	echo "## Auto-generated by 'trackinstall-$TRACKINSTALL_VERSION'" >> "$CWD"/$NAME.TrackBuild
+	echo "## trackinstall Copyright 2005-2008 Gilbert Ashley <amigo@ibilio.org>" >> "$CWD"/$NAME.TrackBuild
+	echo "## Full package name: $SHORT_NAME.tgz" >> "$CWD"/$NAME.TrackBuild
+	echo "" >> "$CWD"/$NAME.TrackBuild
+	echo "NAME='$NAME'" >> "$CWD"/$NAME.TrackBuild
+	echo "VERSION='$VERSION'" >> "$CWD"/$NAME.TrackBuild
+	echo "ARCH='$ARCH'" >> "$CWD"/$NAME.TrackBuild
+	echo "BUILD='$BUILD'" >> "$CWD"/$NAME.TrackBuild
+	echo "TRACK_INSTALL='YES'" >> "$CWD"/$NAME.TrackBuild
+	[[ $SHELL_INSTALL ]] && echo "SHELL_INSTALL='YES'" >> "$CWD"/$NAME.TrackBuild
+	echo "PRE_FIX='$PRE_FIX'" >> "$CWD"/$NAME.TrackBuild
+	echo "" >> "$CWD"/$NAME.TrackBuild
+	echo "# Any extra options go here:" >> "$CWD"/$NAME.TrackBuild
+	! [[ "$INSTALL_LINE" = "" ]] && echo "INSTALL_LINE='$INSTALL_LINE'" >> "$CWD"/$NAME.TrackBuild
+	! [[ "$DOCLIST" = "" ]] && echo "DOCLIST='$DOCLIST'" >> "$CWD"/$NAME.TrackBuild
+	[[ "$CORRECT_PERMS" = "NO" ]] && echo "CORRECT_PERMS='NO'" >> "$CWD"/$NAME.TrackBuild
+	echo "" >> "$CWD"/$NAME.TrackBuild
+	echo "# Read in the config file and functions:" >> "$CWD"/$NAME.TrackBuild
+	echo ". /usr/libexec/src2pkg/FUNCTIONS ;" >> "$CWD"/$NAME.TrackBuild
+	echo "" >> "$CWD"/$NAME.TrackBuild
+	echo "# do_track_install can substitute the following functions:" >> "$CWD"/$NAME.TrackBuild
+	echo "" >> "$CWD"/$NAME.TrackBuild
+	cat >> "$CWD"/$NAME.TrackBuild << EOF
+pre_process
+make_dirs
+fake_install
+fix_pkg_perms
+strip_bins
+create_docs
+compress_man_pages
+make_description
+make_doinst
+make_package
+post_process
+EOF
+
+	echo "" >> "$CWD"/$NAME.TrackBuild
+	echo "# src2pkg and trackinstall - Copyright 2005-2012  Gilbert Ashley <amigo@ibiblio.org>" >> "$CWD"/$NAME.TrackBuild
+	echo "# See /usr/doc/src2pkg-x.x.x, run 'man trackinstall' or 'trackinstall --help' for help. Below" >> "$CWD"/$NAME.TrackBuild
+	echo "# are some common trackinstall options for easy cut-and-paste use if you need them." >> "$CWD"/$NAME.TrackBuild
+	echo "# INSTALL_LINE ='' PRE_FIX='' DOCLIST=''" >> "$CWD"/$NAME.TrackBuild
+	echo "# SHELL_INSTALL='YES' CORRECT_PERMS='NO'" >> "$CWD"/$NAME.TrackBuild
+	echo "# When editing this script to add custom code, use these variables" >> "$CWD"/$NAME.TrackBuild
+	echo "# to refer to the current directory, the sources or the package tree:" >> "$CWD"/$NAME.TrackBuild
+	echo "# \$CWD (current directory), \$SRC_DIR (sources), \$PKG_DIR (package tree)" >> "$CWD"/$NAME.TrackBuild
+	echo $GREEN"DONE!"$NORMAL
+fi #3
+if [[ $NEW_BUILD ]] ; then
+  echo $BLUE"Creating new.slack-desc file. "$NORMAL"Edit, if needed and rename to slack-desc for use."
+  cat > "$CWD"/new.slack-desc << END 
+$NAME: $NAME
+$NAME:
+$NAME: No description was given for this package.
+$NAME:
+$NAME:
+$NAME:
+$NAME:
+$NAME:
+$NAME:
+$NAME:
+$NAME: $BLURB_11
+END
+
+fi
+
+exit 0

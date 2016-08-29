@@ -1,0 +1,350 @@
+
+	This file answers some Frequently Asked Questions about src2pkg
+
+#####################################################################
+1.  How do you pronounce 'src2pkg'?
+2.  What is src2pkg?
+3.  What is src2pkg *not*?
+4.  How can I get help using src2pkg?
+5.  What programs are included with src2pkg?
+6.  What 'dependencies' are required for using src2pkg?
+7.  How can I get started using src2pkg?
+8.  Why are some of the lines in $NAME.src2pkg file commented out?
+9.  What are the minimum lines needed, then for a NAME.src2pkg script?
+10. What is 'do_all_processes'?
+11. What's the difference bewteen new.* and *.new files?
+12. Can src2pkg resume a build which has been interrupted?
+#####################################################################
+
+1. How do you pronounce 'src2pkg'?
+	'src2pkg' is pronounced 'source to package'
+
+
+2. What is src2pkg?
+	src2pkg is a program for creating installable archives (packages),
+   --usually from compilable source code. But, it can also be used
+   to package any sort of material. It was originally intended for 
+   building installable package for use on Slackware Linux, or any
+   other Linux distribution which uses the 'pkgtools' collection
+   for package management. But, it can now also produce packages for
+   other systems using other package formats.
+   
+   src2pkg provides a comprehensive solution to packaging software
+   for delivery to others or for your own use. It can package
+   content of any kind, as taken from most common types of archives
+   or even from un-archived material. It works transparently with
+   most configuration methods used by sources, including autoconf,
+   imake, cmake, jam, scons, perl, python, tcl, qmake or even
+   others including sources with just a simple Makefile.
+   
+   The simple format and usage of src2pkg build scripts makes it
+   possible to create a package from any sort of material.
+   
+   src2pkg can also be used to convert packages from one format
+   to another. When doing so, a large set of checks and corrections
+   is run to ensure the best compatibility with the target system.
+
+3. What is src2pkg *not*?
+	src2pkg is not a 'system updater' or software/package 'manager'.
+   src2pkg is intended for creating packages which can be 'managed'
+   by other software. src2pkg does have the ability to install
+   packages as they are built -but this is meant for use on-the-fly
+   so that groups of packages which depend on each other can be
+   easily built and installed in series.
+   
+4. How can I get help using src2pkg?
+	All the main utilities included with src2pkg can show a basic
+   help-page by running the command with the '--help' argument.
+   for instance: 'src2pkg --help' will show the basic help-page
+   for src2pkg. There are also man-pages for each program which
+   can be viewed with the command 'man prog', where 'prog' is
+   src2pkg, trackinstall, tracklist or sentry. The man-pages
+   are similar to the help-page shown by the program itself,
+   but with slightly more explanation.
+   
+   You can also find various helpful documents in the src2pkg
+   sources, or in the directory where douments are installed
+   on your system, under the directory src2pkg-VERSION, where
+   VERSION is the version number of src2pkg which you are using.
+   
+   There is also a WIKI for src2pkg which can be viewed online
+   with any internet browser at:
+   http://www.src2pkg.net/start
+   
+   You can also email the author, Gilbert Ashley, directly and
+   ask for help -especially regarding advanced features of src2pkg.
+   Any comments, feature requests or bug-related issues or fixes
+   should also be directed to:
+   amigo@ibiblio.org
+   The author is usually quick and happy to respond to any
+   emails about src2pkg. It is helpful to include the word
+   'src2pkg' in the subject line of the email to be sure that
+   the email is not overlooked or filtered out as spam.
+
+5. What programs are included with src2pkg?
+	src2pkg originally was a simple script-driven API for creating
+   packages. But, over time a couple of 'wrappers' have been
+   added which make src2pkg act more like a 'program'. Of course,
+   the main one is the 'program' src2pkg. It is meant for use
+   as a do-it-all command for (usually) downloading, uncompressing,
+   configuring and compiling source code, and then turning the result
+   into an installable package.
+   
+   The other main 'program', or wrapper, is called 'trackinstall'.
+   trackinstall is a drop-in replacement for the once-popular
+   program called checkinstall -with one key difference. Whereas
+   checkinstall always really installed the compiled software,
+   src2pkg/trackinstall tries to avoid this, if at all possible,
+   unless you tell it do so.
+   
+   In most cases, src2pkg uses a small library named 'libsentry'
+   to 'track' and log all the operations carried out when the
+   'make install' (or other) command is run. By logging all the
+   activity which creates, deletes, renames or modifies files,
+   src2pkg is able to control where these files go and make sure
+   they all wind up in your package and that the files on your
+   system remain unchanged by the packaging operation. libsentry
+   must be compiled on your system to ensure the best compatibility
+   with your glibc and gcc versions. libsentry also includes a
+   'wrapper' named 'sentry' which can be used in the same way as
+   the well-known 'installwatch' program. sentry/libsentry is,
+   in fact, a fork of the installwatch library and program, although
+   nearly all the changes made in libentry have been incorporated
+   into the 'git' repository of installwatch. There is another
+   'wrapper' which makes using 'sentry' even easier -'tracklist'.
+   Since sentry alone produces a pretty non-readable log, the 
+   'tracklist' adds log-parsing options which produce a shorter and
+   easier-to-read output which can even by used by other scripts.
+   
+   src2pkg and trackinstall are simple bash shell scripts, which serve
+   as wrappers to the src2pkg API. The 'API' is a series of shell
+   'functions'. Each function is a block of code which performs
+   a well-defined operation. sentry is a shell wrapper which works
+   directly with libsentry. tracklist is a bash script which acts
+   as a wrapper to the sentry wrapper. src2pkg also includes
+   another shell script named 'exploderpm' which again is a wrapper
+   to the 'hexdump' or 'od' programs which are found on most
+   systems. exploderpm is used to decompress '*.rpm' or '*.deb'
+   archives and works even on systems where 'rpm', 'rpm2cpio'
+   or 'dpkg' are not installed. All of these programs are installed
+   under /usr/bin by src2pkg. Since src2pkg can even be used by
+   non-root users, they are placed in the normal path of all users.
+   A small script called 'sb2sp' is also included and installed
+   under /usr/bin. sb2sp is for 'translating' SlackBuild-type
+   build scripts into the src2pkg format.
+   
+   sentry and tracklist are both useless unless libsentry is
+   present on the system. We choose to deliver src2pkg as a
+   non-binary package since compiling libsentry on the same system
+   where it will be used provides the best possible compatibility
+   with the version of libc being used on that system.
+   
+   libsentry works by 'intercepting' the actions of the programs
+   which are most often used to create or install files. That is,
+   programs like cp, install, rm and several others have their
+   actions scrutinized by libsentry before being carried out. This
+   allows src2pkg to even make backups of files which are about
+   to be overwritten on your system, and restore them automatically
+   afterwards.
+   
+   Once src2pkg is installed, the command 'src2pkg --setup' is used
+   to compile and install libsentry. It gets installed in its' own
+   directory under /usr/libexec/src2pkg/lib.
+   
+   To ensure the most reliable results when installations commands
+   are run, src2pkg also compiles and installs known versions of the
+   most commonly used programs for installing, creating or modifying
+   files. These include these commands: cat, chmod, chown, cp, ginstall,
+   groups, install, link, ln, mkdir, mknod, mv, readlink, rm, rmdir,
+   stat, touch and unlink. These are all compiled from the original
+   sources for coreutils-5.2.1. This version is chosen because of its'
+   known behaviour and compatibility across many systems. All of these
+   programs are purposely installed by src2pkg under the directory
+   /usr/libexec/src2pkg/bin so that they will *not* be in any users'
+   nornmal path. This keeps them from interfering with any other
+   operations other than when running src2pkg.
+   
+   src2pkg also compiles and installs an older version of the tar 
+   program, tar-1.13, as it is indespensable for creating proper
+   Slackware-compatible packages. The sources are patched before
+   compiling to add a couple of handy command-line options for easy
+   usage with archive-compression formats which were unavailable at
+   the time tar-1.13 was released. tar-1.13 is also installed under
+   /usr/libexec/src2pkg/bin for the same reasons given above.
+   
+   Finally, src2pkg will *optionally* compile and install a program
+   called unionfs-fuse which is a front-end to the 'fuse' Filesystem in
+   Userspace kernel module. This only gets compiled and installed
+   if the system has the kernel module, the libfuse libraries and
+   the development headers necessary for compiling. If built, the
+   unionfs-fuse program makes possible an extra type of 'installation
+   environment' using the unionfs and chroot.
+   
+   The installation also includes a slightly-modified version of the
+   standard gettextize program Since normally gettextize is interactive,
+   that is it always stops and prompts the user before finishing,
+   a copy is included with src2pkg which does not stop and prompt
+   the user before finishing. This ensures that in the (rare) case where
+   gettextize gets called during configuration, configuration doesn't
+   needlessly stop. This gets installed under /usr/libexec/src2pkg/bin
+   so it won't intefere with normal use of gettextize.
+   
+6. What 'dependencies' are required for using src2pkg?
+	src2pkg does most of its' work using utilities which will normally
+   be found on nearly any system: bash >=3.0 , coreutils and sed.
+   
+   You'll need at least a minimal development environment for using
+   src2pkg -even the 'setup' of src2pkg requires the basics. As
+   a minimum you'll need: make, binutils, kernel/libc headers.
+   Depending on the type of sources you are trying to compile and package,
+   you may need any number of other tools like autoconf, cmake or
+   others. See the file 'Technical' for details of what is required
+   for each type of sources which src2pkg can work with.
+   
+   There are other optional functions of src2pkg which can only be
+   used if the corresponding tools are installed on your system. For
+   instance, src2pkg can use upx or exepak to compress the binaries
+   in your packages, but you must install these tools separately for
+   src2pkg to be able to use them.
+   
+   Still, some *essentials* needed by src2pkg are supplied in the form
+   of source code in the src2pkg package itself. These get compiled
+   and installed on your system by src2pkg by running 'src2pkg --setup'.
+
+7. How can I get started using src2pkg?
+	src2pkg must be 'set up' on your system before it is usable. src2pkg
+   uses a few binary programs or libraries in order to safely build
+   packages. The src2pkg package contains the sources for these programs
+   so they can be compiled and installed on your system by src2pkg itself.
+   This assures the best binary compatibility with your system. In order
+   to set up src2pkg, you must be logged in as 'root' or other super-user.
+   Then simply open a terminal and run the command 'src2pkg --setup'. This
+   will start the compilation of all the programs and finish by installing
+   them on your system. the you can begin normal use of src2pkg.
+   
+   Thereafter, src2pkg can be used while logged in as a normal user. There
+   are a few cases where you should be logged in as root in order
+   to create a proper package, but usually you can create correct packages
+   while running as a non-priviledged user. src2pkg can usually tell when
+   you need to build a package as root for proper results, and will alert
+   you when it thinks this is the case.
+   
+   The best way to get started with src2pkg is take a simple example,
+   which installs only a few files, and dive right into using src2pkg
+   by following the example commands shown in the help or man-pages.
+   For a deeper understanding of the workings of src2pkg, or help
+   getting started using src2pkg scripts, see the other documentation
+   and/or examples included with src2pkg.
+   
+   Most sources can be compiled using only a few command-line options,
+   but src2pkg provides a large number of configurable options -some of
+   which can only be accessed by using a src2pkg build script, or by
+   otherwise passing environmental variables to src2pkg at run-time.
+   
+   It is helpful (and reassuring) to start by using small, simple sources
+   which you already know can be compiled on your system, and that normally
+   only install a few files. this will let you investigate and practice the
+   most useful command-line options without having to wait for long compile
+   times or worrying about hundreds of files being scattered around!
+   
+   A small note about the command-line syntax is in order here. src2pkg
+   does not use getopts, so you can't run multiple options together. For
+   instance, combining the options -C, -W and -D into -CWD is not possible.
+   Each option must have its' own preceeding '-' or '--' in the case of
+   long options. In most cases, for options which neither require nor accept
+   arguments the option uses UPPERCASE letters. lowercase options mostly
+   require an argument and can usually be used either like this: '--option=arg'
+   or: -o=a ,w here 'o' is the short form of the option name and 'a' is the
+   argument to the option. The most commonly used option is the one needed
+   to pass extra options to the 'configure' script found in most sources.
+   The src2pkg syntax for this option is either: --'extra_configs=???' or:
+   -e='??' , where '??' would be somthing like '--disable-plugins' or whatever.
+   This command-line syntax corresponds to the EXTRA_CONFIGS variable as used
+   by the internal src2pkg API and to the way it should be written in a src2pkg
+   build script. So, on the command-line, the whole thing would look like this:
+   src2pkg -e='--disable-plugins' tarball-name. The same option in a src2pkg script,
+   would look like this: EXTRA_CONFIGS='--disable-plugins'
+   
+   An effort has been made to limit the command-line options to only the most
+   useful ones -as a way of not overwhelming the user with many pages of help
+   or man-pages. The syntax is generally consistent, except for a few special
+   commands which don't easily fit in the normal types of options, and aren't
+   normally used often.
+   
+   The formatting-style and syntax of src2pkg scripts is also designed to
+   have a clean, simple look, so that it is easier to understand and to be able
+   quickly spot anything which has been added to the script or commented out.
+   The internal coding style of the API is also *meant* to be clean and self-
+   descriptive. But unless you are pretty good at reading shell code, you may
+   find it hard to understand as a whole. There are over 10,000 lines of code
+   in the internal functions used by src2pkg, so don't feel bad if it looks
+   like spaghetti to you!
+   
+8. Why are some of the lines in $NAME.src2pkg file commented out?
+	Some lines are shown in the script mostly as information on the default options which
+	were used to create the package, and to make it easy for you to edit them if they
+	need to be different. But they are commented out if they are system-dependent options
+	and not package-specific. STD_FLAGS is a good example. On a regular Intel PC, the
+	STD_FLAGS would probably show as: STD_FLAGS="-O2 -march=i486 -mtune=i686". but on
+	an AMD64 they might be STD_FLAGS="-O2 -fPIC" or on a PPC machine just STD_FLAGS="-O2".
+	These options aren't package-dependent, they depend on which system is being used.
+	And the default STD_FLAGS are usually calculated by src2pkg according to the system
+	or they are set to whatever you like/need in the src2pkg.conf file, where they will
+	always be used unless overridden by the $NAME.src2pkg script.
+	If the line for STD_FLAGS were left uncommented, then the script would most likely
+	have to be edited by hand in order to build the same software on a different system.
+	Other options which have a direct bearing on the success of the build on any platform
+	are left uncommented so they *do* get used -like EXTRA_CONFIGS, if in use.
+	If you auto-generate a $NAME.src2pkg.auto script using -A or -N, then src2pkg will
+	sort out what should be commented and what should not. You can always uncomment or
+	edit any lines that need it.
+
+9. What are the minimum lines needed, then for a NAME.src2pkg script?
+	Just three (3) lines! Like this:
+	SOURCE_NAME=some-prog.tar.bz2
+	. /usr/libexec/src2pkg/FUNCTIONS
+	do_all_processes
+	
+	Of course this only works if no special options or instructions are needed to build
+	the package. This also means you could build the package without any script at all,
+	just by running 'src2pkg prog.tar.bz2'. You could even have it download the sources
+	for you by running 'src2pkg URL' where URL is the internet address of the sources.
+	
+10. What is 'do_all_processes'?
+	do_all_processes is a short-cut function which simply runs all the normal steps for
+	building a package -in their normal order. Whe src2pkg writes a script for you, it
+	lists all the steps individually to make it easier for you to comment out a step
+	so that it gets skipped, or for you to add extra code bewteen the normal steps.
+	
+11. What's the difference bewteen new.* and *.new files?
+	Filenames which start with 'new.' are files generated by src2pkg. They will get
+	over-written each time you re-run using -A or -N. Removing the 'new.' part from
+	the name leaves them with their 'official' name. Changing to the 'official' name
+	means the files get used as-is and that they will not be over-written or removed.
+	Giving the file its 'real' name tells src2pkg: "I want you to use exactly this."
+	
+	Filenames that *end* with '.new' are a special kind of configuration file. A special
+	routine in the doinst.sh script for the package, makes these files get special
+	treatment when the package is installed and the doinst.sh script is run. '*.new'
+	files have the 'official' name when the '.new' part is removed. But, the doinst.sh
+	handles these files with a small routine which compares the new '*.new' file with
+	any file with the official name which is already installed on the system. The result
+	is that, if you have a conf file (say /etc/prog.conf, for example) which you have edited,
+	then if your package contains an /etc/prog.conf.new file, your original prog.conf
+	will not be overwritten by the prog.conf.new file. Otherwise, prog.conf.new will get
+	renamed to prog.conf, replacing the old one, when the package is installed -in most
+	cases.
+	You have to create *.new files yourself. Naming them *.new just tells src2pkg to
+	be sure and write the special routine to handle them into the doinst.sh script for
+	the package.
+	
+	Read the file 'Special-files' for more specific information about these files.
+
+12. Can src2pkg resume a build which has been interrupted?
+	Yes, src2pkg can resume builds or pause at certain points during the build to
+	let you examine the sources or package-tree contents. This functionality is
+	*not* intended for the purpose of letting you do things manually in the sources
+	or package-tree while src2pkg is paused, or before resuming a build. Doing so
+	would defeat one of the main purposes of using src2pkg -that is, being able to
+	reliably repeat any build in a non-interactive manner. For details of how to
+	use the --resume and/or --pause options, see section '4' of the file 'Usage'.

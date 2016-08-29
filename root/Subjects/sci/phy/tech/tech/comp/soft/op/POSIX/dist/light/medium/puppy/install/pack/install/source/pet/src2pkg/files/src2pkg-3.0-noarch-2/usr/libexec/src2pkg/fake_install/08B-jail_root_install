@@ -1,0 +1,220 @@
+# This file is part of the src2pkg program:
+# Copyright 2005-2013 Gilbert Ashley <amigo@ibilio.org>
+# src2pkg is released under the GNU General Public License Version 2
+
+# This method installs all files into a 'false root' directory, the PKG_DIR.
+# This usually works when using DESTDIR is not supported by the Makefiles and
+# is less intrusive than installing to the real root directory, backing up 
+# overwritten files and then restoring them
+
+install_to_jail_root() {
+echo $BLUE"Creating content in JAIL root - "$NORMAL"Using: '$INSTALL_COMMAND $INSTALL_RULE'"$NORMAL
+if [ $PKG_DIR != "" ] ; then
+	! [ $INSTALLSENTRY_ROOT_DIR ] && INSTALLSENTRY_ROOT_DIR="${PKG_DIR}"
+fi
+export INSTALLSENTRY_ROOT_DIR
+
+# The libsentry variable is INSTW_ROOTPATH
+# We give it a second name  since INSTW_ROOTPATH gets unset
+
+# This is supposed to have been done already
+mkdir -p "$INSTALLSENTRY_ROOT_DIR"
+
+# make sure all these are unset
+unset INSTW_ROOTPATH
+unset INSTW_TRANSL
+unset INSTW_BACKUP
+unset INSTW_LOGFILE
+unset INSTW_DBGFILE
+unset INSTW_DBGLVL
+unset INSTW_EXCLUDE
+
+# This method installs the files in PKG_DIR/TRANSL
+INSTW_ROOTPATH="${INSTALLSENTRY_ROOT_DIR}"
+export INSTW_ROOTPATH
+
+if [ $DEBUG_FILELISTS ] ; then
+	INSTW_LOGFILE="${CWD}/FILELIST.tmp"
+	INSTW_DBGFILE="${CWD}/libsentry.debug"
+	INSTW_DBGLVL=2
+	if cat /dev/null >"${INSTW_LOGFILE}" ; then
+		true
+	else
+		echo $RED"FAILED! - "$NORMAL "Unable to prepare $INSTW_LOGFILE"
+		exit 1
+	fi
+	if cat /dev/null >"${INSTW_DBGFILE}" ; then
+		true
+	else
+		echo $RED"FAILED! - "$NORMAL "Unable to prepare $INSTW_DBGFILE"
+		exit 1
+	fi
+fi
+
+export INSTW_LOGFILE
+export INSTW_DBGFILE
+export INSTW_DBGLVL
+
+# turn the backup feature off
+INSTW_BACKUP=0
+export INSTW_BACKUP
+# turn the translation fetaure on
+INSTW_TRANSL=1
+export INSTW_TRANSL
+
+# this doesn't seem to work any other way
+INSTW_EXCLUDE="/dev,/proc,/tmp,/var/tmp,/initrd,${INSTW_EXCLUDE}"
+OIFS="$IFS"
+IFS=','
+INSTW_EXCLUDE=$(for name in $INSTW_EXCLUDE; do
+	echo $name
+	done | sort -u |
+	while read elem; do
+		echo -n "$elem,"
+	done)
+export INSTW_EXCLUDE
+IFS="$OIFS"
+	
+# create a list of files to double-check if JAIl holds
+echo '' > $SRC_DIR/jail-check
+for DIR in bin lib sbin $PRE_FIX/bin $PRE_FIX/lib $PRE_FIX/sbin ; do
+	( cd / && find $DIR/* -type f -name "st*" >> $SRC_DIR/jail-check )
+done
+sort -u $SRC_DIR/jail-check > $SRC_DIR/jail-check.tmp
+mv $SRC_DIR/jail-check.tmp $SRC_DIR/jail-check
+
+# This turns on tracking
+LD_PRELOAD="/usr/libexec/src2pkg/lib/libsentry.so"
+export LD_PRELOAD
+
+trap trap_int 2
+( cd $OBJ_DIR ;
+if [[ $LOG_COMMANDS = "YES" ]] ; then
+	echo "NOTICE: Sorry, normal logging is not possible when using jail root" > "$LOG_DIR"/$NAME-make-install.log
+	echo "because all processes are diverted by libsentry. It which keeps an" >> "$LOG_DIR"/$NAME-make-install.log
+	echo "even more accurate log which is then parsed to list all files and" >> "$LOG_DIR"/$NAME-make-install.log
+	echo "directories created. Some logging output can be found in the file" >> "$LOG_DIR"/$NAME-make-install.log
+	echo "named $NAME-test-make-install.log which is the output from: '$MAKE_COMMAND -n $INSTALL_RULE'" >> $NAME-make-install.log
+	echo $CYAN"NOTICE: "$NORMAL"Redirection to a log-file not possible with 'jail root'."
+	$INSTALL_COMMAND $INSTALL_RULE
+elif [[ $QUIET = "YES" ]] ; then
+	$INSTALL_COMMAND $INSTALL_RULE &> /dev/null
+else
+	$INSTALL_COMMAND $INSTALL_RULE
+fi
+)
+
+RETVAL=$?
+
+unset INSTW_ROOTPATH
+unset LD_PRELOAD
+
+# Some naughty Makefiles create to-be-installed files only when 'make install' is run
+# Thus they get tracked by libsentry and wind up in the PKG_DIR in a path which is
+# a 'shadow' of SRC_DIR. Remove such files and any empty directories above them.
+SRC_SHADOW=$(dirname ${SRC_DIR:1})
+if [[ -d ${PKG_DIR}/TRANSL/${SRC_SHADOW} ]] ; then
+	# only warn about this type of error if debugging
+	[[ $DEBUG ]] && echo $YELLOW"   Warning! - "$NORMAL"PKG_DIR contains 'shadow' of SRC_DIR. Removing."
+	[[ $DEBUG ]] && echo $CYAN"   Notice -   "$NORMAL"Use another install method rather than 'JAIL' to avoid this."
+	if [[ -n $SCRIPT ]] && [[ -n $DEBUG ]] ; then
+		echo "              To fix permanently, add INSTALL_FAIL=JAIL to '${SCRIPT##/*}'"
+	fi
+	
+	( cd "$PKG_DIR"/TRANSL && {
+		DIR=${SRC_SHADOW}
+		# individual files are under the last element of SRC_DIR, so we must use 'rm -rf'.
+		rm -rf $DIR
+		# move the search up one dir and remove empty parents.
+		DIR=$(dirname $DIR)
+		# The dirname of the top-most element of the path will be '.' and that's where we stop
+		while [[ $DIR != '.' ]] ; do
+			rmdir $DIR 2> /dev/null
+			DIR=$(dirname $DIR)
+		done
+		}
+	)
+fi
+		# remove the META directory
+( cd "$INSTALLSENTRY_ROOT_DIR" && rm -rf META )
+
+
+if [ $RETVAL -eq 0 -o $RETVAL -gt 1 ] ; then
+	# 
+	if [[ $(find "${INSTALLSENTRY_ROOT_DIR}"/TRANSL -type f) != "" ]] ; then
+		# exit status greater than 1 means a 'partial error'
+		if [[ $DEBUG ]] && [[ $RETVAL -gt 1 ]] ; then
+			echo $CYAN"NOTICE - "$NORMAL"Possible error($RETVAL) running '$INSTALL_COMMAND $INSTALL_RULE'"
+			echo "         This may be a false error since some files have been installed."
+			echo "         But you should check the package content just to be sure."
+		fi
+		# Create check-list for comparison with the original $SRC_DIR/jail-check1
+		echo -n $CYAN"   Notice - "$NORMAL"Checking integrity of 'JAIL' installation - "
+		echo '' > $SRC_DIR/jail-check2
+		for DIR in bin lib sbin $PRE_FIX/bin $PRE_FIX/lib $PRE_FIX/sbin ; do
+			( cd / && find $DIR/* -type f -name "st*" >> $SRC_DIR/jail-check2 )
+		done
+		sort -u $SRC_DIR/jail-check2 > $SRC_DIR/jail-check2.tmp
+		mv $SRC_DIR/jail-check2.tmp $SRC_DIR/jail-check2
+		
+		comm -3 $SRC_DIR/jail-check $SRC_DIR/jail-check2 > $SRC_DIR/jail-check-all
+		echo $GREEN"Done"$NORMAL
+		if [[ -s  $SRC_DIR/jail-check-all ]] ; then
+			echo $YELLOW"   Warning! - "$NORMAL"Naughty $MAKEFILE may have allowed files to escape from JAIL!"
+			echo $CYAN"                   "$NORMAL"Unless installed by another process, these files will be removed:"
+			while read FILE ; do
+				FILE=$(echo $FILE)
+				if [[ -d $ADM_DIR_NAME/manifests ]] ; then
+					if ! grep $FILE $ADM_DIR_NAME/manifests/* ; then
+						echo $'\t'"$FILE"
+						rm -f /$FILE
+					fi
+				else
+					if ! grep $FILE $ADM_DIR_NAME/packages/* ; then
+						echo $'\t'"$FILE"
+						rm -f /$FILE
+					fi
+				fi
+			done < $SRC_DIR/jail-check-all
+			echo $CYAN"   Notice -   "$NORMAL"Use another install method rather than 'JAIL' to avoid this."
+			if [[ -n $SCRIPT ]] ; then
+				echo "              To fix permanently, add INSTALL_FAIL=JAIL to '${SCRIPT##/*}'"
+			fi
+		fi
+		( cd "${INSTALLSENTRY_ROOT_DIR}"/TRANSL && mv * ../ 2> /dev/null )
+		# then remove the TRANSL directory
+		( cd "${INSTALLSENTRY_ROOT_DIR}" && rm -rf TRANSL )
+		echo $BLUE"Safe content creation - "$GREEN"Successful!"$NORMAL
+	else
+		echo $RED"FATAL! "$NORMAL"Running '$INSTALL_COMMAND $INSTALL_RULE' has failed with error: $? "
+		echo "Try using INSTALL_LINE 'make -i install'  "$RED"Exiting..."$NORMAL
+		FAILED="make_install in: $FUNCNAME"
+	fi
+else
+	if [[ $(find "${INSTALLSENTRY_ROOT_DIR}"/TRANSL -type f) != "" ]] ; then
+		echo $CYAN"Notice - "$NORMAL"Possible error running '$INSTALL_LINE'"
+		echo "         This is probably a false error since files have been installed."
+		echo "         But you should check the package content just to be sure."
+		( cd "${INSTALLSENTRY_ROOT_DIR}"/TRANSL && mv * ../ 2> /dev/null )
+		( cd "${INSTALLSENTRY_ROOT_DIR}" && rm -rf TRANSL )
+	elif [[ -x "$OBJ_DIR"/$NAME ]] || [[ -x "$OBJ_DIR"/$ORIG_NAME ]] && [[ $keyfile != "setup.py" ]] ; then
+		echo $CYAN"Notice - "$NORMAL"Running '$INSTALL_LINE' has failed."
+		echo "But, there seems to be a matching executable in the SRC_DIR."
+		echo $BLUE"Doing generic install - "$NORMAL
+		mkdir -p "$PKG_DIR"/$PRE_FIX/bin
+		[[ -x "$OBJ_DIR"/$NAME ]] && cp -a "$OBJ_DIR"/$NAME "$PKG_DIR"/$PRE_FIX/bin
+		[[ -x "$OBJ_DIR"/$ORIG_NAME ]] && cp -a "$OBJ_DIR"/$ORIG_NAME "$PKG_DIR"/$PRE_FIX/bin
+		if [[ -e "$OBJ_DIR"/$NAME.1 ]] || [[ -e "$OBJ_DIR"/$NAME.man ]] ; then
+			echo $BLUE"Found man-page - "$NORMAL"Copying into PKG_DIR"
+			mkdir -p "$PKG_DIR"/usr/man/man1
+			[[ -e "$OBJ_DIR"/$NAME.1 ]] && cp -a "$OBJ_DIR"/$NAME.1 "$PKG_DIR"/usr/man/man1/$NAME.1
+			[[ -e "$OBJ_DIR"/$NAME.man ]] && cp -a "$OBJ_DIR"/$NAME.man "$PKG_DIR"/usr/man/man1/$NAME.1
+		fi
+	else
+		echo $RED"FATAL! "$NORMAL"Running '$INSTALL_LINE' has failed with error: $? "
+		echo "Try using INSTALL_LINE 'make -i install'  "$RED"Exiting..."$NORMAL
+		FAILED="make_install in: $FUNCNAME"
+	fi
+fi
+}	
+	

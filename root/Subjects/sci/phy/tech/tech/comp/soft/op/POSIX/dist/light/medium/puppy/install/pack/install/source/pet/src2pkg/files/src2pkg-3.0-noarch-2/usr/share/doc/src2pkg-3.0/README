@@ -1,0 +1,92 @@
+
+				src2pkg - trackinstall - sentry
+				Copyright 2005-2010 Gilbert Ashley
+				amigo@ibilio.org amigolinux.org
+
+	src2pkg is a system for creating installable software packages from
+	source code or any other type of content. It can create packages
+	of several different formats, depending on which system you are
+	building packages for. It can also convert existing packages into
+	packages of a different format or type. See the file 'Technical'
+	for details of the formats supported.
+
+	src2pkg is both a command-line tool and a package-creation API which
+	can be used by simple 'build scripts' in order to make the process
+	repeatable or to perform the complex tasks needed for some packages.
+
+The goals of src2pkg are these:
+
+1. Above all, make the task of compiling software and creating packages
+   as safe as possible. src2pkg allows most packages to be created
+   while logged in as a normal un-priviledged user. And all default
+   operations carried out by src2pkg are done as safely as possible.
+   
+2. Create packages which are uniform and standards-compliant. src2pkg
+   can comply with several different packaging standards and allows
+   you to choose which to use.
+   
+3. Make creation of packages as simple and easy as possible for the
+   casual user, while providing sufficient flexibility and depth of
+   utility to keep 'power users' happy, as well.
+   
+4. Encourage 'best practices' when working with software, according
+   to the spirit of open-source software and in compliance with the
+   'free' software licenses under which it is made available.
+   
+5. Encourage the repeatability and reliability of packaging software.
+   By using src2pkg 'build scripts', an accurate and repeatable 'recipe'
+   is kept of the package building process. These scripts also provide
+   a place to keep any notes to yourself (or others) about each package.
+   This is important both for users who only rarely create a package
+   as well as for those who create lots of packages.
+   
+6. src2pkg should be compatible with multiple architectures and/or
+   operating systems. src2pkg is known to work under Linux and similar
+   OS's running on various kinds of hardware, including x86(intel),
+   x86_64, PPC and others. It can even be used on multi-lib systems
+   or in a cross-compiling environment.
+
+
+The src2pkg package includes extensive documentation which can help you
+get the best use out of src2pkg:
+
+1. The file 'FAQ' answers some of the most frequently asked questions, and
+is a good place to start learning about src2pkg.
+
+2. Technical details and specifications can be found in the file 'Technical'.
+
+3. The file 'Tutorial' contains a fairly short 'course' for getting started
+using src2pkg to create packages.
+
+4. The file 'Special-files' contains details about special files created or
+used by src2pkg and 'extra' files which may be needed by some packages or
+for certain package formats.
+
+5. The file 'CHANGES' contains summarized notes about the most important or
+visible changes in src2pkg from one version to the next. The file 'ChangeLog'
+contains a much more detailed record of all changes bewteen versions.
+
+6. The file 'Usage' shows some details about using the various src2pkg options
+ -especially the advanced options.
+
+7. Each of the main tools included with src2pkg displays a help-page and
+has a man-page which contains somewhat more information on syntax and usage.
+
+8. There is a directory 'examples' in the documentation which contains example
+build scripts which demonstrate both basic and advanced usage of *.src2pkg scripts.
+
+
+Also, the authors' internet site at http://amigolinux.org has a repository which
+includes over 1,000 programs and libraries with the source code, any extra files
+and the src2pkg script used to build each one.
+
+The author is always glad to answer email regarding src2pkg, but please try
+to find the answer to any questions you have by reading the documentation first.
+Questions, comments, suggestions or bug reports/fixes can be addressed to:
+Gilbert Ashley <amigo@ibiblio.org>
+Be sure to include the word 'src2pkg' in the subject line of the email to
+ensure that your email is noticed and not filtered out by anti-spam software.
+
+License:
+src2pkg and all the tools included are released under the GPL license.
+A copy is included in the src2pkg package.

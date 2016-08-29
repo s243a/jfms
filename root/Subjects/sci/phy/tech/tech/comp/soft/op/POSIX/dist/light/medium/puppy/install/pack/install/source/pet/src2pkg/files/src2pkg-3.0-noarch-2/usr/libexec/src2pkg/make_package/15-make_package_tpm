@@ -1,0 +1,579 @@
+# packaging functions for kiss tpm packages
+
+# tiny_make_package
+tiny_make_package() {
+	local PACKAGE_NAME=$1
+	local TARGET_NAME=$(dirname "$PACKAGE_NAME")
+	local PACKAGE_NAME=$(basename "$PACKAGE_NAME")
+	local SHORT_NAME=$(basename "$PACKAGE_NAME" ".$PKG_FORMAT")
+	umask 022
+	echo ""
+	TAR=/bin/tar-1.27
+	if [[ "$EUID" = "0" ]] ; then
+		${TAR} cvf "$SHORT_NAME".tar .
+	else
+		${TAR} --owner=root --group=root -cvf "$SHORT_NAME".tar .
+	fi
+	echo ""
+	
+	LONG_NAME=$SHORT_NAME.tar.xz
+	echo "Compressing $SHORT_NAME.tar using xz(lzma-2)..."
+	xz $SHORT_NAME.tar
+	
+	echo "Renaming $LONG_NAME to $PACKAGE_NAME..."
+	mv "$LONG_NAME" "$PACKAGE_NAME"
+	
+	if [[ ! "$TARGET_NAME" = "." ]]; then
+		echo "Moving $PACKAGE_NAME to $TARGET_NAME"
+		mv "$PACKAGE_NAME" "$TARGET_NAME"
+	fi
+}
+
+copy_scripts() {
+	local TAG=$1
+	if [[ -f $PATCHES_DIR/$NAME-patches/$PKG_PREINST.${NAME}-$TAG ]] ; then
+		cp $PATCHES_DIR/$NAME-patches/$PKG_PREINST.${NAME}-$TAG install/$PKG_PREINST
+	elif [[ -f $CWD/$PKG_PREINST.${NAME}-$TAG ]] ; then
+		cp $CWD/$PKG_PREINST.${NAME}-$TAG install/$PKG_PREINST
+	fi
+	
+	if [[ -f $PATCHES_DIR/$NAME-patches/$PKG_POSTINST.${NAME}-$TAG ]] ; then
+		cp $PATCHES_DIR/$NAME-patches/$PKG_POSTINST.${NAME}-$TAG install/$PKG_POSTINST
+	elif [[ -f $CWD/$PKG_POSTINST.${NAME}-$TAG ]] ; then
+		cp $CWD/$PKG_POSTINST.${NAME}-$TAG install/$PKG_POSTINST
+	fi
+	
+	if [[ -f $PATCHES_DIR/$NAME-patches/$PKG_PRERM.${NAME}-$TAG ]] ; then
+		cp $PATCHES_DIR/$NAME-patches/$PKG_PRERM.${NAME}-$TAG install/$PKG_PRERM
+	elif [[ -f $CWD/$PKG_PRERM.${NAME}-$TAG ]] ; then
+		cp $CWD/$PKG_PRERM.${NAME}-$TAG install/$PKG_PRERM
+	fi
+	
+	if [[ -f $PATCHES_DIR/$NAME-patches/$PKG_POSTRM.${NAME}-$TAG ]] ; then
+		cp $PATCHES_DIR/$NAME-patches/$PKG_POSTRM.${NAME}-$TAG install/$PKG_POSTRM
+	elif [[ -f $CWD/$PKG_POSTRM.${NAME}-$TAG ]] ; then
+		cp $CWD/$PKG_POSTRM.${NAME}-$TAG install/$PKG_POSTRM
+	fi
+	
+	if [[ -f $PATCHES_DIR/$NAME-patches/$PKG_DESC.${NAME}-$TAG ]] ; then
+		cp $PATCHES_DIR/$NAME-patches/$PKG_DESC.${NAME}-$TAG install/$PKG_DESC
+	elif [[ -f $CWD/$PKG_DESC.${NAME}-$TAG ]] ; then
+		cp $CWD/$PKG_DESC.${NAME}-$TAG install/$PKG_DESC
+	fi
+}
+
+make_tpm_pkg() {
+# package segregated packages if they exist
+	# DEVEL
+	if [[ -d "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME ]] ; then
+		rm -f "$DEVEL_PACKAGE"
+		( cd "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME
+			mkdir -p install
+			echo -n $BLUE"Creating package: "$NORMAL"${DEVEL_PACKAGE##*/} - "
+			copy_scripts $DEVEL_TAG
+			write_pkg_spec_header "$DEVEL_PKG_NAME"
+			SUMMARY="Development files for: ${SHORT_NAME}"
+			LICENSE=$(grep -m 1 "License"':' install/pkg-desc 2>/dev/null)
+			if [[ -z "$LICENSE" ]] ; then
+				LICENSE="$(grep -m 1 'License:' $PKG_DIR/install/pkg-desc 2>/dev/null)"
+			fi
+			echo "summary=\"${SUMMARY}\"" >> install/pkg-spec
+			echo "license=\"${LICENSE##*'License: '}\"" >> install/pkg-spec
+			echo "description=\"This package contains the headers and static libraries from: ${SHORT_NAME}\"" >> install/pkg-spec
+			echo "requires=\"${SHORT_NAME}.${PKG_FORMAT}\"" >> install/pkg-spec
+			rm -f install/$PKG_DESC
+			rm -f install/pkg-required
+			#gen_tpm_file_lists "$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME silent
+			. tpm-gen-file-lists silent #"$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME silent
+			# create the child package
+			tiny_make_package "$DEVEL_PACKAGE" &> /dev/null
+			if [[ -f "$DEVEL_PACKAGE" ]] ; then
+				echo $GREEN"Done"$NORMAL
+				[[ $REALLY_INSTALL = "YES" ]] && really_install "$DEVEL_PACKAGE"
+			else
+				echo $RED"Failed!"$NORMAL
+			fi
+		)
+		! [[ $DEBUG ]] && (cd "$PKG_BUILDS_DIR" && rm -rf $DEVEL_PKG_NAME)
+	fi
+	
+	# DOCS
+	if [[ -d "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME  ]] ; then
+		rm -f "$DOCS_PACKAGE"
+		( cd "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME 
+			mkdir -p install
+			echo -n $BLUE"Creating package: "$NORMAL"${DOCS_PACKAGE##*/} - "
+			copy_scripts $DOCS_TAG
+			write_pkg_spec_header "$DOCS_PKG_NAME"
+			SUMMARY="Document files for: ${SHORT_NAME}"
+			LICENSE=$(grep -m 1 "License"':' install/pkg-desc 2>/dev/null)
+			if [[ -z "$LICENSE" ]] ; then
+				LICENSE="$(grep -m 1 'License:' $PKG_DIR/install/pkg-desc 2>/dev/null)"
+			fi
+			echo "summary=\"${SUMMARY}\"" >> install/pkg-spec
+			echo "license=\"${LICENSE##*'License: '}\"" >> install/pkg-spec
+			echo "description=\"This package contains the full documents from: ${SHORT_NAME}\"" >> install/pkg-spec
+			echo "requires=\"${SHORT_NAME}.${PKG_FORMAT}\"" >> install/pkg-spec
+			rm -f install/$PKG_DESC
+			rm -f install/pkg-required
+			#gen_tpm_file_lists "$PKG_BUILDS_DIR"/$DOCS_PKG_NAME silent
+			. tpm-gen-file-lists silent #"$PKG_BUILDS_DIR"/$DOCS_PKG_NAME silent
+			# create the child package
+			tiny_make_package "$DOCS_PACKAGE" &> /dev/null
+			if [[ -f "$DOCS_PACKAGE" ]] ; then
+				echo $GREEN"Done"$NORMAL
+				[[ $REALLY_INSTALL = "YES" ]] && really_install "$DOCS_PACKAGE"
+			else
+				echo $RED"Failed!"$NORMAL
+			fi
+		)
+		! [[ $DEBUG ]] && (cd "$PKG_BUILDS_DIR" && rm -rf $DOCS_PKG_NAME)
+	fi
+	
+	# I18N
+	if [[ -d "$PKG_BUILDS_DIR"/$I18N_PKG_NAME   ]] ; then
+		rm -f "$I18N_PACKAGE"
+		( cd "$PKG_BUILDS_DIR"/$I18N_PKG_NAME  
+			mkdir -p install
+			echo -n $BLUE"Creating package: "$NORMAL"${I18N_PACKAGE##*/} - "
+			copy_scripts $I18N_TAG
+			write_pkg_spec_header "$I18N_PKG_NAME"
+			SUMMARY="Localization files for: ${SHORT_NAME}"
+			LICENSE=$(grep -m 1 "License"':' install/pkg-desc 2>/dev/null)
+			if [[ -z "$LICENSE" ]] ; then
+				LICENSE="$(grep -m 1 'License:' $PKG_DIR/install/pkg-desc 2>/dev/null)"
+			fi
+			echo "summary=\"${SUMMARY}\"" >> install/pkg-spec
+			echo "license=\"${LICENSE##*'License: '}\"" >> install/pkg-spec
+			echo "description=\"This package contains the internationalization files from: ${SHORT_NAME}\"" >> install/pkg-spec
+			echo "requires=\"${SHORT_NAME}.${PKG_FORMAT}\"" >> install/pkg-spec
+			rm -f install/$PKG_DESC
+			rm -f install/pkg-required
+			#gen_tpm_file_lists "$PKG_BUILDS_DIR"/$I18N_PKG_NAME  silent
+			. tpm-gen-file-lists silent #"$PKG_BUILDS_DIR"/$DEVEL_PKG_NAME silent
+			
+			# create the child package
+			tiny_make_package "$I18N_PACKAGE" &> /dev/null
+			if [[ -f "$I18N_PACKAGE" ]] ; then
+				echo $GREEN"Done"$NORMAL
+				[[ $REALLY_INSTALL = "YES" ]] && really_install "$I18N_PACKAGE"
+			else
+				echo $RED"Failed!"$NORMAL
+			fi
+		)
+		! [[ $DEBUG ]] && (cd "$PKG_BUILDS_DIR" && rm -rf $I18N_PKG_NAME )
+	fi
+	####
+	
+	# SOLIBS
+	if [[ -d "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME   ]] ; then
+		rm -f "$SOLIBS_PACKAGE"
+		( cd "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME  
+			mkdir -p install
+			echo -n $BLUE"Creating package: "$NORMAL"${SOLIBS_PACKAGE##*/} - "
+			copy_scripts $SOLIBS_TAG
+			write_pkg_spec_header "$SOLIBS_PKG_NAME"
+			SUMMARY="Runtime binary files for: ${SHORT_NAME}"
+			LICENSE=$(grep -m 1 "License"':' install/pkg-desc 2>/dev/null)
+			if [[ -z "$LICENSE" ]] ; then
+				LICENSE="$(grep -m 1 'License:' $PKG_DIR/install/pkg-desc 2>/dev/null)"
+			fi
+			echo "summary=\"${SUMMARY}\"" >> install/pkg-spec
+			echo "license=\"${LICENSE##*'License: '}\"" >> install/pkg-spec
+			echo "description=\"This package contains the runtime libraries from: ${SHORT_NAME}\"" >> install/pkg-spec
+			echo "requires=\"${SHORT_NAME}.${PKG_FORMAT}\"" >> install/pkg-spec
+			rm -f install/$PKG_DESC
+			rm -f install/pkg-required
+			#rm -f doinst.links
+			#rm -f links.list
+			
+			. tpm-gen-requires > install/pkg-requires
+			#gen_deps_list_tpm > install/pkg-requires
+			#gen_tpm_file_lists "$PKG_BUILDS_DIR"/$SOLIBS_PKG_NAME  silent
+			. tpm-gen-file-lists silent
+			
+			# create the child package
+			tiny_make_package "$SOLIBS_PACKAGE" &> /dev/null
+			if [[ -f "$SOLIBS_PACKAGE" ]] ; then
+				echo $GREEN"Done"$NORMAL
+				[[ $REALLY_INSTALL = "YES" ]] && really_install "$SOLIBS_PACKAGE"
+			else
+				echo $RED"Failed!"$NORMAL
+			fi
+		)
+		! [[ $DEBUG ]] && (cd "$PKG_BUILDS_DIR" && rm -rf $SOLIBS_PKG_NAME )
+	fi
+	####
+	
+	#for CUSTOM in ${CUSTOM_PACKAGES} ; do
+	#	(cd $PKG_BUILDS_DIR/$CUSTOM && {
+	#		echo hello
+		
+	#		}
+	#	)
+	#done
+	
+	##### mani package
+	cd $PKG_DIR
+	mkdir -p install
+	#grep -v '^#' install/pkg-required > install/pkg-requires
+	skip() {
+	if [[ -f install/pkg-required ]] ; then
+		while read LINE ; do
+			case "$LINE" in
+				'#'*|'') : ;;
+				*' | '*) echo ${LINE%%' | '*} >> install/pkg-requires ;;
+				*) echo "$LINE" >> install/pkg-requires ;;
+			esac
+		done < install/pkg-required
+		rm -f install/pkg-required
+	fi
+	}
+	rm -f install/pkg-desc
+	rm -f install/pkg-required
+	
+	. tpm-gen-requires > install/pkg-requires
+	#gen_deps_list_tpm > install/pkg-requires
+	# create_file_list
+	#gen_tpm_file_lists "$PKG_DIR" #silent
+	. tpm-gen-file-lists silent
+	
+	# create the main package
+	rm -f "$PACKAGE"
+	echo -n $BLUE"Creating package: "$NORMAL"${PACKAGE##*/} - "
+	if [[ $QUIET = "YES" ]] ; then
+		cd "$PKG_DIR" ;
+		tiny_make_package "$PACKAGE" &> /dev/null
+	else
+		cd "$PKG_DIR" ;
+		echo ""
+		tiny_make_package "$PACKAGE"
+	fi
+	if [[ -f "$PACKAGE" ]] ; then
+		echo $GREEN"Done"$NORMAL
+		if [[ "$CREATE_MD5_CHECKSUM" = "YES" ]]; then
+			echo $BLUE"Creating md5 checksum - "$NORMAL"$(basename $PACKAGE).md5"
+			cd "$PKG_DEST_DIR"
+			md5sum $(basename "$PACKAGE") > "$PACKAGE".md5
+		fi
+		echo $BLUE"Package Creation - "$GREEN"Successful! "$NORMAL"Package Location:"
+		echo "$PACKAGE"
+	else
+		echo $RED"FAILED! "$NORMAL
+		echo "Creation of ${PACKAGE##*/} has failed."
+		FAILED="PACKAGE CREATION in: $FUNCNAME"
+	fi
+	[[ $REALLY_INSTALL = "YES" ]] && really_install "$PACKAGE"
+	if [[ $PAUSE = "AFTER" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+		echo $MAGENTA"Notice - "$BLUE"Pausing after: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+		read
+	fi
+}
+
+create_file_list() {
+	declare -a SYSDIRS
+	count=0
+	while read DIR ; do
+		SYSDIRS[$count]=$DIR
+		(( count++ ))
+	done < /etc/src2pkg/sysdirs.conf
+	
+	# /bin/tar-1.27 -c -f - . |/bin/tar-1.27 -tvv -f - > install/pkg-files.tmp
+	/bin/tar-1.27 -c -f - . |/bin/tar-1.27 -tvv | \
+	while read LINE ; do
+		FILE="${LINE#*./}"
+		case "$FILE" in 'install'*) continue ;; esac
+		case "${LINE:0:1}" in
+			d)
+				case "$FILE" in
+					"./"|"") : ;;
+					*)	if ! is_element "${FILE}" "${SYSDIRS[@]}" ; then
+							echo "d:${FILE}" >> install/pkg-files
+						fi
+					;;
+				esac
+			;;
+			l) 	LINK="${FILE% ->*}"
+				TARGET="${FILE#*-> }"
+				case "$TARGET" in
+					../*) echo "l:${LINK}"' -> '"${TARGET}" >> install/pkg-files ;;
+					./*) echo "l:${LINK}"' -> '"${TARGET:2}" >> install/pkg-files ;;
+					*) echo "l:${LINK}"' -> '"${TARGET}" >> install/pkg-files ;;
+				esac
+			;;
+			h) 	LINK="${FILE% link to*}"
+				#TARGET="${FILE#*link to }"
+				case "$TARGET" in
+					../*) echo "h:${LINK}" >> install/pkg-files ;;
+					./*) echo "h:${LINK}" >> install/pkg-files ;;
+					*) echo "h:${LINK}" >> install/pkg-files ;;
+				esac
+			;;
+			p|b|c) echo "${LINE:01}:${FILE}" >> install/pkg-files ;;
+			*) echo "f:${FILE}" >> install/pkg-files ;;
+		esac
+	done
+	#done < install/pkg-files.tmp
+	unset SYSDIRS
+}
+
+is_element() {
+	local needle="$1" ; shift
+	local item
+	for item in $@ ; do
+		[[ "$item" = "$needle" ]] && return 0 # Found
+	done
+	return 1 # Not Found
+}
+
+gen_tpm_file_lists() {
+	[[ $2 = 'silent' ]] && SILENT=1 || SILENT=0
+	declare -a SYSDIRS
+	count=0
+	while read DIR ; do
+		SYSDIRS[$count]=$DIR
+		(( count++ ))
+	done < /etc/src2pkg/sysdirs.conf
+	
+	
+	#( cd $1
+		# Create a full listing of this package, excluding the install dir
+		mkdir -p install
+		#> install/pkg-manifest
+		> "$CWD"/pkg-files
+		
+		#( cd $PKG_DIR && ${TAR} --exclude=install* -cf - * |tar -tvv > "$SRC_DIR"/pkg-manifest)
+		# exclude doesn't seem to work with tar-1.13 anyway
+		[[ $SILENT != 1 ]] && echo -n "      Creating: 'pkg-manifest' "
+		/bin/tar-1.27 -cf - . 2>/dev/null |tar -tvv  2>/dev/null > $CWD/pkg-manifest
+		#echo hello
+		#exit
+		while read LINE ; do
+				#echo LINE="$LINE"
+				case $LINE in '') continue ;; esac
+				
+				#set -- ${LINE}
+				#ITEM="$(shift 5 ; echo $@)"
+				ITEM=${LINE#*'./'}
+				MY_ITEM="./${ITEM}"
+				case "$/MY_ITEM=" in
+					'./install/pkg-files'*|'./install/pkg-manifest'*) continue ;;
+				esac
+				#echo ITEM=$ITEM
+				case ${LINE:0:1} in
+					-)	#if [[ $ADD_MANIFEST_FILE != "NO"  ]] ; then
+							#echo "${ITEM}"'|' $1 $2 $3 $4 $5 >> install/pkg-manifest
+						#	echo "${LINE}">> "$CWD"/pkg-manifest
+						#fi
+						case "${MY_ITEM}" in
+							'./install'*|'./') continue ;;
+						esac
+						echo "f:${ITEM}" >> "$CWD"/pkg-files
+					;;
+					d)	#if [[ $ADD_MANIFEST_FILE != "NO"  ]] ; then
+						#	echo "${LINE}">> "$CWD"/pkg-manifest
+							#case "${MY_ITEM}" in
+							#	'./') echo "${MY_ITEM}"'|' $1 $2 $3 $4 $5 >> install/pkg-manifest 
+								
+							#	;;
+							#	*) echo "${ITEM}"'|' $1 $2 $3 $4 $5 >> install/pkg-manifest 
+								
+							#	;;
+							#esac
+						#fi
+						case "$MY_ITEM" in
+							'./install'*|'./') continue ;;
+						esac
+						if ! is_element  "${ITEM}" "${SYSDIRS[@]}" ; then
+							echo "d:${ITEM}" >> "$CWD"/pkg-files
+						fi
+					;;
+					l)	
+						LINK="${ITEM% ->*}" # everything to the left of ' ->'
+						TARGET="${ITEM##*-> }" # everything to the right of '-> '
+						case "$TARGET" in
+							./*) TARGET="${TARGET:2}"
+						esac
+						echo "l:${LINK}"' -> '"${TARGET}" >> "$CWD"/pkg-files
+						#if [[ $ADD_MANIFEST_FILE != "NO"  ]] ; then
+							#echo "${LINK}"'|' $1 $2 $3 $4 $5 "\"$TARGET\"" >> install/pkg-manifest
+						#	echo "${LINE}">> "$CWD"/pkg-manifest
+						#fi
+					;;
+					h)	
+						LINK="${ITEM% link to*}" # everything to the left of ' link to'
+						TARGET="${ITEM##*link to }" # everything to the right of 'link to '
+						case "$TARGET" in
+							./*) TARGET="${TARGET:2}"
+						esac
+						#if [[ $ADD_MANIFEST_FILE != "NO"  ]] ; then
+							#echo "${LINK}"'|' $1 $2 $3 $4 $5 "\"$TARGET\"" >> install/pkg-manifest
+						#	echo "${LINE}">> "$CWD"/pkg-manifest
+						#fi
+						echo "h:${LINK}"' -> '"$TARGET" >> "$CWD"/pkg-files
+					;;
+					*)
+						#echo yeah
+						echo "${LINE:0:1}:${ITEM}" >> "$CWD"/pkg-files
+						#if [[ $ADD_MANIFEST_FILE != "NO"  ]] ; then
+							#echo "${ITEM}"'|' $1 $2 $3 $4 $5 >> install/pkg-manifest
+						#	echo "${LINE}">> "$CWD"/pkg-manifest
+						#fi
+					;;
+				esac
+		done < $CWD/pkg-manifest
+		mv $CWD/pkg-manifest install/pkg-manifest
+		mv $CWD/pkg-files install/pkg-files
+		
+		#rm -f install/pkg-manifest.tmp
+		[[ $SILENT != 1 ]] && echo $GREEN"Done"$NORMAL
+	#)
+}
+
+gen_deps_list_tpm() {
+	local TMP="$CWD/$$"
+	FILE_LISTS=/var/lib/tpm/packages
+	: > $TMP.deps_list.tmp
+	 #if sourced by src2pkg, this part is used
+	if [[ -s $SRC_DIR/$NAME-ELF-all ]] ; then
+		while read LINE ; do
+			# skip non-existing -they may have been moved
+			if [[ -f $LINE ]] ; then
+				_ldd $LINE >> $TMP.deps_list.tmp
+			fi
+		done < $SRC_DIR/$NAME-ELF-all
+		
+		#cp $SRC_DIR/$NAME-ELF-all $TMP.all-files
+	else
+		# otherwise, try to deduce a NAME
+		local NAME=$(basename $CWD)
+		NAME=${NAME%%_*}
+
+		find * -type f > $TMP.all-files
+		while read FILE ; do
+			case "$FILE" in
+				# */plugins/*|*/plugin/*) true ;; # no dependable way to check for any other plugins
+				*.la|*.a) : ;;
+				# *.h|*.hh|*.inc) echo "$FILE" >> "$SRC_DIR"/$NAME-header-files ;;
+				# some packages like 'kbd' include *.inc files which are not header files
+				${PRE_FIX}/include*|usr/include*) : ;;
+				${PRE_FIX}/lib${LIBDIRSUFFIX}/$NAME/include/*) : ;;
+				*.h|*.gch|*.hh) : ;;
+				*.txt|*.html|*.ps|*.pdf|*.avi|*.mpg3|*.mpg4|*.ogg) : ;; # textand audio documents we can ignore
+				*.xpm|*.jpeg|*.png|*.svg) : ;; # image files we can ignore
+				*.gz|*.tgz|*.tar.gz|*.bz2|*.tbz2|*.tar.bz2|*.xz|*.txz|*.tar.xz) : ;; # compression formats
+				*.o|*.o.gz|*.ko|*.ko.gz|*.ko.lz) : ;;
+				*)	if is_elf_4 "$FILE" ; then
+						_ldd "$FILE" >> $TMP.deps_list.tmp
+					fi ;;
+			esac
+		done < $TMP.all-files
+	fi
+	# exit
+	if [[ -s $TMP.deps_list.tmp ]] ; then
+		# sort and uniq separately for best results:
+		sort -u $TMP.deps_list.tmp > $TMP.deps_list
+		uniq -u $TMP.deps_list > $TMP.deps_list.tmp
+		# and cull
+		#exit
+		: > $TMP.deps_list
+		: > $TMP.unsatisfied_deps_list.tmp
+		while read LINE ; do
+			case $LINE in
+				*"not found"*) 
+					# we have to allow for links, hence '-e', not '-f'
+					#if [[ -e ${LINE%' not found'*} ]] ; then
+						#echo ${LINE%' not found'*} >> $TMP.deps_list
+						:
+					#else
+						TRY=$(find -name ${LINE%' not found'*})
+						case "$TRY" in
+							'')
+								echo ${LINE} >> $TMP.unsatisfied_deps_list.tmp
+							;;
+							*) : ;;
+						esac
+					#fi
+				;;
+				*) #echo ${LINE#*/} >> $TMP.deps_list
+					echo ${LINE} >> $TMP.deps_list
+				;;
+			esac
+		done < $TMP.deps_list.tmp
+	fi
+	#exit
+	rm -f $TMP.deps_list.tmp
+	
+	# any deps which are not packaged?
+	# maybe not working at the moment
+	if [[ -s $TMP.unsatisfied_deps_list.tmp ]] ; then
+		: > $TMP.unsatisfied_deps_list
+		while read LINE ; do
+			( set -- $(echo $LINE) ; echo $1 >> $TMP.unsatisfied_deps_list )
+			#echo ${LINE%% *} >> unsatisfied_deps_list
+		done < $TMP.unsatisfied_deps_list.tmp
+		while read LINE ; do
+			if [[ -f $TMP.all-files ]] ; then
+				fgrep -m1 -q $LINE $TMP.all-files
+			elif [[ -f $SRC_DIR/$NAME-ELF-all ]] ; then
+				#echo hello2 $LINE
+				fgrep -m1 -q $LINE $SRC_DIR/$NAME-ELF-all
+			fi
+			case $? in
+				0) : ;;
+				*) echo ${LINE} >> $TMP.unsatisfied_deps_list.tmp
+			esac
+			
+		done < $TMP.unsatisfied_deps_list
+		mv $TMP.unsatisfied_deps_list.tmp $TMP.unsatisfied_deps_list
+		
+	fi
+	rm -f $TMP.unsatisfied_deps_list.tmp
+	
+	if [[ -s $TMP.deps_list ]] ; then
+		: > $TMP.deps_list.tmp
+		while read PKG_DEP ; do
+			THIS_DEP=
+			PKG_DEP_COUNT=0
+			COUNT=0
+			# make sure we are not reading a blank line
+			case $PKG_DEP in '') continue ;; esac
+			
+			# if PKG_DEP is found in this package skip it
+			if [[ $(fgrep -q ${PKG_DEP} $TMP.all-files 2> /dev/null) ]] || \
+				[[ $(fgrep -q ${PKG_DEP} $SRC_DIR/$NAME-ELF-all 2> /dev/null) ]] ; then
+				continue
+			fi
+			if [[ -e "$PKG_DEP" ]] ; then
+				continue
+			fi
+			PKG_DEP_MATCHES=
+			for PKG_DEP_MATCH in $(grep -m1 $(readlink /${PKG_DEP}) $FILE_LISTS/* 2> /dev/null) ; do
+				PKG_DEP_MATCH="$(basename ${PKG_DEP_MATCH%%:*})"
+				case "$PKG_DEP_MATCH" in
+					gcc_*|gcc-g++_*|'') : ;;
+					*) PKG_DEP_MATCHES="${PKG_DEP_MATCHES}$PKG_DEP_MATCH|" ;;
+				esac
+			done
+			case ${PKG_DEP_MATCHES} in
+					'') echo "${PKG_DEP} not found" ;;
+					'|') : ;;
+					*)	fgrep -m1 -q ${PKG_DEP_MATCHES%|*} $TMP.deps_list.tmp
+						case $? in
+							0) : ;; # already in the list
+							*) echo "${PKG_DEP_MATCHES%|*}" >> $TMP.deps_list.tmp
+						esac
+					;;
+			esac
+		done < $TMP.deps_list
+	fi
+	
+	if [[ -s $TMP.deps_list.tmp ]] ; then
+	#sort $TMP.deps_list.tmp > $TMP.deps_list
+		sort $TMP.deps_list.tmp
+	fi
+	#rm -f deps_list.tmp
+	rm -f $TMP.deps_list.tmp
+	rm -f $TMP.deps_list
+	rm -f $TMP.all-files
+}

@@ -1,0 +1,11 @@
+#!/bin/bash
+#
+# to stop an IP adress talking to hosts on local lan
+# uncomment the following line and change 10.252.253.254 to the IP address
+# NOTE: this rule is often not necessary
+#iptables -I FORWARD 2 -s 10.252.253.254 -j DROP
+
+# to stop hosts on local lan talking to an IP address
+# uncomment the following line and change 10.252.253.254 to the IP address
+# NOTE: this rule is the preferred way to stop traffic
+#iptables -I FORWARD 2 -d 10.252.253.254 -j DROP

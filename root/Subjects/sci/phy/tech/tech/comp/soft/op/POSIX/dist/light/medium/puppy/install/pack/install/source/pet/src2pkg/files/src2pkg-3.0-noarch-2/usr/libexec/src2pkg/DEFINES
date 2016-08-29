@@ -1,0 +1,371 @@
+# /usr/libexec/src2pkg/DEFINES
+## src2pkg - Copyright 2005-2013 Gilbert Ashley <amigo@ibilio.org>
+## src2pkg is free software released under the GNU General Public License Version 2
+
+# This file defines some of the variables for src2pkg which, in some cases,
+#  a user might want or need to edit to change basic default behaviours of src2pkg.
+# The syntax used in this file defines variables in such a way 
+# that they can still be overridden when needed.  ! [[ $VAR ]] && VAR=VALUE
+# means if VAR is not given then set VAR to VALUE. Doing it this way still lets you
+# override the defaults for any package which needs it.
+# This syntax is what allows you to pass command-line arguments or script
+# commands which override these defaults. Once given like this: VAR=VALUE
+# the VAR will always be VALUE, unless explicitly overridden later.
+# Still, the best place to set any such variables is in your configuration file
+# in /etc/src2pkg/src2pkg.conf The src2pkg.conf file is not overwritten when
+# you upgrade to a newer version of src2pkg, so your changes will not be lost.
+# It is also not removed if you uninstall srcpkg.
+# This DEFINES file *is* overwritten if you upgrade and will be removed if
+# you uninstall src2pkg. Please use the conf file for any changes you want to make,
+# but use the same syntax as found in this file for maximum flexibility.
+# The src2pkg.conf file contains helpful notes to guide you in setting up any
+# variable which you might normally want or need to change.
+
+#####------------------ src2pkg Defaults --------------------------#####
+
+! [[ $QUIET = "NO" ]] && QUIET="YES"
+! [[ $COLOR_PROMPT = "NO" ]] && COLOR_PROMPT="YES"
+
+# This replaces CREATOR and is the default signature in slack-desc(PKG_DESC)
+# and gets written to the 11th line of the file.
+! [[ $PACKAGER ]] && PACKAGER="$LOGNAME <$LOGNAME@$(hostname)>"
+! [[ $SIGNATURE ]] && SIGNATURE="Packaged by $PACKAGER"
+[[ $SIGNATURE ]] && BLURB_11="$SIGNATURE"
+! [[ $BLURB_11 ]] && BLURB_11="Packaged by src2pkg"
+
+# SIG is a suffix to BUILD for signing packages
+! [[ $SIG ]] && SIG=""
+
+# Don't change things below here unless you really know what you are doing.
+# These are the best known 'sane' defaults for building conformant packages.
+# By default most sources install to /usr/local, but that's for locally-compiled sources
+# which are not packaged.
+# Software for packages should install with prefix of  /usr or /opt/pkgname usually.
+! [[ $PRE_FIX ]] && PRE_FIX="/usr"
+
+# Here's where the standardized directories can be given, such as --sysconfdir=/etc --localstatedir=/var/lib .
+# ! [[ $STD_CONFIGS ]] && STD_CONFIGS="--sysconfdir=/etc --localstatedir=/var/lib "
+# We leave this blank to avoid breaking some builds. Add any needed configure options to EXTRA_CONFIGS
+# in your src2pkg script -this is just the sort of one-off build requirement that is best  documented there.
+! [[ $STD_CONFIGS ]] && STD_CONFIGS=""
+
+# Extra arguments to the compiler, usually architecture specific stuff
+# An example for ix86 would be this:"-fomit-frame-pointer" or "-Wall"
+# ! [[ $EXTRA_FLAGS ]] && EXTRA_FLAGS="-Wall"
+# We leave this blank by default
+! [[ $EXTRA_FLAGS ]] && EXTRA_FLAGS=""
+
+# DEFAULT_CONFIG_COMMAND
+[[ $DEFAULT_CONFIG_COMMAND ]] || DEFAULT_CONFIG_COMMAND='./configure'
+# DEFAULT_ MAKE_COMMAND combine the JOBS variable if it is given
+if [[ -z $NUMJOBS ]] ; then
+	[[ $DEFAULT_MAKE_COMMAND ]] || DEFAULT_MAKE_COMMAND="$(echo make |white_out)"
+else
+	[[ $DEFAULT_MAKE_COMMAND ]] || DEFAULT_MAKE_COMMAND="$(echo make -j$NUMJOBS |white_out)"
+fi
+
+# Binary and library strip commands
+# binaries are not usually sensitive to stripping. "-p --strip-unneeded" should always be safe.
+# This:"-p -strip-all" strips even smaller, but is also sometimes risky, especially for libraries.
+# It also marks all objects as stripped, even if nothing was stripped. Use with caution
+! [[ $BIN_STRIP_COMMAND ]] && BIN_STRIP_COMMAND="strip -p --strip-unneeded"
+# --strip-unneeded seems to work fine for most libraries. Use "strip -p --strip-debug" if you have any problems
+! [[ $LIB_STRIP_COMMAND ]] && LIB_STRIP_COMMAND="strip -p --strip-unneeded"
+# --strip-unneeded seems to work fine for most libraries. Use "strip -p --strip-debug" if you have any problems
+! [[ $STATIC_LIB_STRIP_COMMAND ]] && STATIC_LIB_STRIP_COMMAND="strip -p --strip-debug"
+# Always stripping seems safe as the default. I've had no problems using the above options.
+! [[ $STRIP_BINS ]] && STRIP_BINS="YES"
+! [[ $STRIP_LIBS ]]  && STRIP_LIBS="YES"
+# If you need to keep libraries unstripped put STRIP_LIBS="NO" in your build script.
+# If set to 'YES', STRIP_HARD will strip .note, .comment and .compact_rel sections from libs and bins
+# This is set to NO as default as it is only useful where space really needs to be saved -like embedded systems 
+! [[ $STRIP_HARD ]] && STRIP_HARD="NO"
+
+# Using bzip2 by default would be alright, but saves little space in this case. gzip is standard.
+# Note that using SAVE_SPACE changes this to bzip2
+! [[ $MAN_COMPRESS ]] && MAN_COMPRESS="gzip -9"
+# These 4 set up a standard build environment that behaves like SlackBuild scripts
+! [[ $SOURCES_DIR ]] && SOURCES_DIR=$CWD
+# SRC_BUILDS_DIR is the directory where the sources get built
+! [[ $SRC_BUILDS_DIR ]] && SRC_BUILDS_DIR="/tmp"
+#  PKG_BUILDS_DIR -where packages are pre-installed and assembled
+! [[ $PKG_BUILDS_DIR ]] && PKG_BUILDS_DIR="/tmp"
+#  PKG_DEST_DIR -where assembled packages are left
+! [[ $PKG_DEST_DIR ]] && PKG_DEST_DIR="/tmp"
+# libsentry needs a backup path -usually the same as SRC_BUILDS_DIR
+! [[ $BACKUP_DIR ]] && BACKUP_DIR="/tmp"
+# If you specify KEEP_BACKUPS=YES a .tgz archive is created in:
+! [[ $BACKUPS_SAVE_DIR ]] && BACKUPS_SAVE_DIR="/tmp"
+
+## Package corrections preferences
+! [[ $CORRECT_NAMES ]] && CORRECT_NAMES="YES"
+! [[ $CORRECT_MANS ]] && CORRECT_MANS="YES"
+! [[ $CORRECT_DOCS ]] && CORRECT_DOCS="YES"
+## CORRECT_USRX11R6
+! [[ $CORRECT_USRX11R6 ]] && CORRECT_USRX11R6="YES"
+## CORRECT_ICONS
+! [[ $CORRECT_ICONS ]] && CORRECT_ICONS="YES"
+
+## even if you use the recommended corrections above, it
+#  may be useful to not correct some or all perms (CVS SVN ?) sometimes
+! [[ $CORRECT_PERMS ]] && CORRECT_PERMS="YES"
+! [[ $CORRECT_SUID_PERMS ]] && CORRECT_SUID_PERMS="YES"
+
+## AUTO_PATCH
+! [[ $AUTO_PATCH ]] && AUTO_PATCH="YES"
+
+# set defaults for kiss-linux
+# DEPTH and SCRIPT_DIR are used in gen_deps_list_kiss (FUNCTIONS) 
+# if [[ -f /etc/kiss-version ]] ; then
+# hmm, how is this working with db-root?
+if [[ $PKG_FORMAT = 'tpkg' ]] ; then
+	[[ $ADM_DIR_NAME ]] || ADM_DIR_NAME=/var/lib/tpkg
+	[[ $PKG_DESC ]] || PKG_DESC="pkg-desc"
+	[[ $PKG_POSTINST ]] || PKG_POSTINST="doinst.sh"
+	[[ $PKG_PREINST ]] || PKG_PREINST="preinst"
+	[[ $PKG_PRERM ]] || PKG_PRERM="prerm"
+	[[ $PKG_POSTRM ]] || PKG_POSTRM="postrm"
+	[[ $PKG_META ]] || PKG_META="pkg-meta"
+	[[ $PKG_PROVIDES ]] || PKG_PROVIDES="pkg-provides"
+	[[ $PKG_REQUIRED ]] || PKG_REQUIRED="pkg-required"
+	[[ $PKG_SUGGESTS ]] || PKG_SUGGESTS="pkg-suggests"
+	[[ $PKG_CONFLICTS ]] || PKG_CONFLICTS="pkg-conflicts"
+	[[ $PKG_LINKS ]] || PKG_LINKS="pkg-links"
+	DEPTH=6
+	SCRIPT_DIR=postinst
+elif [[ $PKG_FORMAT = 'tpm' ]] ; then
+	[[ $ADM_DIR_NAME ]] || ADM_DIR_NAME=/var/lib/tpkg ## FIXME
+	[[ $PKG_DESC ]] || PKG_DESC="pkg-desc"
+	[[ $PKG_POSTINST ]] || PKG_POSTINST="postinst"
+	[[ $PKG_PREINST ]] || PKG_PREINST="preinst"
+	[[ $PKG_PRERM ]] || PKG_PRERM="prerm"
+	[[ $PKG_POSTRM ]] || PKG_POSTRM="postrm"
+	[[ $PKG_META ]] || PKG_META="pkg-spec"
+	[[ $PKG_PROVIDES ]] || PKG_PROVIDES="pkg-provides"
+	[[ $PKG_REQUIRED ]] || PKG_REQUIRED="pkg-required"
+	[[ $PKG_SUGGESTS ]] || PKG_SUGGESTS="pkg-suggests"
+	[[ $PKG_CONFLICTS ]] || PKG_CONFLICTS="pkg-conflicts"
+	[[ $PKG_LINKS ]] || PKG_LINKS="pkg-links"
+	DEPTH=6
+	SCRIPT_DIR=postinst
+else
+	DEPTH=5
+	SCRIPT_DIR=scripts
+fi
+
+# allow some compatibility for other package systems and directory layout schemes
+! [[ $ADM_DIR_NAME ]] && ADM_DIR_NAME=/var/log
+! [[ $PKG_DESC ]] && PKG_DESC="slack-desc"
+! [[ $PKG_REQUIRED ]] && PKG_REQUIRED="slack-required"
+! [[ $PKG_PROVIDES ]] && PKG_PROVIDES="slack-provides"
+! [[ $PKG_SUGGESTS ]] && PKG_SUGGESTS="slack-suggests"
+! [[ $PKG_CONFLICTS ]] && PKG_CONFLICTS="slack-conflicts"
+! [[ $INSTALLPKG ]] && INSTALLPKG="internal"
+! [[ $ADM_DIR_NAME ]] && ADM_DIR_NAME=/var/log
+! [[ $PKG_POSTINST ]] && PKG_POSTINST="doinst.sh"
+! [[ $PKG_PREINST ]] && PKG_PREINST="slack-preinst"
+! [[ $PKG_PRERM ]] && PKG_PRERM="slack-prerm"
+! [[ $PKG_POSTRM ]] && PKG_POSTRM="slack-postrm"
+! [[ $PKG_META ]] && PKG_META="slack-meta"
+! [[ $PKG_LINKS ]] && PKG_LINKS="slack-links"
+
+if [[ "$PKG_FORMAT" = "pet2" ]] ; then
+	PKG_FORMAT=pet PET2=1
+fi
+
+# Compression type for final packages 
+# If not already specified, try to figure it out
+if ! [[ $PKG_FORMAT ]] ; then
+	if [[ -f /etc/slackware-version ]] ; then
+		DISTRO_VERSION=$(cat /etc/slackware-version |cut -f2 -d ' ' |cut -f1 -d '.')
+		if [[ $DISTRO_VERSION -lt 13 ]] ; then
+			PKG_FORMAT=tgz
+		else
+			PKG_FORMAT=txz
+		fi
+	elif [[ -f /etc/vector-version ]] ; then
+		PKG_FORMAT=tbz
+	elif [[ -f /etc/zenwalk-version ]] || [[ -f /etc/salix-version ]] ; then
+		# probably needs treatment like slackware -assume they are using a recent version
+		PKG_FORMAT=txz
+	elif [[ -f /etc/slitaz-release ]] ; then
+		PKG_FORMAT=taz
+	elif [[ -f /etc/debian_version ]] || [[ -f /etc/debian-version ]] \
+			|| [[ -f /etc/lsb-release ]] ; then
+		PKG_FORMAT=deb
+	elif [[ -f /etc/redhat-release ]] || [[ -f /etc/redhat_release ]] \
+			|| [[ -f /etc/SUSE-release ]] || [[ -f /etc/openSUSE-release ]] \
+			|| [[ -f /etc/UnitedLinux-release ]] || [[ -f /etc/mandrake-release ]] \
+			|| [[ -f /etc/mandriva-release ]] ; then
+		PKG_FORMAT=rpm
+	elif [[ -f /etc/DISTRO_SPECS ]] ; then
+		PKG_FORMAT=pet PET2=1
+	elif [[ -f /etc/puppyversion ]] ; then
+		PKG_FORMAT=pet
+	else
+		PKG_FORMAT=tgz
+	fi
+fi
+
+# set the interactive mode preferences
+if [[ "$INTERACTIVE_MODE" = "ALL" ]] ; then
+QUERY_FOR_EXTRA_CONFIGS="YES"
+# CONFIRM_CONFIGURATION="YES"
+QUERY_FOR_PKG_DESC="YES"
+fi
+
+# set the default installation method
+! [[ $INSTALL_TYPE ]] && INSTALL_TYPE=DESTDIR
+# ! [[ $INSTALL_TYPE ]] && INSTALL_TYPE=JAIL
+
+# Don't generate md5 checksums by default
+! [[ $CREATE_MD5_CHECKSUM ]] && CREATE_MD5_CHECKSUM="NO"
+# database features
+if [[ $EXTENDED_DATABASE = "YES" ]] ; then
+	ADD_REQUIRED_FILE="YES"
+	if [[ $PKG_FORMAT != 'tpm' ]] ; then
+		ADD_PROVIDES_FILE="YES"
+	fi
+	ADD_SUGGESTS_FILE="YES"
+	! [[ $ADD_SRC2PKG_SCRIPT ]] && ADD_SRC2PKG_SCRIPT="YES"
+else
+	# Don't generate PKG_REQUIRED (slack-required) file by default
+	! [[ $ADD_REQUIRED_FILE ]] && ADD_REQUIRED_FILE="NO"
+	! [[ $ADD_PROVIDES_FILE ]] && ADD_PROVIDES_FILE="NO"
+	! [[ $ADD_SUGGESTS_FILE ]] && ADD_SUGGESTS_FILE="NO"
+fi
+
+# Don't use package version numbers in PKG_REQUIRED files
+! [[ $INCLUDE_DEP_VERSIONS ]] && INCLUDE_DEP_VERSIONS="NO"
+# Exclude aaa_elflibs, glibc* and gcc* packages from PKG_REQUIRED files
+! [[ $INCLUDE_BASE_LIBS ]] && INCLUDE_BASE_LIBS="NO"
+
+# options for inclusion of src2pkg scripts inside the package
+# Don't include src2pkg buils scripts in the package by default
+! [[ $ADD_SRC2PKG_SCRIPT ]] && ADD_SRC2PKG_SCRIPT="NO"
+# Default directory for including src2pkg build scripts
+# ! [[ $SRC2PKG_SCRIPT_DIR ]] && SRC2PKG_SCRIPT_DIR="/usr/src/src2pkg/scripts"
+! [[ $SRC2PKG_SCRIPT_DIR ]] && SRC2PKG_SCRIPT_DIR="DOC_DIR"
+# Don't use program  version numbers by default
+! [[ $USE_VERSION_NUMBERS ]] && USE_VERSION_NUMBERS="NO"
+# if src2pkg scripts are stored outside of DOC_DIR, link to them in DOC_DIR by default
+! [[ $LINK_SCRIPT_TO_DOC_DIR ]] && LINK_SCRIPT_TO_DOC_DIR="YES"
+
+# User Authorization options
+! [[ $AUTHORIZE_USERS ]] && AUTHORIZE_USERS="NO"
+! [[ $AUTHORIZE_USER_CONF ]] && AUTHORIZE_USER_CONF="NO"
+! [[ $ALLOW_USER_EXTENSIONS ]] && ALLOW_USER_EXTENSIONS="NO"
+
+# options for auto-detecting configure options
+# AUTO_CONFIG can be set to FOREIGN or NATIVE
+! [[ $AUTO_CONFIG ]] && AUTO_CONFIG=""
+# default list of options to check for
+! [[ $AUTO_CONFIG_OPTIONS ]] && AUTO_CONFIG_OPTIONS="sysconfdir localstatedir"
+# by default don't create links to common licenses
+! [[ $LINK_LICENSES ]] && LINK_LICENSES=NO
+# by default, don't compress document directories
+! [[ $COMPRESS_DOCS ]] && COMPRESS_DOCS=NO
+# by default, use gzip when compressing document directories
+! [[ $DOC_COMPRESSOR ]] && DOC_COMPRESSOR=gzip
+
+# COMPRESS_BINS and COMPRESS_LIBS options
+! [[ $BIN_COMPRESSOR ]] && BIN_COMPRESSOR=upx-ucl
+if ! [[ $BIN_COMPRESSOR_OPTIONS ]] ; then
+	if [[ "$BIN_COMPRESSOR" = "upx" ]] || [[ "$BIN_COMPRESSOR" = "upx-ucl" ]] ; then
+		BIN_COMPRESSOR_OPTIONS="--brute"
+	fi
+fi
+
+! [[ $COMPRESSION_SIZE_LIMIT ]] && COMPRESSION_SIZE_LIMIT=50
+! [[ $COMPRESS_BINS ]] && COMPRESS_BINS=NO
+# turns out this routine doesn't work anyway :-(
+# ! [[ $COMPRESS_LIBS ]] && COMPRESS_LIBS=NO
+
+# DESC_WRAP_LENGTH
+# this variable tells text_wrapper how characters to use for each line
+# in the PKG_DESC files created
+! [[ $DESC_WRAP_LENGTH ]] && DESC_WRAP_LENGTH=80
+# this variable tells the text wrapper how many lines to pad the PKG_DESC file.
+# the PKG_DESC file should be at least 11 lines -the first, second and 11th line
+# are supplied separately (8+3=11) and lines 12 and 13 are optionally added
+! [[ $DESC_MAX_LINES ]] && DESC_MAX_LINES=11
+# HANDY_RULER_TEXT sets the text to write in the header of the PKG_DESC file
+# make sure it isn't longer than the $DESC_WRAP_LENGTH above!
+! [[ $HANDY_RULER_TEXT ]] && HANDY_RULER_TEXT="Use this guide to format your text with"
+
+# DOWNLOADER
+! [[ $DOWNLOADER  ]] &&  DOWNLOADER=wget
+# DOWNLOADER_OPTIONS
+if [[ "$DOWNLOADER" = "wget" ]] && [[ ! $DOWNLOADER_OPTIONS ]] ; then
+	 DOWNLOADER_OPTIONS="--tries=3 --timeout=15 -O"
+fi
+
+if [[ "$DOWNLOADER" = "aria2c" ]] && [[ ! $DOWNLOADER_OPTIONS ]] ; then
+	 DOWNLOADER_OPTIONS="--seed-time=0"
+fi
+
+## EXIT_ON_PATCH_FAILURE
+! [[ $EXIT_ON_PATCH_FAILURE ]] && EXIT_ON_PATCH_FAILURE="NO"
+
+# LOG_COMMANDS
+! [[ $LOG_COMMANDS ]] && LOG_COMMANDS="NO"
+
+# PATCHES_DIR
+! [[ $PATCHES_DIR ]] && PATCHES_DIR="$CWD"
+
+# alias the old FORCE_ZERO_LENGTH
+[[ "$ALLOW_EMPTY_FILES" = "YES" ]] && FORCE_ZERO_LENGTH="YES"
+
+## AUTO_DESKTOP
+! [[ $AUTO_DESKTOP ]] && AUTO_DESKTOP="NO"
+
+## AUDIO_NOTIFICATION
+! [[ $AUDIO_NOTIFICATION ]] && AUDIO_NOTIFICATION="NO"
+
+## TTS_ENGINE
+! [[ $TTS_ENGINE ]] && TTS_ENGINE="flite"
+
+## COMPAT_NAME_SUFFIX
+! [[ $COMPAT_NAME_SUFFIX ]] &&  COMPAT_NAME_SUFFIX='-compat32'
+
+## COMPAT_NAME_PREFIX
+! [[ $COMPAT_NAME_PREFIX ]] &&  COMPAT_NAME_PREFIX=''
+
+## FAIL_ON_BAD_DIRS
+! [[ $FAIL_ON_BAD_DIRS ]] && FAIL_ON_BAD_DIRS=YES
+
+## stuff for debian packages
+! [[ $DEB_COMPAT ]] && DEB_COMPAT=2.0
+! [[ $PKG_COMPRESSOR ]] && PKG_COMPRESSOR=gzip
+case $PKG_COMPRESSOR in
+	gzip) COMP_EXT=gz ;;
+	bzip2) COMP_EXT=bz2 ;;
+	lzma) COMP_EXT=lzma ;;
+	xz) COMP_EXT=xz ;;
+	*) COMP_EXT=gz ;;
+esac
+# export it so find command works with it later
+export COMP_EXT
+
+# remove libtool *.la files if disable-static is used or no *.a files are found
+[[ $CORRECT_LIBTOOL_FILES ]] || CORRECT_LIBTOOL_FILES=YES
+[[ $ENFORCE_DISABLE_STATIC ]] || ENFORCE_DISABLE_STATIC="YES"
+[[ $REMOVE_LIBTOOL_FILES ]] || REMOVE_LIBTOOL_FILES="NO"
+
+[[ $EXTRA_CMAKE_OPTIONS ]] || EXTRA_CMAKE_OPTIONS="-DCMAKE_BUILD_TYPE=Release"
+
+## CHECK_BUILD 
+! [[ $CHECK_BUILD ]] && CHECK_BUILD="NO"
+## EXIT_ON_CHECK_FAILURE
+! [[ $EXIT_ON_CHECK_FAILURE ]] && EXIT_ON_CHECK_FAILURE="NO"
+
+## DOC_SPLIT_SIZE
+# When using SPLIT_PACKAGE, only create a 'NAME-docs' package if the documents contents
+# are above this size limit (Total of DOC_DIR,MAN_DIR, INFO_DIR and PKG_DIR/usr/share/gtk-doc)
+! [[ $DOC_SPLIT_SIZE ]] && DOC_SPLIT_SIZE=100
+
+#
+case $PKG_FORMAT in
+	deb|rpm) MAKE_LINKS="NO" REMOVE_LINKS="NO" ADD_MANIFEST_FILE="NO" ;;
+	tpm) MAKE_LINKS="NO" REMOVE_LINKS="NO" ADD_MANIFEST_FILE="YES" REMOVE_LIBTOOL_FILES="YES" ;;
+esac

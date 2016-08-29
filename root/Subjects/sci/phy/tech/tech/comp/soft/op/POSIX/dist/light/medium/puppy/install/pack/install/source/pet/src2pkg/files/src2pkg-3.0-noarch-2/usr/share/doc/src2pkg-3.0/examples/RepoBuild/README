@@ -1,0 +1,16 @@
+
+To quickly see how easy this example can be, simply:
+1. copy the two files URL-list.txt and src2pkg.RepoBuild into
+any directory where you have write privileges.
+2. make sure your internet connection is up
+3. cd into the new directory
+4. run the command 'bash ./src2pkg.RepoBuild'
+
+The above will download the sources for three small utilities,
+compile them and create packages of them. All in just a few minutes
+
+The src2pkg.RepoBuild is extensively commented. Read through it
+to see how to change the behaviour of the script.
+
+See additional notes about this example in the README.examples
+file one level up from here.

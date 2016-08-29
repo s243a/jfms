@@ -1,0 +1,337 @@
+# This file is part of the src2pkg program:
+# Copyright 2005-2013 Gilbert Ashley <amigo@ibilio.org>
+# src2pkg is released under the GNU General Public License Version 2
+
+# This used to be the main way we installed, by spamming the real root directory
+# It will make backups of any files before overwriting them and then restore them
+# before continuing to process the package content. It's a pretty complicated method
+# but has proved to be quite dependable.
+
+install_to_real_root() {
+if [[ "$SAFE_METHOD" = "YES" ]] ; then
+	echo $BLUE"Using SAFE method in REAL root directory - "$NORMAL"Using: '$INSTALL_COMMAND $INSTALL_RULE'"$NORMAL
+else
+	echo $BLUE"Installing to REAL root directory - "$NORMAL"Using: '$INSTALL_COMMAND $INSTALL_RULE'"$NORMAL
+fi
+
+unset INSTW_ROOTPATH
+unset INSTW_TRANSL
+unset INSTW_BACKUP
+unset INSTW_LOGFILE
+unset INSTW_DBGFILE
+unset INSTW_DBGLVL
+unset INSTW_EXCLUDE
+
+if [[ $DEBUG_FILELISTS ]] ; then
+	INSTW_DBGFILE="${CWD}/libsentry.debug"
+	INSTW_DBGLVL=2
+	if cat /dev/null >"${INSTW_DBGFILE}" ; then
+		true
+	else
+		echo $RED"FAILED! - "$NORMAL "Unable to prepare $INSTW_DBGFILE"
+		exit 1
+	fi
+fi
+export INSTW_DBGFILE
+export INSTW_DBGLVL
+
+# this doesn't seem to work any other way
+INSTW_EXCLUDE="/dev,/proc,/tmp,/var/tmp,/initrd,${INSTW_EXCLUDE}"
+OIFS="$IFS"
+IFS=','
+INSTW_EXCLUDE=$(for name in $INSTW_EXCLUDE; do
+	echo $name
+	done | sort -u |
+	while read elem; do
+		echo -n "$elem,"
+	done)
+export INSTW_EXCLUDE
+IFS="$OIFS"
+
+INSTW_LOGFILE="${CWD}/FILELIST.tmp"
+export INSTW_LOGFILE
+
+# turn the translation feature off
+INSTW_TRANSL=0
+export INSTW_TRANSL
+
+if [[ "$SAFE_METHOD" = "YES" ]] ; then
+	! [[ $BACKUP_DIR ]] && BACKUP_DIR=/tmp
+	! [[ $BACKUP_DIR_NAME ]] && BACKUP_DIR_NAME=$NAME-$VERSION-backup-$BUILD$SIG
+	! [[ $BACKUP_DIRECTORY ]] && BACKUP_DIRECTORY="${BACKUP_DIR}"/"${BACKUP_DIR_NAME}"
+	export BACKUP_DIRECTORY
+	# we need to call it this when removing since INSTW_ROOTPATH gets unset
+	mkdir -p "$BACKUP_DIRECTORY"
+	# set the INSTW_ROOTPATH to the backup directory
+	INSTW_ROOTPATH="${BACKUP_DIRECTORY}"
+	# turn the backup feature on
+	INSTW_BACKUP=1
+else
+	INSTW_ROOTPATH="${CWD}"
+	INSTW_BACKUP=0
+fi
+
+export INSTW_ROOTPATH
+export INSTW_BACKUP
+
+if cat /dev/null >"${INSTW_LOGFILE}" ; then
+	true
+else
+	echo $RED"FAILED! - "$NORMAL "Unable to prepare $INSTW_LOGFILE"
+	exit 1
+fi
+
+LD_PRELOAD="/usr/libexec/src2pkg/lib/libsentry.so"
+export LD_PRELOAD
+trap trap_int 2
+
+( cd "$OBJ_DIR" ;
+if [[ $LOG_COMMANDS = "YES" ]] ; then
+	#
+	if ! [[ $LOG_DIR ]] ; then
+		LOG_DIR="$OBJ_DIR"
+	elif [[ "$LOG_DIR" != "$CWD" ]] && [[ "${LOG_DIR:0:1}" != "/" ]] ; then
+		echo $YELLOW"Warning! "$NORMAL"LOG_DIR is set to an invalid path."
+		echo "         It must be set to \$CWD or an absolute path."
+	fi
+	echo $BLUE"Logging output to: "$NORMAL"$NAME-make-install.log"
+	${INSTALL_COMMAND} ${INSTALL_RULE} &> "$LOG_DIR"/$NAME-make-install.log
+elif [[ $QUIET = "YES" ]] ; then
+	${INSTALL_COMMAND} ${INSTALL_RULE} &> /dev/null
+else
+	${INSTALL_COMMAND} ${INSTALL_RULE}
+fi
+)
+	
+## this routine ends at the end of the function. It checks the exit status of the INSTALL_LINE and
+## acts accordingly. To assure maximum robustness, the first parts of this routine uses statically-compiled
+## programs which don't need any installed libraries at all. If you just whacked something really bad, like glibc,
+## this routine should get your system back right away. The bad(?) thing is that you may not even notice. Since all
+## these programs are out of the normal path it makes it possible to safely compile and package tar and the other
+## programs which are used in this routine.
+if [[ $? -gt 0 ]] ; then
+	# make install itself returned an error
+	if [[ -x "$OBJ_DIR"/$NAME ]] || [[ -x "$OBJ_DIR"/$ORIG_NAME ]]; then
+		echo $CYAN"Notice - "$NORMAL"Running '$INSTALL_COMMAND $INSTALL_RULE' has failed."
+		echo "But, there seems to be a matching executable in the SRC_DIR."
+		echo $BLUE"Doing generic install - "$NORMAL
+		mkdir -p "$PKG_DIR"/$PRE_FIX/bin
+		[[ -x "$OBJ_DIR"/$NAME ]] && cp -a "$OBJ_DIR"/$NAME "$PKG_DIR"/$PRE_FIX/bin/$NAME
+		[[ -x "$OBJ_DIR"/$ORIG_NAME ]] && cp -a "$OBJ_DIR"/$ORIG_NAME "$PKG_DIR"/$PRE_FIX/bin/$ORIG_NAME 
+		if [[ -e "$OBJ_DIR"/$NAME.1 ]] || [[ -e "$OBJ_DIR"/$NAME.man ]] ; then
+			echo $BLUE"Found man-page - "$NORMAL"Copying into PKG_DIR"
+			mkdir -p "$PKG_DIR"/usr/man/man1
+			[[ -e "$OBJ_DIR"/$NAME.1 ]] && cp -a "$OBJ_DIR"/$NAME.1 "$PKG_DIR"/usr/man/man1/$NAME.1
+			[[ -e "$OBJ_DIR"/$NAME.man ]] && cp -a "$OBJ_DIR"/$NAME.man "$PKG_DIR"/usr/man/man1/$NAME.man
+		fi
+	else
+		echo $RED"FATAL! "$NORMAL"Running '$INSTALL_COMMAND $INSTALL_RULE' has failed with error: $? "
+		echo "Try using INSTALL_LINE 'make -i install'  "$RED"Exiting..."$NORMAL
+		FAILED="make_install in: $FUNCNAME"
+	fi
+	unset INSTW_ROOTPATH
+	unset LD_PRELOAD
+	( cd "$BACKUP_DIR" && rm -rf "$BACKUP_DIR_NAME" )
+	rm -f "$CWD"/FILELIST.tmp
+elif [[ $(cat "$CWD"/FILELIST.tmp |grep -v FILELIST.tmp 2> /dev/null) = "" ]] ; then
+	# 'make install' produced no errors but also produced no output
+	echo $RED"FATAL! "$NORMAL"Running '$INSTALL_COMMAND $INSTALL_RULE' with libsentry produced no files list. "
+	echo "This may be the result of an empty or faulty install rule. "$RED"Exiting..."$NORMAL
+	unset INSTW_ROOTPATH
+	unset LD_PRELOAD
+	( cd "$BACKUP_DIR" && rm -rf "$BACKUP_DIR_NAME" )
+	rm -f "$CWD"/FILELIST.tmp
+	FAILED="make_install NO FILES in: $FUNCNAME"
+elif [[ $FAILED = "CANCELLED" ]] ; then
+	unset INSTW_ROOTPATH
+	unset LD_PRELOAD
+	unset INSTW_LOGFILE
+	( cd "$BACKUP_DIR" && rm -rf "$BACKUP_DIR_NAME" )
+	rm -f "$CWD"/FILELIST.tmp
+	FAILED="CANCELLED in: $FUNCNAME"
+else
+	# Commands have succeeded and we have files.
+	# remove the no-backup directory
+	unset INSTW_ROOTPATH
+	unset LD_PRELOAD
+	
+	rm -rf "${BACKUP_DIRECTORY}"/BACKUP/no-backup &> /dev/null
+	#rm -f ${BACKUP_DIRECTORY}/BACKUP/dbgfile &> /dev/null
+	
+	# used by SHELL_INSTALL
+	[[ $RESTORE_QUIET ]] && QUIET="YES"
+	[[ $DEBUG ]] && echo -n $BLUE"Processing installation FILELIST - "$NORMAL
+	# Parse the full original libsentry log FILELIST.tmp
+	# extract a list of the regular files
+	#  cat ./FILELIST.orig | egrep -v '^3' |sort -u
+	cat "$CWD"/FILELIST.tmp | cut -f 3 | egrep -v "^(/dev|$CWD|/tmp)" | sort -u > "$CWD"/FILELIST
+	# extract a  list of symlinks 
+	cat "$CWD"/FILELIST.tmp | cut -f 4 | egrep -v "^(/dev|$CWD|/tmp)" | egrep -v "#File exists" |sort -u >> "$CWD"/FILELIST
+	# DIRLIST extract the directories to a separate DIRLIST  so they can be handled apart
+	cat "$CWD"/FILELIST.tmp | egrep 'mkdir' | egrep -v '#File exists' | egrep '#success' | cut -f3 |sort -r -u >> "$CWD"/DIRLIST
+	# DEBUG_FILELISTS
+	if [[ $DEBUG_FILELISTS ]] ; then
+	   # get a list of the links created
+	   cat "$CWD"/FILELIST.tmp | egrep 'symlink' | egrep "#success" | cut-f4 |sort -u >> "$CWD"/LINKLIST
+	   # copy the full libsentry log
+	   cat "$CWD"/FILELIST.tmp > "$CWD"/FILELIST.orig
+	   KEEP_FILELIST="YES"
+	   KEEP_DIRLIST="YES"
+	fi
+	# Delete the original list so we can recycle the name
+	rm -f "$CWD"/FILELIST.tmp
+	# sort and remove duplicates
+	cat /dev/null > "$CWD"/FILELIST.tmp
+	 sort -u < "$CWD"/FILELIST | uniq | while read file; do
+		! [[ -d "$file" ]] && [[ -f "$file" ]] && echo $file >> "$CWD"/FILELIST.tmp
+	  done
+	# remove more cruft
+	cat "$CWD"/FILELIST.tmp | egrep -v "$CWD" | egrep -v "#success"> "$CWD"/FILELIST
+	rm -f $CWD/FILELIST.tmp
+	[[ $DEBUG ]] && echo $GREEN"Done"$NORMAL
+	#  End parsed FILELIST creation
+	
+	# Create $PKG_DIR/$PRE_FIX -is only created if make install succeeds
+	mkdir -p "$PKG_DIR"/$PRE_FIX
+	
+	[[ $DEBUG ]] && echo -n $BLUE"Copying installed files to PKG_DIR - "$NORMAL
+	# copy files from root directory into PKG_DIR using the FILELIST
+	cd / ;
+	  cat "$CWD"/FILELIST | while read i; do 
+		if ! [[ -d "$i" ]] && [[ -e "$i" ]] ; then
+		  if [ -x ${TAR} ] ; then
+		  (${TAR} -cpf - "$i"| ${TAR} -f - -xvpC "$PKG_DIR") 2> /dev/null 1> /dev/null
+		  else
+		  (tar -cpf - "$i"| tar -f - -xvpC "$PKG_DIR") 2> /dev/null 1> /dev/null
+		  fi
+		fi
+	  done
+	[[ $DEBUG ]] && echo $GREEN"Done"$NORMAL
+	
+	if [[ "$SAFE_METHOD" = "YES" ]] ; then
+		# *Carefully* remove the shadow CWD from the BACKUP_DIRECTORY
+		# strip the leading '/' off, cd into the BACKUP and then rm -rf
+		SHADOW_CWD="${CWD:1}"
+		# SHADOW_CWD_BASE=$(echo $SHADOW_CWD |cut -f1 -d'/') 
+		SHADOW_CWD_BASE="${SHADOW_CWD%%/*}"
+		
+		( cd "$BACKUP_DIRECTORY"/BACKUP && rm -rf "$SHADOW_CWD_BASE" )
+		# also remove the META directory
+		( cd "$BACKUP_DIRECTORY" && rm -rf META )
+		
+		# Once we have the file list and have copied the installed files into PKG_DIR
+		# immediately restore any files which were overwritten by the installation
+		ls "$BACKUP_DIRECTORY"/BACKUP/* &> /dev/null
+		if [[ $? -eq 0 ]] ; then
+			if [[ $(find "$BACKUP_DIRECTORY"/BACKUP -type f -o -type l) != "" ]] ; then
+				cd "$BACKUP_DIRECTORY"/BACKUP
+				[[ $DEBUG ]] && echo -n $BLUE"Restoring overwritten files - "$NORMAL
+				# $TAR --no-overwrite-dirs --one-file-system -xzUpvf - 
+				#if [ "$( ${TAR} --version )" = "1.13" ] ; then
+				if [ "$( ${TAR} --version |head -n 1 |cut -f 4 -d ' ')" = "1.13" ] ; then
+					${TAR} -cpf - . | ${TAR} -f - -xlUvpC / &> /dev/null
+					#${TAR} -cpf - . | ${TAR} -f - -xlUpC /
+				elif [ -x ${TAR} ] ; then
+					${TAR} -cpf - . | ${TAR} -f - -xvpC / &> /dev/null
+				elif [ $( tar --version) >= 1.16 ] ; then
+					tar -cpf - . | tar-f - -xvpC / &> /dev/null
+				else
+					echo $YELLOW"Warning!"$NORMAL"Unable to find a suitable tar version!"
+					echo "Backups will not be done because your tar version makes a mess."
+				fi
+				
+				[[ $DEBUG ]] && echo $GREEN"Done"$NORMAL
+			fi
+		fi
+		# Now remove the new files and links installed to the system, unless they were just backed up above.
+		# Compare the list of installed file and links with the contents of the backup directory
+		[[ $DEBUG ]] && echo -n $BLUE"Removing other files installed by: "$NORMAL"'$INSTALL_COMMAND $INSTALL_RULE' - "
+		cd / ;
+		cat "$CWD"/FILELIST | while read i; do 
+		if [ -e "$i" -o -L "$i" ] && ! [ -d "$i" ] ; then 
+			if [[ $QUIET = "YES" ]] ; then
+				if [[ ! -e "$BACKUP_DIRECTORY/BACKUP/$i" ]] && [[ ! -L "$BACKUP_DIRECTORY/BACKUP/$i" ]] ; then
+					( rm -f $i ) 1> /dev/null
+				fi
+			else
+				if [[ ! -e "$BACKUP_DIRECTORY/BACKUP/$i" ]] && [[ ! -L "$BACKUP_DIRECTORY/BACKUP/$i" ]] ; then
+					( rm -f $i )
+				fi
+			fi
+		fi
+		done
+		[[ $DEBUG ]] && echo $GREEN"Done "$NORMAL""
+		
+		# run ldconfig immediately after restoring backups and removing new files
+		if [[ -x /sbin/ldconfig ]] ; then
+			[[ $DEBUG ]] &&  echo -n $BLUE"Running ldconfig - "$NORMAL"Updating shared library links - "
+			/sbin/ldconfig
+			[[ $DEBUG ]] &&  echo $GREEN"Done"$NORMAL
+		fi
+		### After restoring overwritten files, removing new ones and running ldconfig the system should
+		### be running just as before running 'make install', or whatever install command was run.
+		### So we stop using the static programs and go back to running whatever binaries are in the path(except tar).
+		
+		# Now remove any new directories from the system that were created by the INSTALL_LINE .
+		# Our DIRLIST only includes directories which didn't exist before and they should already be empty.
+		cd / ;
+		if [[ "$(cat $CWD/DIRLIST)" != "" ]] ; then
+			[[ $DEBUG ]] && echo -n $BLUE"Removing empty directories installed "$NORMAL"by '$INSTALL_LINE' - "
+			cat "$CWD"/DIRLIST | while read i; do 
+			if [[ -d "$i" ]] ; then 
+				( rm -rf $i )
+			fi
+			done
+			[[ $DEBUG ]] && echo $GREEN"Done"$NORMAL""
+		fi
+		# create backup tarball if requested
+		if [[ $KEEP_BACKUPS = "YES" ]] ; then
+			! [[ $BACKUPS_SAVE_DIR ]] && BACKUPS_SAVE_DIR="$CWD"
+			if [[ $(find "$BACKUP_DIR"/$NAME-$VERSION-backup-$BUILD$SIG -type f) != "" ]] ; then
+				cd "$BACKUP_DIR"/$NAME-$VERSION-backup-$BUILD$SIG/BACKUP ;
+				echo -n $BLUE"Creating backup package - "$NORMAL
+				${TAR} -cpf - . | gzip -9 > "${BACKUPS_SAVE_DIR}/backup-$(date +%m%d%Y%H%M)-pre-${SHORT_NAME}.tar.gz"
+				rm -f "$CWD"/BACKUP.list
+				echo $GREEN"Done"$NORMAL
+				echo $BLUE"Saved backup archive: "$NORMAL
+				echo "   ${BACKUPS_SAVE_DIR}/backup-$(date +%m%d%Y%H%M)-pre-${SHORT_NAME}.tar.gz"
+			fi
+		fi
+		# remove the backup directory
+		if [[ -d "$BACKUP_DIR"/$NAME-$VERSION-backup-$BUILD$SIG ]] ; then
+			ls "$BACKUP_DIR"/$NAME-$VERSION-backup-$BUILD$SIG/* &> /dev/null
+			if [[ $? -eq 0 ]] ; then
+				cd "$BACKUP_DIR" ;
+				if [[ $(find "$BACKUP_DIR"/$NAME-$VERSION-backup-$BUILD$SIG -type f) != "" ]] ; then
+					[[ $DEBUG ]] &&  echo -n $BLUE"Removing backup files - "$NORMAL
+					#rm -rf "$BACKUP_DIRECTORY" 2> /dev/null 1> /dev/null
+					( cd "$BACKUP_DIR" && rm -rf "$BACKUP_DIR_NAME" &> /dev/null )
+				else
+					[[ $DEBUG ]] &&  echo -n $BLUE"Removing empty backup directories - "$NORMAL
+					#rm -rf "$BACKUP_DIRECTORY" 2> /dev/null 1> /dev/null
+					( cd "$BACKUP_DIR" && rm -rf "$BACKUP_DIR_NAME" &> /dev/null )
+				fi
+				[[ $DEBUG ]] &&  echo $GREEN"Done"$NORMAL
+			else
+				cd "$BACKUP_DIR" ;
+				[[ $DEBUG ]] &&  echo $BLUE"Removing unused backup directory - "$NORMAL
+				#rm -rf "$BACKUP_DIRECTORY" 2> /dev/null 1> /dev/null
+				( cd "$BACKUP_DIR" && rm -rf "$BACKUP_DIR_NAME" &> /dev/null )
+			fi
+		fi
+	# end of backups
+	fi
+	
+	# remove filelists unless we are debugging
+	! [[ $KEEP_FILELIST = "YES" ]] && rm -f "$CWD"/FILELIST
+	! [[ $KEEP_DIRLIST = "YES" ]] && rm -f "$CWD"/DIRLIST
+	! [[ $DEBUG_FILELISTS ]] && rm -f "$CWD"/libsentry.debug
+	
+	if [[ $SAFE_METHOD = "YES" ]] ; then
+		echo $BLUE"SAFE Content creation - "$GREEN"Successful!"$NORMAL
+	else
+		echo $BLUE"Content creation - "$GREEN"Successful!"$NORMAL
+	fi
+	# echo $BLUE"Processing package content:"$NORMAL
+fi
+}

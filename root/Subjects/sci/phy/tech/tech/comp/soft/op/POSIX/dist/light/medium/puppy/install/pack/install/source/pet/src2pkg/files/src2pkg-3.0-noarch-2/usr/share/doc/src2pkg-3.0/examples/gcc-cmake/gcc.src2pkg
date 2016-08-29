@@ -1,0 +1,107 @@
+#!/bin/bash
+## src2pkg script for: 	gcc
+## src2pkg Copyright 2005-2007 Gilbert Ashley <amigo@ibilio.org>
+
+SOURCE_NAME='gcc-3.4.6.tar.bz2'
+ALT_NAME='gcc346'
+VERSION='3.4.6'
+ARCH='i486'
+BUILD='1'
+PRE_FIX='usr/gcc-3.4.6'
+# Any extra options go here
+# EXTRA_CONFIGS=''
+# STD_FLAGS='-O2 -march=i486 -mtune=i686'
+
+# Get the functions and configs
+. /usr/libexec/src2pkg/FUNCTIONS ;
+
+# do_all_processes can substitute these 16 steps:
+
+pre_process
+find_source
+make_dirs
+unpack_source
+fix_source_perms
+
+# configure_source
+# compile_source
+# fake_install
+
+
+OBJ_BUILD_DIR=$SRC_BUILDS_DIR/$NAME-$VERSION-obj-$BUILD$SIG ;
+mkdir -p $OBJ_BUILD_DIR ;
+TARGET=i486-slackware-linux
+HOST=$TARGET
+
+(cd $OBJ_BUILD_DIR;
+    ../$NAME-$VERSION-src-$BUILD$SIG/configure --prefix=/$PRE_FIX \
+			--enable-shared \
+			--enable-languages=c,c++ \
+			--with-gnu-ld \
+			--enable-threads=posix \
+			--enable-__cxa_atexit \
+			--disable-checking \
+			--verbose \
+			--target=${TARGET} \
+			--host=${HOST}
+  make bootstrap;
+  # make info;
+  make check;
+  make install prefix=$PKG_DIR/$PRE_FIX;
+)
+
+chmod 755 $PKG_DIR/$PRE_FIX/lib/libgcc_s.so.1
+rm -f $PKG_DIR/$PRE_FIX/lib/libiberty.a
+rm -rf $PKG_DIR/$PRE_FIX/i486-slackware-linux
+rm -rf $PKG_DIR/$PRE_FIX/info
+
+( cd $PKG_DIR/$PRE_FIX/lib ; ln -sf ../bin/cpp cpp )
+
+( cd $PKG_DIR/$PRE_FIX/bin
+mv g++ g++-gcc-3.4.6
+mv gcc gcc-3.4.6
+ln -sf g++-gcc-3.4.6 g++
+ln -sf gcc-3.4.6 gcc
+ln -sf g++ c++
+ln -sf gcc cc
+ln -sf gcc-3.4.6 i486-slackware-linux-gcc
+chown root:root * .
+)
+
+fix_pkg_perms ;
+
+# strip_bins ;
+
+( cd $PKG_DIR
+ find . | xargs file | grep "ELF 32-bit LSB executable" | grep 80386 | cut -f 1 -d : | xargs strip --strip-unneeded
+ find . | xargs file | grep "ELF 32-bit LSB shared object" | grep 80386 | cut -f 1 -d : | xargs strip --strip-unneeded
+)
+
+find $PKG_DIR/$PRE_FIX/lib/gcc -name "*.a" | xargs strip -g
+
+create_docs ;
+
+cp -a $CWD/Resources/README.Amigo $PKG_DIR/usr/doc/$NAME-$VERSION/
+
+# instead of this:
+# cp -a $CWD/Resources/GCC346 $PKG_DIR/usr/doc/$NAME-$VERSION/
+# copy the wrapper into /usr/bin
+mkdir -p $PKG_DIR/usr/bin
+cp $CWD/GCC346 $PKG_DIR/usr/bin
+chmod 755 $PKG_DIR/usr/bin/GCC346
+
+# compress_man_pages ;
+( cd $PKG_DIR/$PRE_FIX/man/man1 ; gzip -9 *)
+
+
+make_description
+make_doinst
+make_package
+post_process
+
+# src2pkg - Copyright 2005-2007  Gilbert Ashley <amigo@ibiblio.org>
+## See the documentation for more help and examples. Below are some of
+# the most common Extras and Options for easy cut-and-paste use.
+# EXTRA_CONFIGS='' PRE_FIX='' DOCLIST=''
+# MAKE_COMMAND='' INSTALL_LINE='' 
+# SHELL_INSTALL='YES' CORRECT_PERMS='NO'

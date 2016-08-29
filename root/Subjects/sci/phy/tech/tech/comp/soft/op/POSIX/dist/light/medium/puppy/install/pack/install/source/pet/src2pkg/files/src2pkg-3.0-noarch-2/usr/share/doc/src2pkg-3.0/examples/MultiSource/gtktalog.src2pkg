@@ -1,0 +1,202 @@
+#!/bin/bash
+## src2pkg script for: 	gtktalog & Co.
+## src2pkg Copyright 2005-2009 Gilbert Ashley <amigo@ibilio.org>
+
+## This script is an example of building a single
+## package from multiple source archives
+
+
+add_source_to_package_1 () {
+# this function should have a SOURCE_URL as its' argument
+# this
+if [[ $1 = "" ]] ; then
+	echo $RED"Failed! "$NORMAL"You must supply an argument (source name) to add_source_to_package_1"
+	FAILED="MANDATORY ARGUMENT NOT GIVEN"
+fi
+# save the main source and package names
+# the conditional syntax means they only get set once
+! [[ $NAME_1 ]] && NAME_1=$NAME
+! [[ $VERSION_1 ]] && VERSION_1=$VERSION
+! [[ $SRC_DIR_1 ]] && SRC_DIR_1=$SRC_DIR
+! [[ $PKG_DIR_1 ]] && PKG_DIR_1=$PKG_DIR
+! [[ $CONFIG_DIR_1 ]] && CONFIG_DIR_1=$CONFIG_DIR
+! [[ $SRC_DIR_NAME_1 ]] && SRC_DIR_NAME_1=$SRC_DIR_NAME
+# blank the derived variable values
+reset_vars
+# reset the derived variables using the current SOURCE_URL
+SOURCE_URL=$1
+pre_process
+# override PKG_DIR so everything goes into one package
+PKG_DIR=$PKG_DIR_1
+# do these normal functions here
+find_source
+make_dirs
+unpack_source
+fix_source_perms
+}
+
+finish_package_1() {
+reset_vars
+
+NAME=$NAME_1
+VERSION=$VERSION_1
+
+pre_process
+# reset the package dir to the main PKG_DIR so that the
+#  contents of this package get combined with the first one
+SRC_DIR=$SRC_DIR_1
+SRC_DIR_NAME=$SRC_DIR_NAME_1
+PKG_DIR=$PKG_DIR_1
+CONFIG_DIR=$CONFIG_DIR_1
+}
+
+reset_vars () {
+# this function 'blanks' (unsets) most of the common src2pkg
+# internal variables which get derived when pre_process is run
+[[ $DEBUG ]] && echo "Resetting variables...!!!"
+BIN_DIR=''
+SBIN_DIR=''
+LIBEXEC_DIR=''
+SYSCONF_DIR=''
+SHAREDSTATE_DIR=''
+LOCALSTATE_DIR=''
+LIB_DIR=''
+INCLUDE_DIR=''
+DATA_DIR=''
+INFO_DIR=''
+LOCALE_DIR=''
+MAN_DIR=''
+DOC_DIR=''
+GAMESBIN_DIR=''
+GAMESDATA_DIR=''
+PIXMAPS_DIR=''
+ICONS_DIR=''
+# these are the obvious ones that need to be reset
+SOURCE_URL=''
+SOURCE_NAME=''
+SOURCE=''
+NAME=''
+VERSION=''
+ALT_NAME=''
+ALT_VERSION=''
+ORIG_NAME=''
+ORIG_VERSION=''
+SRC_DIR=''
+SRC_DIR_NAME=''
+PKG_DIR=''
+PKG_DIR_NAME=''
+OBJ_DIR=''
+OBJ_DIR_NAME=''
+# these get set later, in configure_source
+CONFIG_DIR=''
+CONFIG_SUBDIR=''
+CONFIG_COMMAND=''
+MAKE_COMMAND=''
+VERIFY=''
+}
+# All the above extra functions could be put into the main FUNCTIONS file or elsewhere
+
+# Below starts like a normal src2pkg script
+# Instead of resetting SOURCE_URL each time you can do this:
+#SOURCE_URL='http://distro.ibiblio.org/pub/linux/distributions/amigolinux/download/Applications/Cataloging/gtktalog-0.0.18/gtktalog-0.0.18.tar.bz2'
+#EXTRA_SOURCES='http://distro.ibiblio.org/pub/linux/distributions/amigolinux/download/Applications/Cataloging/gtkcat-0.1/gtkcat-0.1.tar.bz2
+#http://distro.ibiblio.org/pub/linux/distributions/amigolinux/download/Applications/Cataloging/gwhere-0.1.6/gwhere-0.1.6.tar.bz2'
+
+# this syntax is a little shorter than the above and allows you to include differing intermediate paths:
+BASE_URL='http://distro.ibiblio.org/pub/linux/distributions/amigolinux/download/Applications/Cataloging'
+SOURCE_URL='gtktalog-0.0.18/gtktalog-0.0.18.tar.bz2'
+EXTRA_SOURCES='gtkcat-0.1/gtkcat-0.1.tar.bz2
+gwhere-0.1.6/gwhere-0.1.6.tar.bz2'
+
+SOURCE_2="gwhere-0.1.6.tar.bz2"
+SOURCE_3="gtkcat-0.1.tar.bz2"
+
+# ARCH='i486'
+BUILD='1'
+PRE_FIX='usr'
+# Any extra options go here
+# EXTRA_CONFIGS=''
+
+
+# Get the functions and configs
+. /usr/libexec/src2pkg/FUNCTIONS ;
+
+########################### SRC_DIR_1
+# Just do the first half of the usual instructions
+pre_process
+find_source
+make_dirs
+unpack_source
+fix_source_perms
+configure_source
+compile_source
+fake_install
+# leave the rest of the functions till last
+########################### SRC_DIR_1
+
+########################### SOURCE_2
+# reset the vars and build another tarball. But, it gets
+# installed into the PKG_DIR of the main package
+# Add any extra flags needed for this tarball
+# EXTRA_CONFIGS=''
+# PATCHLIST=''
+INSTALL_TYPE=JAIL
+# 
+add_source_to_package_1 gwhere-0.1.6.tar.bz2 # or use $SOURCE_2
+# do the standard 'build' functions
+configure_source
+compile_source
+fake_install
+# Add code here to handle any missed items or documents.
+# It would great if we could run the regular man-page and
+# document-handling routines here, but they won't always
+# work (main functions need a little work to accomodate this)
+## cleanup the added sources
+CLEANUP=SRC
+post_process
+########################### SOURCE_2
+
+########################### SOURCE_3
+## reset the vars and build another tarball
+# EXTRA_CONFIGS=''
+# PATCHLIST=''
+add_source_to_package_1 gtkcat-0.1.tar.bz2 # or use $SOURCE_3
+# do the standard 'build' functions or write custom code
+configure_source
+compile_source
+# fake_install
+cp $SRC_DIR/$NAME $PKG_DIR/usr/bin
+## cleanup the added sources
+CLEANUP=SRC
+post_process
+########################### SOURCE_3
+
+########################### SRC_DIR_1
+## reset the vars and finish the final finish
+CLEANUP=ALL
+# finish_package_1 resets the intermediate variables
+# back to the ones for the main package
+finish_package_1
+
+# and then the second half of the funtions are run
+# to process the final package content
+fix_pkg_perms
+strip_bins
+create_docs
+compress_man_pages
+make_description
+make_doinst
+make_package
+post_process
+
+# src2pkg - Copyright 2005-2009  Gilbert Ashley <amigo@ibiblio.org>
+## See the documentation for more help and examples. Below are some of
+# the most common Extras and Options for easy cut-and-paste use.
+# EXTRA_CONFIGS='' PRE_FIX='' DOCLIST=''
+# MAKE_COMMAND='' INSTALL_LINE='' 
+# SHELL_INSTALL='YES' CORRECT_PERMS='NO'
+# When editing src2pkg scripts to add custom code, use these variables
+# to refer to the current directory, the sources or the package tree:
+# $CWD (current directory), $SRC_DIR (sources), $PKG_DIR (package tree)
+# Other commonly-used directories include: $DOC_DIR (document directory)
+# $MAN_DIR (man-page directory) $DATA_DIR (shared-data directory)

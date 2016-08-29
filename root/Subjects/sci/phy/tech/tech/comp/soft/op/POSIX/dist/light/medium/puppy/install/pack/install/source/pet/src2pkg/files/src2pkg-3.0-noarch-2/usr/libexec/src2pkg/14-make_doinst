@@ -1,0 +1,882 @@
+# This file is part of the src2pkg program:
+# Copyright 2005-2013 Gilbert Ashley <amigo@ibilio.org>
+# src2pkg is released under the GNU General Public License Version 2
+
+# Each routine that writes lines to the doinst.sh should add a blank line afterwards, but not before
+
+## make_doinst
+make_doinst() {
+if [[ $ALLOW_USER_EXTENSIONS = "YES" ]] ; then
+ # check if the user has any pre-execution extensions to this file and run them, if so.
+ [[ -f "$HOME"/.src2pkg/extensions/14.pre ]] && . "$HOME"/.src2pkg/extensions/14.pre
+fi
+if [[ "$FAILED" = "" ]] && [[ ! $USER_CANCELLED ]] ; then
+  if [[ ! $RESUME ]] || [[ $RESUME = $FUNCNAME ]] || [[ $HAVE_RESUMED ]] ; then
+	[[ $RESUME = $FUNCNAME ]] && HAVE_RESUMED=1 && echo $CYAN"Notice - "$BLUE"Resuming build at: "$NORMAL "$FUNCNAME"
+	if [[ $PAUSE = "BEFORE" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+		echo $MAGENTA"Notice - "$BLUE"Pausing before: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+		read
+	fi
+	
+	# These extra routines have been moved into a separate file 14A-last_minute_details
+	# file/dir/perms checking and package-splitting occurs here
+	do_last_minute_details
+	
+	# Make scripts and db files for the main package
+	make_pkg_install_scripts
+	
+	# Create a required file if requested
+	if  [[ "$ADD_REQUIRED_FILE" = "YES" ]] ; then
+		( cd $PKG_DIR && gen_required_file $PKG_DIR )
+	fi
+	
+	# Create a suggests file if requested
+	if  [[ "$ADD_SUGGESTS_FILE" = "YES" ]] ; then
+		( cd $PKG_DIR && gen_suggests_file $PKG_DIR )
+	fi
+	
+	case $EXTENDED_DATABASE in
+		YES|1) 
+				# See the note in 14A-last_minute_details about this option
+				if [[ $ADD_MANIFEST_FILE != "NO"  ]] ; then
+					if [[ $PKG_FORMAT != 'tpm' ]] ; then
+						gen_pkg_manifest $PKG_DIR
+					fi
+				fi
+			;;
+	esac
+	
+	if [[ $PAUSE = "AFTER" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+		echo $MAGENTA"Notice - "$BLUE"Pausing after: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+		read
+	fi
+  fi
+fi
+
+if [[ $ALLOW_USER_EXTENSIONS = "YES" ]] ; then
+ # check if the user has any post-execution extensions to this file and run them, if so.
+ [[ -f "$HOME"/.src2pkg/extensions/14.post ]] && . "$HOME"/.src2pkg/extensions/14.post
+fi
+
+}
+# end make_doinst main routine
+
+# make_pkg_install_scripts
+make_pkg_install_scripts () {
+	# take care of slack-provides and slack-required first
+	if [[ "$ADD_PROVIDES_FILE" = "YES" ]] && [[ ! -f "$PKG_DIR"/install/$PKG_PROVIDES ]] ; then
+		for FILENAME in $PKG_PROVIDES $PKG_PROVIDES-$NAME $NAME-$PKG_PROVIDES $NAME.$PKG_PROVIDES ; do
+		   for SEARCH_PATH in "$CWD" "$CWD"/Resources "$PATCHES_DIR"/$NAME-patches "$CWD"/patches ; do
+			if [[ -f "$SEARCH_PATH"/$FILENAME ]] ; then
+				echo $BLUE"Found $FILENAME - "$NORMAL"Copying to PKG_DIR/install/$PKG_PROVIDES"
+				cat "$SEARCH_PATH"/$FILENAME > "$PKG_DIR"/install/$PKG_PROVIDES
+				HAVE_PROVIDES=1
+			fi
+		   done
+		done
+		if ! [[ $HAVE_PROVIDES ]] ; then
+			gen_provides_list "$PKG_DIR" > "$SRC_DIR"/provides.tmp
+			if [[ -s "$SRC_DIR"/provides.tmp ]] ; then
+				echo $BLUE"Creating $PKG_PROVIDES - "$NORMAL"Copying to PKG_DIR/install/$PKG_PROVIDES"
+				# echo "# $NAME-$VERSION Provides these 'requireable' items:" > "$PKG_DIR"/install/$PKG_PROVIDES
+				sort -u "$SRC_DIR"/provides.tmp |uniq -u > "$PKG_DIR"/install/$PKG_PROVIDES
+				if [[ $AUTO_SCRIPT ]] ; then
+					echo $BLUE"Copying $PKG_PROVIDES to: "$NORMAL"CWD/$PKG_PROVIDES"
+					cp "$PKG_DIR"/install/$PKG_PROVIDES "$CWD"/new.$PKG_PROVIDES
+				fi
+			fi
+			rm -f "$SRC_DIR"/provides.tmp
+			
+			# this is wasteful, but would require juggling with link-creation code to avoid it.
+			# it is less wasteful than the old gen_provides_list
+			find * -type l > links.list
+			if [[ -s links.list ]] ; then
+				while read ONE_LINK; do
+					case $ONE_LINK in
+						'') : ;;
+						*)	DIR=${ONE_LINK%/*}
+							BASE=${ONE_LINK##*/}
+							#TARGET=$( cd $DIR and stat -L $BASE ) #works also
+							TARGET=$( cd $DIR && readlink $BASE )
+							# if TARGET is prefix with '../' or is an absolute paths then eliminate that
+							case $TARGET in
+								*'./'*) TARGET=${TARGET##*'./'} ;;
+								'/'*) TARGET=${TARGET:1} ;;
+							esac
+							# only include this link if it refers to a 'requireable' item from list generated above
+							if grep "$TARGET"$  install/$PKG_PROVIDES &> /dev/null  ; then
+								# maybe need '|| [[ -e $TARGET ]] || [[ -L $TARGET ]]'' #for badly-formed links
+								echo $ONE_LINK >> "$PKG_DIR"/install/$PKG_PROVIDES 
+							fi
+						;;
+					esac
+				done < links.list
+				# resort the list
+				if [[ -s "$PKG_DIR"/install/$PKG_PROVIDES ]] ; then
+					sort -u "$PKG_DIR"/install/$PKG_PROVIDES > "$PKG_DIR"/install/$PKG_PROVIDES.tmp
+					mv "$PKG_DIR"/install/$PKG_PROVIDES.tmp "$PKG_DIR"/install/$PKG_PROVIDES
+				fi
+			fi
+			rm -f links.list
+		fi
+	fi
+		
+	# handle pkg-suggests and pkg-conflicts here
+	if [[ -n $SUGGESTS ]] ; then
+		echo "# $NAME-$VERSION" >"$PKG_DIR"/install/$PKG_SUGGESTS
+		echo "# Suggests:" >> "$PKG_DIR"/install/$PKG_SUGGESTS
+		(IFS=, ; for SUGGEST in $SUGGESTS ; do
+			IV_SUGGEST=$(get_installed_version $SUGGEST)
+			case $IV_SUGGEST in
+				'') echo $SUGGEST >> "$PKG_DIR"/install/$PKG_SUGGESTS ;;
+				*) echo $IV_SUGGEST >> "$PKG_DIR"/install/$PKG_SUGGESTS ;;
+			esac
+		done
+		)
+	else
+		for FILENAME in $PKG_SUGGESTS $PKG_SUGGESTS-$NAME $NAME-$PKG_SUGGESTS $NAME.$PKG_SUGGESTS ; do
+			for SEARCH_PATH in "$CWD" "$PATCHES_DIR"/$NAME-patches "$CWD"/patches "$CWD"/Resources ; do
+				if [[ -f "$SEARCH_PATH"/$FILENAME ]] ; then
+					echo $BLUE"Found $FILENAME - "$NORMAL"Copying to PKG_DIR/install/$PKG_SUGGESTS"
+					cat "$SEARCH_PATH"/$PKG_SUGGESTS > "$PKG_DIR"/install/$PKG_SUGGESTS
+				fi
+			done
+		done
+	fi
+	if [[ -n $CONFLICTS ]] ; then
+		echo "# $NAME-$VERSION" > "$PKG_DIR"/install/$PKG_CONFLICTS
+		echo "# Conflicts:" >> "$PKG_DIR"/install/$PKG_CONFLICTS
+		(IFS=, ; for CONFLICT in $CONFLICTS ; do
+			echo $CONFLICT >> "$PKG_DIR"/install/$PKG_CONFLICTS
+		done
+		)
+	else
+		for FILENAME in $PKG_CONFLICTS $PKG_CONFLICTS-$NAME $NAME-$PKG_CONFLICTS $NAME.$PKG_CONFLICTS ; do
+			for SEARCH_PATH in "$CWD" "$PATCHES_DIR"/$NAME-patches "$CWD"/patches "$CWD"/Resources ; do
+				if [[ -f "$SEARCH_PATH"/$FILENAME ]] ; then
+					echo $BLUE"Found $FILENAME - "$NORMAL"Copying to PKG_DIR/install/$PKG_CONFLICTS"
+					cat "$SEARCH_PATH"/$FILENAME > "$PKG_DIR"/install/$PKG_CONFLICTS
+				fi
+			done
+		done
+	fi
+	
+	if [[ -f "$CWD"/unfound_depends ]] ; then
+		echo $YELLOW"   Notice - "$NORMAL"Package has dependencies not found in package database."
+	fi
+	if [[ -f "$CWD"/unsatisfied_deps ]] ; then
+		echo $YELLOW"   Notice - "$NORMAL"Package has unsatisfied dependencies not found on system."
+	fi
+	## desktop_create
+	# If a doinst.sh is present, assume that it is final and copy as-is into the PKG_DIR
+	# 4 filenames are possible: $NAME-doinst.sh, doinst.sh, $NAME-doinst.sh.gz or doinst.sh.gz
+	# We look for them in the CWD, then CWD/$NAME-patches, then CWD/patches then CWD/Resources
+	mkdir -p "$PKG_DIR"/install
+	for DOINST_NAME in $PKG_POSTINST-$NAME $PKG_POSTINST-$NAME.gz $PKG_POSTINST $PKG_POSTINST.gz $NAME-$PKG_POSTINST $NAME-$PKG_POSTINST.gz $NAME.$PKG_POSTINST $NAME.$PKG_POSTINST.gz ; do
+		for SEARCH_PATH in "$CWD" "$PATCHES_DIR"/$NAME-patches "$CWD"/patches "$CWD"/Resources ; do
+			if [[ -f "$SEARCH_PATH"/$DOINST_NAME ]] ; then
+				DOINST="$SEARCH_PATH"/$DOINST_NAME
+				#  shorten the path name for the prompt below
+				[[ "$SEARCH_PATH" = "$CWD" ]] && SEARCH_PATH=CWD || SEARCH_PATH=$(basename "$SEARCH_PATH")
+				HAVE_DOINST=1
+				break ;
+			fi
+		done
+		[[ $HAVE_DOINST ]] && break ;
+	done
+	
+	if [[ $HAVE_DOINST ]] ; then
+		case "$DOINST" in
+			*.gz)
+				echo $BLUE"Found $DOINST_NAME in $SEARCH_PATH - "$NORMAL"Decompressing in the PKG_DIR"
+				mkdir -p "$PKG_DIR"/install
+				if [[ $(zcat "$DOINST" |head -n1 |grep '/bin/sh') != "" ]] ; then
+					zcat "$DOINST" > "$PKG_DIR"/install/$PKG_POSTINST
+				else
+					echo "#!/bin/sh" > "$PKG_DIR"/install/$PKG_POSTINST
+					zcat "$DOINST" >> "$PKG_DIR"/install/$PKG_POSTINST
+				fi
+			;;
+			*)
+				echo $BLUE"Found $DOINST_NAME in $SEARCH_PATH - "$NORMAL"Inserting in the PKG_DIR"
+				mkdir -p "$PKG_DIR"/install
+				if [[ $(head -n1  "$DOINST" |grep '/bin/sh') != "" ]] ; then
+					cat "$DOINST" > "$PKG_DIR"/install/$PKG_POSTINST
+				else
+					echo "#!/bin/sh" > "$PKG_DIR"/install/$PKG_POSTINST
+					cat "$DOINST" >> "$PKG_DIR"/install/$PKG_POSTINST
+				fi
+			;;
+		esac
+	else
+		# create new script with a shebang (10 bytes long)
+		mkdir -p "$PKG_DIR"/install
+		echo "#!/bin/sh" > "$PKG_DIR"/install/$PKG_POSTINST
+		# no doinst.sh script was found, so create one, if needed
+		if ! [[ $MAKE_LINKS = "NO" ]] ; then
+		 make_doinst_links "$PKG_DIR"
+		fi
+		for SEARCH_PATH in "$CWD" "$CWD"/Resources "$PATCHES_DIR"/$NAME-patches "$CWD"/patches ; do
+			if [[ -e "$SEARCH_PATH"/doinst.prepend ]] ; then
+				echo $BLUE"Found doinst.prepend - "$NORMAL"Starting a new $PKG_POSTINST with its' contents"
+				cat "$SEARCH_PATH"/doinst.prepend > "$PKG_DIR"/install/$PKG_POSTINST
+				echo "" >> "$PKG_DIR"/install/$PKG_POSTINST
+			fi
+		done
+		if [[ -e "$CWD"/doinst.links ]] ; then
+			echo $BLUE"Adding links to $PKG_POSTINST - "$NORMAL"Adding links-creation to the $PKG_POSTINST"
+			cat "$CWD"/doinst.links >> "$PKG_DIR"/install/$PKG_POSTINST
+			rm -f "$CWD"/doinst.links
+		fi
+		# check to see if any files are installed to PKG_DIR/etc
+		if [[ -d "$PKG_DIR"/etc ]] || [[ -d "$PKG_DIR"/var ]] || [[ -d "$PKG_DIR"/$PRE_FIX/etc ]] ; then
+			if [[ $(find "$PKG_DIR"/etc -type f -name "*.new" 2> /dev/null) != "" ]] \
+				|| [[ $(find "$PKG_DIR"/var -type f -name "*.new" 2> /dev/null) != "" ]] \
+				|| [[ $(find "$PKG_DIR"/$PRE_FIX/etc -type f -name "*.new" 2> /dev/null) != "" ]] ; then
+				if [[ $(grep 'config()' "$PKG_DIR"/install/$PKG_POSTINST 2> /dev/null) = "" ]] ; then
+					echo $BLUE"Found '.new' files in PKG_DIR - "$NORMAL"Adding '.new' file routine to $PKG_POSTINST"
+					echo '' >> "$PKG_DIR"/install/$PKG_POSTINST
+					echo 'config() {' >> "$PKG_DIR"/install/$PKG_POSTINST
+					echo ' NEW="$1"' >> "$PKG_DIR"/install/$PKG_POSTINST
+					echo ' OLD="`dirname $NEW`/`basename $NEW .new`"' >> "$PKG_DIR"/install/$PKG_POSTINST
+					echo ' if [ ! -r $OLD ] ; then' >> "$PKG_DIR"/install/$PKG_POSTINST
+					echo '  mv $NEW $OLD' >> "$PKG_DIR"/install/$PKG_POSTINST
+					echo '  echo ""' >> "$PKG_DIR"/install/$PKG_POSTINST
+					echo '  echo "  --> Installed new configuration file $OLD"' >> "$PKG_DIR"/install/$PKG_POSTINST
+					echo ' elif [ ${NEW:0:3} = var ] ; then' >> "$PKG_DIR"/install/$PKG_POSTINST
+					echo '  # *.new files under /var are not needed' >> "$PKG_DIR"/install/$PKG_POSTINST
+					echo '  rm -f $NEW' >> "$PKG_DIR"/install/$PKG_POSTINST
+					echo ' elif [ "`cat $OLD 2> /dev/null | md5sum`" = "`cat $NEW 2> /dev/null | md5sum`" ] ; then' >> "$PKG_DIR"/install/$PKG_POSTINST
+					# echo '  echo "  --> Removed duplicate configuration file $NEW"' >> $PKG_DIR/install/$PKG_POSTINST
+					echo '  rm -f $NEW' >> "$PKG_DIR"/install/$PKG_POSTINST
+					echo ' else' >> "$PKG_DIR"/install/$PKG_POSTINST
+					echo '  echo ""' >> "$PKG_DIR"/install/$PKG_POSTINST
+					#echo '  echo "  --> Installed new configuration file: $NEW"' >> "$PKG_DIR"/install/$PKG_POSTINST
+					#echo '  echo "  --> Setting ownership and permissions to match $OLD"' >> "$PKG_DIR"/install/$PKG_POSTINST
+					echo '  cp -a $OLD $NEW.incoming' >> "$PKG_DIR"/install/$PKG_POSTINST
+					echo '  cat $NEW > $NEW.incoming' >> "$PKG_DIR"/install/$PKG_POSTINST
+					echo '  mv $NEW.incoming $NEW' >> "$PKG_DIR"/install/$PKG_POSTINST
+					echo '  echo "  --> Preserving your old configuration file: $OLD"' >> "$PKG_DIR"/install/$PKG_POSTINST
+					# echo '  echo ""' >> $PKG_DIR/install/$PKG_POSTINST
+					# echo '  echo "  Please examine your existing configuration file: $OLD"' >> "$PKG_DIR"/install/$PKG_POSTINST
+					echo '  echo "  Check to see if it needs to be updated from: $NEW"' >> "$PKG_DIR"/install/$PKG_POSTINST
+					echo '  echo ""' >> "$PKG_DIR"/install/$PKG_POSTINST
+					echo ' fi' >> "$PKG_DIR"/install/$PKG_POSTINST
+					echo '}' >> "$PKG_DIR"/install/$PKG_POSTINST
+					echo '' >> "$PKG_DIR"/install/$PKG_POSTINST
+					if [[ -d "$PKG_DIR"/etc ]] ; then
+						cd "$PKG_DIR"/etc ;
+						find * -type f -name "*.new" |while read conf ; do
+							echo "config etc/$conf" >> "$PKG_DIR"/install/$PKG_POSTINST
+						done
+					fi
+					if [[ -d "$PKG_DIR"/var ]] ; then
+						cd "$PKG_DIR"/var ;
+						find * -type f -name "*.new" |while read conf  ; do
+							echo "config var/$conf" >> "$PKG_DIR"/install/$PKG_POSTINST
+						done
+					fi
+					if [[ $PRE_FIX != '/' ]] && [[ -d "$PKG_DIR"/$PRE_FIX/etc ]] ; then
+						cd "$PKG_DIR"/$PRE_FIX/etc ;
+						find * -type f -name "*.new" |while read conf ; do
+							echo "config $PRE_FIX/etc/$conf" >> "$PKG_DIR"/install/$PKG_POSTINST
+						done
+					fi
+					echo '' >> "$PKG_DIR"/install/$PKG_POSTINST
+				fi
+			fi
+		fi
+		
+		if [[ "$AUTO_RC_LOCAL" != "NO" ]] ; then
+			if [[ -f "$INIT_DIR"/rc.$NAME.new ]] ; then
+				echo $BLUE"Found rc.$NAME.new init file - "$NORMAL"Adding rc.local routine to $PKG_POSTINST"
+				add_to_rc_local
+			elif [[ -f "$INIT_DIR"/rc.$NAME ]] ; then
+				echo $BLUE"Found rc.$NAME init file - "$NORMAL"Adding rc.local routine to $PKG_POSTINST"
+				add_to_rc_local
+			fi
+		fi
+		
+		# write postinst and postrm routines
+		if [[ $(find "$INFO_DIR" -type f 2> /dev/null) != "" ]] ; then 
+			write_install_info_postinst $PKG_DIR
+		fi
+		
+		# check to see if any *.desktop files are installed.
+		# If so, add code to the doinst.sh which will run 'update-desktop-database' when the package is installed
+		if [[ $(find "$PKG_DIR"/usr/share/applications -type f 2> /dev/null) != "" ]] ; then
+			write_update_desktop_database_postinst $PKG_DIR
+		fi
+		
+		# check to see if any  icons are installed.
+		# If so, add code to the doinst.sh which will run  'gtk-update-icon-cache' when the package is installed
+		if [[ $(find "$ICONS_DIR"/ -type f 2> /dev/null) != "" ]] ; then
+				if [[ $AUTO_ICON != "NO" ]] ; then
+					write_gtk_update_icon_cache_postinst $PKG_DIR
+				fi
+		fi
+		
+		# check to see if any mime-database files are installed.
+		# If so, add code to the doinst.sh which will run 'update-mime-database' when the package is installed
+		if [[ $(find "$PKG_DIR"/usr/share/mime -type f 2> /dev/null) != "" ]] ; then
+			write_update_mime_database_postinst $PKG_DIR
+		fi
+		
+		# check to see if any gtk immodules are installed.
+		# If so, add code to the doinst.sh which will run 'updategtk-immodules-' when the package is installed
+		if [[ $(find "$PKG_DIR"/usr/lib/gtk-2.0/immodules -type f 2> /dev/null) != "" ]] ; then
+			write_update_gtk_immodules_postinst $PKG_DIR
+		fi
+		
+		# add the code from doinst.append, if present
+		for SEARCH_PATH in "$CWD" "$CWD"/Resources "$PATCHES_DIR"/$NAME-patches "$CWD"/patches ; do
+			if [[ -e "$SEARCH_PATH"/doinst.append ]] ; then
+				echo $BLUE"Found doinst.append - "$NORMAL"Adding its' contents to $PKG_POSTINST"
+				cat "$SEARCH_PATH"/doinst.append >> "$PKG_DIR"/install/$PKG_POSTINST
+				echo "" >> "$PKG_DIR"/install/$PKG_POSTINST
+			fi
+		done
+		
+		# if nothing was actually written to the script, remove it
+		if [[ $(stat -c %s "$PKG_DIR"/install/$PKG_POSTINST)  -eq 10 ]] ; then
+			rm -f "$PKG_DIR"/install/$PKG_POSTINST
+		fi
+		
+		# if not running trackinstall or src2pkg without auto-scripting enabled copy the new doinst.sh into the CWD
+		if [[ "$EXEC_NAME" = "trackinstall" ]] && [[ ! $AUTO_SCRIPT ]] ; then
+		 true
+		elif [[ -e "$PKG_DIR"/install/$PKG_POSTINST ]]  && [[ $AUTO_SCRIPT ]] ; then
+		 echo $BLUE"Copying new $PKG_POSTINST - "$NORMAL"Copying as new.$PKG_POSTINST into the current directory"
+		 echo "Be sure to check it. For permanent use, edit and/or rename to $PKG_POSTINST"
+		 cat "$PKG_DIR"/install/$PKG_POSTINST > "$CWD"/new.$PKG_POSTINST
+		fi
+	fi
+	
+	# Handle PKG_POSTRM if asked for
+	case $EXTENDED_DATABASE in
+	  YES|1)
+		# create new script with a shebang (10 bytes long)
+		mkdir -p "$PKG_DIR"/install
+		echo "#!/bin/sh" > "$PKG_DIR"/install/$PKG_POSTRM
+		# check for PKG_POSTRM or PKG_POSTRM.prepend files
+		for SEARCH_PATH in "$CWD" "$PATCHES_DIR"/$NAME-patches "$CWD"/patches "$CWD"/Resources ; do
+			# if we have PKG_POSTRM it will be used as-is
+			if [[ -f $SEARCH_PATH/$PKG_POSTRM ]] ; then
+				if [[ $(head -n1 "$SEARCH_PATH/$PKG_POSTRM" |grep '/bin/sh') != "" ]] ; then
+					cat "$SEARCH_PATH/$PKG_POSTRM" > "$PKG_DIR"/install/$PKG_POSTRM
+				else
+					cat "$SEARCH_PATH/$PKG_POSTRM" >> "$PKG_DIR"/install/$PKG_POSTRM
+				fi
+				HAVE_POSTRM=1
+			elif [[ -f $SEARCH_PATH/$PKG_POSTRM.prepend ]] ; then
+				# else if there's a PKG_POSTRM.prepend, start a new file with that
+				if [[ $(head -n1 "$SEARCH_PATH/$PKG_POSTRM" |grep '/bin/sh') != "" ]] ; then
+					cat "$SEARCH_PATH/$PKG_POSTRM.prepend" >> "$PKG_DIR"/install/$PKG_POSTRM
+				else
+					echo "#!/bin/sh" > "$PKG_DIR"/install/$PKG_POSTRM
+					cat "$SEARCH_PATH/$PKG_POSTRM.prepend" >> "$PKG_DIR"/install/$PKG_POSTRM
+				fi
+			fi
+		done
+		# Add auto routines unless HAVE_POSTRM =1
+		if [[ $HAVE_POSTRM != "1" ]] ; then
+			if [[ $(find "$INFO_DIR" -type f 2> /dev/null) != "" ]] ; then
+				write_install_info_postrm $PKG_DIR
+			fi
+			if [[ $(find "$PKG_DIR"/usr/share/applications -type f 2> /dev/null) != "" ]] ; then
+				write_update_desktop_database_postrm $PKG_DIR
+			fi
+			if [[ $(find "$ICONS_DIR"/ -type f 2> /dev/null) != "" ]] ; then
+				if [[ $AUTO_ICON != "NO" ]] ; then
+					write_gtk_update_icon_cache_postrm $PKG_DIR
+				fi
+			fi
+			if [[ $(find "$PKG_DIR"/usr/share/mime -type f 2> /dev/null) != "" ]] ; then
+				write_update_mime_database_postrm $PKG_DIR
+			fi
+			if [[ $(find "$PKG_DIR"/usr/lib/gtk-2.0/immodules -type f 2> /dev/null) != "" ]] ; then
+				write_update_gtk_immodules_postrm $PKG_DIR
+			fi
+		fi
+		# add any addendums from PKG_POSTRM.append
+		for SEARCH_PATH in "$CWD" "$PATCHES_DIR"/$NAME-patches "$CWD"/patches "$CWD"/Resources ; do
+			if [[ -f $SEARCH_PATH/$PKG_POSTRM.append ]] ; then
+				mkdir -p $PKG_DIR/install
+				cat $SEARCH_PATH/$PKG_POSTRM.append >> $PKG_DIR/install/$PKG_POSTRM
+			fi
+		done
+		# if nothing was actually written to the script, remove it
+		if [[ $(stat -c %s "$PKG_DIR"/install/$PKG_POSTRM)  -eq 10 ]] ; then
+			rm -f "$PKG_DIR"/install/$PKG_POSTRM
+		fi
+	  ;;
+	esac
+	
+	# Remove symbolic links
+	if ! [[ $REMOVE_LINKS = "NO" ]] ; then
+		cd "$PKG_DIR" ;
+		if [[ $(find . -type l) != "" ]] ; then
+		 echo $BLUE"Deleting symbolic links - "$NORMAL"Removing links from the package directory"
+		 find . -type l -exec rm -f {} \;
+		fi
+	fi
+	
+	# this routine shows the raw library names -not the packages they belong to
+	if [[ "$SHOW_DEPS" = "YES" ]] ; then
+	   cd "$PKG_DIR" ;
+	   if [[ -f $PKG_DIR/install/$PKG_REQUIRED ]] ; then
+	      echo $BLUE"Package dependencies:"$NORMAL
+	       grep '^# File:' $PKG_DIR/install/$PKG_REQUIRED |cut -f 3 -d ' '
+	   elif [[ "$(find . |xargs -r file |grep ELF |grep -E '(dynamically linked|shared object)' \
+			|cut -f 1 -d : |xargs -r _ldd |grep -E -v '(^./|linux-gate)')" != "" ]] ; then
+	      echo $BLUE"Package dependencies:"$NORMAL
+	      find . -type f |xargs -r file |grep ELF |grep -E '(dynamically linked|shared object)' \
+			|cut -f 1 -d : |xargs -r _ldd |grep -E -v '(^./|linux-gate|ld-linux)' |sort -u
+	   fi
+	fi
+}
+
+
+## below here are sub-functions:
+
+# make_install_script
+make_install_script() {
+	# $1 is the input file
+	while read LINK ; do
+		DIR=$(dirname $LINK)
+		BASE=$(basename $LINK)
+		TARGET=$(cd $DIR && readlink $BASE )
+		case $TARGET in
+			'/'*) # Convert absolute links to relative ones
+				TARGET=${TARGET:1}
+				STUB=$DIR
+				TARGET="../$TARGET"
+				while : ; do
+					STUB=$(dirname $STUB)
+					case $STUB in
+						'.'|'') break ;;
+					esac
+					TARGET="../$TARGET"
+				done
+			;;
+		esac
+		echo "( cd $DIR ; rm -rf $BASE )"
+		echo "( cd $DIR ; ln -sf $TARGET $BASE )"
+		if [[ $EXTENDED_DATABASE = 'YES' ]] ; then
+			echo $DIR/$BASE $TARGET >> install/$PKG_LINKS
+		fi
+	done < $1
+}
+
+#search for links and make link creation script if necessary
+make_doinst_links() {
+cd "$1" ;
+echo -n $BLUE"Searching for links in:"$NORMAL" ${1##*/} - "$NORMAL
+find * -type l > links.list
+
+if [[ -s links.list ]] ; then
+	echo $GREEN"Done"$NORMAL
+	make_install_script links.list | tee "$CWD"/doinst.links 1> /dev/null
+else
+	echo "None found"
+fi
+rm -f links.list
+}
+
+
+# Add a routine to etc/rc.d/rc.local for an init script in etc/rc.d
+# really tricky syntax with escapes, double and single quotes
+# since this script function writes a script which writes a script...
+add_to_rc_local() {
+if [[ ! $(grep rc.local "$PKG_DIR"/install/$PKG_POSTINST  &> /dev/null) ]] && \
+	[[ ! $(grep rc.local "$CWD"/doinst.append &> /dev/null) ]] ; then
+ echo "if  [ \"\$(grep rc.$NAME $initdir/rc.local 2> /dev/null)\" = \"\" ] ; then" >> "$PKG_DIR"/install/$PKG_POSTINST
+ echo "	echo \"  --> Adding an entry to $initdir/rc.local for $initdir/rc.$NAME\"" >> "$PKG_DIR"/install/$PKG_POSTINST
+ echo "	echo \"\"" >> "$PKG_DIR"/install/$PKG_POSTINST
+ echo "	echo \"# Start $NAME service\" >> $initdir/rc.local" >> "$PKG_DIR"/install/$PKG_POSTINST
+ echo "	echo \"if [ -x $initdir/rc.$NAME ] ; then\" >> $initdir/rc.local" >> "$PKG_DIR"/install/$PKG_POSTINST
+ echo "	echo \"  echo $initdir/rc.local: Running '. $initdir/rc.$NAME start' ...\" >> $initdir/rc.local" >> "$PKG_DIR"/install/$PKG_POSTINST
+ echo "	echo \"  . $initdir/rc.$NAME start & 2> /dev/null\" >> $initdir/rc.local" >> "$PKG_DIR"/install/$PKG_POSTINST
+ echo "	echo \"fi\" >> $initdir/rc.local" >> "$PKG_DIR"/install/$PKG_POSTINST
+ echo "	echo \"\" >> $initdir/rc.local" >> "$PKG_DIR"/install/$PKG_POSTINST
+ echo "fi" >> "$PKG_DIR"/install/$PKG_POSTINST
+ echo "" >> "$PKG_DIR"/install/$PKG_POSTINST
+fi
+}
+
+last_deps_sort() {
+if [[ -s "${CWD}"/deps_list.tmp ]] ; then
+OLD_IFS=$IFS
+IFS='
+'
+  sort -u "$CWD"/deps_list.tmp |uniq -u >> "$CWD"/deps_list
+  IFS=$OLD_IFS
+  rm -f "$CWD"/deps_list.tmp
+else
+  true
+  rm -f "$CWD"/deps_list.tmp
+fi
+}
+
+gen_provides_list() {
+THIS_PKG_DIR="$1"
+cd "$THIS_PKG_DIR"
+#  only include 'requireable' items, that is binaries, executable scripts and *.la files
+# links are handled individually after calling this routine
+# for FILE in $( cat $SRC_DIR/$NAME-ELF-all $SRC_DIR/$NAME-libtool-files $SRC_DIR/$NAME-script-files 2> /dev/null ) ; do
+cat $SRC_DIR/$NAME-ELF-all $SRC_DIR/$NAME-libtool-files $SRC_DIR/$NAME-script-files 2> /dev/null | while read FILE ; do
+	if [[ -f $FILE ]] ; then
+		echo $FILE
+	fi
+done
+}
+
+write_chroot_script() {
+	TARGET_SCRIPT="$1"
+	if [[ ! -s "$1" ]] ; then
+		echo "#!/bin/sh" >> $TARGET_SCRIPT
+	fi
+	case $PKG_FORMAT in
+		# we don't want this for debian packages (what about slitaz?)
+		# I think this works for the package types listed
+		tpkg|tgz|tbz|tlz|txz|rpm|pet)
+			echo "" >> "$TARGET_SCRIPT"
+			echo "# Figure out our root directory" >> "$TARGET_SCRIPT"
+			echo 'ROOTDIR=$(pwd)' >> "$TARGET_SCRIPT"
+			echo "unset CHROOT" >> "$TARGET_SCRIPT"
+			echo 'if [ "${ROOTDIR}" != "/" ] ; then' >> "$TARGET_SCRIPT"
+			echo '  ROOTDIR="${ROOTDIR}/"' >> "$TARGET_SCRIPT"
+			echo '  CHROOT="chroot ${ROOTDIR} "' >> "$TARGET_SCRIPT"
+			echo 'fi' >> "$TARGET_SCRIPT"
+		;;
+		*) true;;
+	esac
+}
+
+# write_install_info and write_delete_info may  get called from here in 14-make_doinst for
+# the main package or from 15-make_package (segregate_package) for the split docs package.
+# debian seems to not run installation/deinstallation scripts from '/', so our fancy CHROOT routines
+# and relative paths don't work there. So, use absolute paths and no chroot for all the following routines
+write_install_info_postinst() {
+	THIS_PACKAGE="$1"
+	if [[ ! $(grep install-info "$THIS_PACKAGE"/install/$PKG_POSTINST 2> /dev/null) ]] ; then
+		#echo $BLUE"Package contains info files - "$NORMAL"Adding 'install-info ' routine to $PKG_POSTINST"
+		echo $CYAN"   Notice - "$NORMAL"Adding 'install-info ' routine to $PKG_POSTINST"
+		mkdir -p "$THIS_PACKAGE"/install
+		if [[ $(grep 'CHROOT' "$THIS_PACKAGE"/install/$PKG_POSTINST 2> /dev/null) = "" ]] ; then
+			write_chroot_script "$THIS_PACKAGE"/install/$PKG_POSTINST
+		fi
+		( cd $INFO_DIR
+			echo "" >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+			case $PKG_FORMAT in
+				tpkg|tgz|tbz|tlz|txz|rpm|pet)
+					echo "if [ -x usr/bin/install-info ] ; then" >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+					find * |while read FILE ; do
+						echo ' ${CHROOT} '"usr/bin/install-info --info-dir=${infodir:1} ${infodir:1}/$FILE 2>/dev/null" >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+					done ;;
+				*)
+					echo "if [ -x /usr/bin/install-info ] ; then" >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+					find * |while read FILE ; do
+						echo "  /usr/bin/install-info --info-dir=${infodir} ${infodir}/$FILE 2>/dev/null" >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+					done ;;
+			esac
+			
+			echo "fi" >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+			echo "" >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+		)
+	fi
+}
+
+write_install_info_postrm() {
+	THIS_PACKAGE="$1"
+	if [[ ! $(grep 'install-info --delete' "$THIS_PACKAGE"/install/$PKG_POSTRM 2> /dev/null |grep 'delete') ]] ; then
+		#echo $BLUE"Package contains info files - "$NORMAL"Adding 'install-info --delete' routine to $PKG_POSTRM"
+		echo $CYAN"   Notice - "$NORMAL"Adding 'install-info --delete' routine to $PKG_POSTRM"
+		mkdir -p "$THIS_PACKAGE"/install
+		if [[ $(grep 'CHROOT' "$THIS_PACKAGE"/install/$PKG_POSTRM 2> /dev/null) = "" ]] ; then
+			write_chroot_script "$THIS_PACKAGE"/install/$PKG_POSTRM
+		fi
+		( cd $INFO_DIR
+			echo "" >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+			case $PKG_FORMAT in
+				tpkg|tgz|tbz|tlz|txz|rpm|pet)
+					echo "if [ -x usr/bin/install-info ] ; then" >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+					find * |while read FILE ; do
+						echo ' ${CHROOT} '"usr/bin/install-info --info-dir=${infodir:1} --delete --info-file=${infodir:1}/$FILE 2>/dev/null" >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+					done;;
+				*) 
+					echo "if [ -x /usr/bin/install-info ] ; then" >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+					find * |while read FILE ; do
+						echo "  /usr/bin/install-info --info-dir=${infodir} --delete --info-file=${infodir}/$FILE 2>/dev/null" >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+					done;;
+			esac
+			echo "fi" >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+			echo "" >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+		)
+	fi
+}
+
+write_update_desktop_database_postinst(){
+	THIS_PACKAGE="$1"
+	if [[ $(grep 'CHROOT' "$THIS_PACKAGE"/install/$PKG_POSTINST 2> /dev/null) = "" ]] ; then
+		write_chroot_script "$THIS_PACKAGE"/install/$PKG_POSTINST
+	fi
+	if [[ $(grep update-desktop-database "$THIS_PACKAGE"/install/$PKG_POSTINST 2> /dev/null) = "" ]] ; then
+		echo $BLUE"Found .desktop files - "$NORMAL"Adding 'update-desktop-database' routine to $PKG_POSTINST"
+		echo '' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+		echo '# update the applications menu database' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+		case $PKG_FORMAT in
+			tpkg|tgz|tbz|tlz|txz|rpm|pet)
+				echo 'if [ -x usr/bin/update-desktop-database ] ; then' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+				echo ' ${CHROOT} usr/bin/update-desktop-database -q usr/share/applications 2> /dev/null' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+			;;
+			*)
+				echo 'if [ -x /usr/bin/update-desktop-database ] ; then' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+				echo '  /usr/bin/update-desktop-database -q /usr/share/applications 2> /dev/null' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+			;;
+		esac
+		echo 'fi' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+		echo '' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+	fi
+}
+
+write_update_desktop_database_postrm(){
+	THIS_PACKAGE="$1"
+	if [[ $(grep 'CHROOT' "$THIS_PACKAGE"/install/$PKG_POSTRM 2> /dev/null) = "" ]] ; then
+		write_chroot_script "$THIS_PACKAGE"/install/$PKG_POSTRM
+	fi
+	if [[ $(grep update-desktop-database "$THIS_PACKAGE"/install/$PKG_POSTRM 2> /dev/null) = "" ]] ; then
+		echo $CYAN"   Notice - "$NORMAL"Adding 'update-desktop-database' (remove) routine to $PKG_POSTRM"
+		echo '' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+		echo '# update the applications menu database' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+		case $PKG_FORMAT in
+			tpkg|tpm|tgz|tbz|tlz|txz)
+				echo 'if [ -x usr/bin/update-desktop-database ] ; then' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+				echo ' ${CHROOT} usr/bin/update-desktop-database -q usr/share/applications 2> /dev/null' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+			;;
+			*)
+				echo 'if [ -x /usr/bin/update-desktop-database ] ; then' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+				echo '  /usr/bin/update-desktop-database -q /usr/share/applications 2> /dev/null' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+			;;
+		esac
+		echo 'fi' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+		echo '' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+	fi
+}
+
+write_gtk_update_icon_cache_postinst(){
+	THIS_PACKAGE="$1"
+	if [[ $(grep 'CHROOT' "$THIS_PACKAGE"/install/$PKG_POSTINST 2> /dev/null) = "" ]] ; then
+		write_chroot_script "$THIS_PACKAGE"/install/$PKG_POSTINST
+	fi
+	if [[ $(grep gtk-update-icon-cache "$THIS_PACKAGE"/install/$PKG_POSTINST 2> /dev/null) = "" ]] ; then
+		echo $BLUE"Found icon files - "$NORMAL"Adding 'gtk-update-icon-cache' routine to $PKG_POSTINST"
+		echo '' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+		echo '# update the gtk-icon-cache' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+		case $PKG_FORMAT in
+			tpkg|tgz|tbz|tlz|txz|rpm|pet)
+				echo 'if [ -x usr/bin/gtk-update-icon-cache ] ; then' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+				echo '  for dir in usr/share/icons/* ; do' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+				echo '    if [ -d $dir ]; then' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+				echo '       ${CHROOT} '"usr/bin/gtk-update-icon-cache --quiet -f -t \$dir 2> /dev/null" >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+			;;
+			*)
+				echo 'if [ -x /usr/bin/gtk-update-icon-cache ] ; then' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+				echo '  for dir in /usr/share/icons/* ; do' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+				echo '    if [ -d $dir ]; then' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+				echo '       /usr/bin/gtk-update-icon-cache --quiet -f -t $dir 2> /dev/null' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+			;;
+		esac
+		echo '    fi' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+		echo '  done' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+		echo 'fi' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+		echo '' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+	fi
+}
+
+write_gtk_update_icon_cache_postrm(){
+	THIS_PACKAGE="$1"
+	if [[ $(grep 'CHROOT' "$THIS_PACKAGE"/install/$PKG_POSTRM 2> /dev/null) = "" ]] ; then
+		write_chroot_script "$THIS_PACKAGE"/install/$PKG_POSTRM
+	fi
+	if [[ $(grep gtk-update-icon-cache "$THIS_PACKAGE"/install/$PKG_POSTRM 2> /dev/null) = "" ]] ; then
+		echo $CYAN"   Notice - "$NORMAL"Adding 'gtk-update-icon-cache' routine to $PKG_POSTRM"
+		echo '' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+		echo '# update the gtk-icon-cache' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+		case $PKG_FORMAT in
+			tpkg|tgz|tbz|tlz|txz|rpm|pet)
+				echo 'if [ -x usr/bin/gtk-update-icon-cache ] ; then' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+				echo '  for dir in usr/share/icons/* ; do' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+				echo '    if [ -d $dir ]; then' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+				echo '       ${CHROOT} usr/bin/gtk-update-icon-cache --quiet -f -t $dir 2> /dev/null' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+			;;
+			*)
+				echo 'if [ -x /usr/bin/gtk-update-icon-cache ] ; then' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+				echo '  for dir in /usr/share/icons/* ; do' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+				echo '    if [ -d $dir ]; then' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+				echo '       /usr/bin/gtk-update-icon-cache --quiet -f -t $dir 2> /dev/null' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+			;;
+		esac
+		echo '    fi' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+		echo '  done' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+		echo 'fi' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+		echo '' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+	fi
+}
+
+write_update_mime_database_postinst() {
+	THIS_PACKAGE="$1"
+	if [[ $(grep 'CHROOT' "$THIS_PACKAGE"/install/$PKG_POSTINST 2> /dev/null) = "" ]] ; then
+		write_chroot_script "$THIS_PACKAGE"/install/$PKG_POSTINST
+	fi
+	if [[ $(grep update-mime-database "$THIS_PACKAGE"/install/$PKG_POSTINST 2> /dev/null) = "" ]] ; then
+		echo $BLUE"Found mime-database files - "$NORMAL"Adding 'update-mime-database' routine to $PKG_POSTINST"
+		echo '' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+		echo '# update the mime database' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+		case $PKG_FORMAT in
+			tpkg|tgz|tbz|tlz|txz|rpm|pet)
+				echo 'if [ -x usr/bin/update-mime-database ] ; then' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+				echo ' ${CHROOT} usr/bin/update-mime-database -q usr/share/mime 2> /dev/null' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+			;;
+			*)
+				echo 'if [ -x /usr/bin/update-mime-database ] ; then' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+				echo '  /usr/bin/update-mime-database -q /usr/share/mime 2> /dev/null' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+			;;
+		esac
+		echo 'fi' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+		echo '' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+	fi
+}
+
+write_update_mime_database_postrm() {
+	THIS_PACKAGE="$1"
+	if [[ $(grep 'CHROOT' "$THIS_PACKAGE"/install/$PKG_POSTRM 2> /dev/null) = "" ]] ; then
+		write_chroot_script "$THIS_PACKAGE"/install/$PKG_POSTRM
+	fi
+	if [[ $(grep update-mime-database "$THIS_PACKAGE"/install/$PKG_POSTRM 2> /dev/null) = "" ]] ; then
+		echo $BLUE"Found mime-database files - "$NORMAL"Adding 'update-mime-database' routine to $PKG_POSTRM"
+		echo '' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+		echo '# update the mime database' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+		case $PKG_FORMAT in
+			tpkg|tgz|tbz|tlz|txz|rpm|pet)
+				echo 'if [ -x usr/bin/update-mime-database ] ; then' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+				echo ' ${CHROOT} usr/bin/update-mime-database -q usr/share/mime 2> /dev/null' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+			;;
+			*)
+				echo 'if [ -x /usr/bin/update-mime-database ] ; then' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+				echo '  /usr/bin/update-mime-database -q /usr/share/mime 2> /dev/null' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+			;;
+		esac
+		echo 'fi' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+		echo '' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+	fi
+}
+
+write_update_gtk_immodules_postinst() {
+	THIS_PACKAGE="$1"
+	if [[ $(grep 'CHROOT' "$THIS_PACKAGE"/install/$PKG_POSTINST 2> /dev/null) = "" ]] ; then
+		write_chroot_script "$THIS_PACKAGE"/install/$PKG_POSTINST
+	fi
+	if [[ $(grep update-gtk-immodules "$THIS_PACKAGE"/install/$PKG_POSTINST 2> /dev/null) = "" ]] ; then
+		echo $BLUE"Found gtk-immodules - "$NORMAL"Adding 'update-gtk-immodules' routine to $PKG_POSTINST"
+		echo '' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+		echo '# update the gtk immodules' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+		case $PKG_FORMAT in
+			tpkg|tgz|tbz|tlz|txz|rpm|pet)
+				echo 'if [ -x usr/bin/update-gtk-immodules ] ; then' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+				echo ' ${CHROOT} usr/bin/update-gtk-immodules 2> /dev/null' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+			;;
+			*)
+				echo 'if [ -x /usr/bin/update-gtk-immodules ] ; then' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+				echo '  /usr/bin/update-gtk-immodules 2> /dev/null' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+			;;
+		esac
+		echo 'fi' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+		echo '' >> "$THIS_PACKAGE"/install/$PKG_POSTINST
+	fi
+}
+
+write_update_gtk_immodules_postrm() {
+	THIS_PACKAGE="$1"
+	if [[ $(grep 'CHROOT' "$THIS_PACKAGE"/install/$PKG_POSTRM 2> /dev/null) = "" ]] ; then
+		write_chroot_script "$THIS_PACKAGE"/install/$PKG_POSTRM
+	fi
+	if [[ $(grep update-gtk-immodules "$THIS_PACKAGE"/install/$PKG_POSTRM 2> /dev/null) = "" ]] ; then
+		echo $BLUE"Found gtk-immodules - "$NORMAL"Adding 'update-gtk-immodules' routine to $PKG_POSTRM"
+		echo '' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+		echo '# update the gtk immodules' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+		case $PKG_FORMAT in
+			tpkg|tgz|tbz|tlz|txz|rpm|pet)
+				echo 'if [ -x usr/bin/update-gtk-immodules ] ; then' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+				echo ' ${CHROOT} usr/bin/update-gtk-immodules > /dev/null' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+			;;
+			*)
+				echo 'if [ -x /usr/bin/update-gtk-immodules ] ; then' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+				echo '  /usr/bin/update-gtk-immodules > /dev/null' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+			;;
+		esac
+		echo 'fi' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+		echo '' >> "$THIS_PACKAGE"/install/$PKG_POSTRM
+	fi
+}
+
+freq() {
+SEARCH_CHAR=$1
+STRING=$2
+STRING_COUNT=0
+CHAR_COUNT=0
+
+echo ${STRING} | while read -n 1 CHAR ; do
+	(( STRING_COUNT++ ))
+	case ${CHAR} in
+		$SEARCH_CHAR) (( CHAR_COUNT++ )) ;;
+	esac
+	if [[ ${STRING_COUNT} = ${#STRING} ]] ; then
+		echo ${CHAR_COUNT}
+		break
+	fi
+done
+}
+
+gen_pkg_manifest() {
+	[[ $2 = 'silent' ]] && SILENT=1 || SILENT=0
+	( cd $1
+		# Create a full listing of this package, excluding the install dir
+		mkdir -p install
+		#( cd $PKG_DIR && ${TAR} --exclude=install* -cf - * |tar -tvv > "$SRC_DIR"/pkg-manifest)
+		# exclude doesn't seem to work with tar-1.13 anyway
+		${TAR} -cf - * |tar -tvv > "$SRC_DIR"/pkg-manifest
+		# create a nice pkg-manifest file with lots of info about each object in the archive -this seemed so easy -for a while!
+		> install/pkg-manifest
+		[[ $SILENT != 1 ]] && echo -n "      Creating: 'pkg-manifest' "
+		while read LINE ; do
+			LINE=$(echo "$LINE" |scrunch_difficult_white)
+			#ITEM=$(echo "${LINE##* }")
+			#STUB=$(echo "${LINE% *}")
+			# the above was failing for filenames with spaces
+			# ITEM is what's to the right of the fifth space:
+			ITEM=$(echo "${LINE#** * * * * *}")
+			# STUB is what is left of the fifth space:
+			STUB=$(echo "${LINE/$ITEM/}")
+			
+			case "$ITEM" in
+				# if we are doing a split package (solibs) these two may be present
+				doinst.links|links.list) : ;; #ignore these files under root
+				#install/|install/*) : ;; #ignore files under install directory
+				install/*) : ;; #ignore files under install directory
+				# use a dummy md5sum value of 0 for directories
+				*/) # this is a directory, so fake an md5sum of '0'
+					echo "$ITEM"'|' "$STUB" 0 >> install/pkg-manifest ;;
+				*)	# we have to check if the thing really exists or set will croak on empty md5sum output
+					if [[ -f "$ITEM" ]] ; then
+						MD5SUM=$(md5sum "$ITEM")
+						MD5SUM=$(echo "${MD5SUM%% *}")
+						echo "$ITEM"'|' "$STUB" "$MD5SUM" >> install/pkg-manifest
+					fi
+				;;
+			esac
+		done < "$SRC_DIR"/pkg-manifest
+		#rm -f "$SRC_DIR"/pkg-manifest
+		[[ $SILENT != 1 ]] && echo $GREEN"Done"$NORMAL
+	)
+}

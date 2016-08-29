@@ -1,0 +1,14 @@
+#!/bin/bash
+
+APPDIR="$0"
+APPDIR="${APPDIR%\/*}"
+
+[ -d /root/.shareInternet ] || mkdir /root/.shareInternet
+[ -d /root/.shareInternet/flagFiles ] || cp -r "$APPDIR/home/flagFiles" /root/.shareInternet/
+[ -f /root/.shareInternet/share.conf ] || cp "$APPDIR/home/share.conf" /root/.shareInternet/
+[ -f /root/.shareInternet/dnsmasq.conf ] || cp "$APPDIR/home/dnsmasq.conf" /root/.shareInternet/
+[ -d /root/.shareInternet/iptablesExtraRules ] || mkdir /root/.shareInternet/iptablesExtraRules
+[ -f /root/.shareInternet/iptablesExtraRules/dropExample ] || cp "$APPDIR/home/iptablesExtraRules/dropExample" /root/.shareInternet/iptablesExtraRules/
+[ -f /root/.shareInternet/iptablesExtraRules/serverExample ] || cp "$APPDIR/home/iptablesExtraRules/serverExample" /root/.shareInternet/iptablesExtraRules/
+
+exit 0

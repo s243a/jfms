@@ -1,0 +1,403 @@
+# This file is part of the src2pkg program:
+# Copyright 2005-2013 Gilbert Ashley <amigo@ibilio.org>
+# src2pkg is released under the GNU General Public License Version 2
+
+### unpack_source
+unpack_source() {
+if [[ $ALLOW_USER_EXTENSIONS = "YES" ]] ; then
+ # check if the user has any pre-execution extensions to this file and run them, if so.
+ [[ -f "$HOME"/.src2pkg/extensions/04.pre ]] && . "$HOME"/.src2pkg/extensions/04.pre
+fi
+if [[ ! "$SOURCE_NAME" ]] || [[ "$SRC_DIR" = "$CWD" ]] ; then
+	true
+elif [[ "$FAILED" = "" ]] && [[ ! $USER_CANCELLED ]] ; then
+  if [[ ! $RESUME ]] || [[ $RESUME = $FUNCNAME ]] || [[ $HAVE_RESUMED ]] ; then
+	[[ $RESUME = $FUNCNAME ]] && HAVE_RESUMED=1 && echo $CYAN"Notice - "$BLUE"Resuming build at: "$NORMAL "$FUNCNAME"
+	if [[ $PAUSE = "BEFORE" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+		echo $MAGENTA"Notice - "$BLUE"Pausing before: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+		read
+	fi
+	
+	echo -n $BLUE"Unpacking source archive - "$NORMAL
+	cd "$SRC_BUILDS_DIR/$SRC_DIR_NAME" ;
+	if [[ "$EXT" = "deb" ]] || [[ "$EXT" = "rpm" ]] || [[ "$EXT" = "src.rpm" ]] ; then
+		# The disrpm program script uses 'hexdump' or 'od' to unpack either debian or rpm archives
+		# works even better than rpm2cpio on older rpm archives
+		if [[ $QUIET = "YES" ]] ; then
+		  #disrpm -x "$SOURCE" &> /dev/null
+		  exploderpm -x "$SOURCE" &> /dev/null
+		else
+		  echo ""
+		  #disrpm -x "$SOURCE"
+		  exploderpm -x "$SOURCE"
+		fi
+	elif [[ $QUIET = "YES" ]] ; then
+	  case "$SOURCE" in
+		*.deb|*.rpm|*.src.rpm)
+			#disrpm -x "$SOURCE" &> /dev/null
+			exploderpm -x "$SOURCE" &> /dev/null
+			;;
+		*.tar.bz2|*.tbz|*.tbz2)
+			tar xjf "$SOURCE" 1> /dev/null
+			;;
+		*.tar.gz|*.tgz)
+			tar xzf "$SOURCE" 1> /dev/null
+			;;
+		*.tar.lz|*.tlz|*.tar.lzma)
+			tar -x --use-compress-program lzma -f "$SOURCE" 1> /dev/null
+			;;
+		*.tar.xz|*.txz|*.tar.lzma2)
+			tar -x --use-compress-program xz -f "$SOURCE" 1> /dev/null
+			;;
+		*.tar)
+			tar xf "$SOURCE" 1> /dev/null
+			;;
+		*.zip)
+			unzip "$SOURCE" 1> /dev/null
+			;;
+	  esac
+	else
+	  echo ""
+	  case "$SOURCE" in
+		*.deb|*.rpm|*.src.rpm)
+			#disrpm -x "$SOURCE"
+			exploderpm -x "$SOURCE"
+			;;
+		*.tar.bz2|*.tbz)
+			tar xjvf "$SOURCE"
+			;;
+		*.tar.gz|*.tgz)
+			tar xzvf "$SOURCE"
+			;;
+		*.tar.lz|*.tlz)
+			tar -xv --use-compress-program lzma -f "$SOURCE"
+			;;
+		*.tar.xz|*.txz*.tar.lzma2)
+			tar -xv --use-compress-program xz -f "$SOURCE"
+			;;
+		*.tar)
+			tar -xf "$SOURCE"
+			;;
+		*.zip)
+			unzip "$SOURCE"
+			;;
+	  esac
+	fi
+	if [[ $? -ne 0 ]] ; then
+	  echo $RED"FAILED!"$NORMAL
+	  echo "This may be caused by a defective or non-tar archive. "$RED"Exiting..."$NORMAL
+	  FAILED="UNPACK in: $FUNCNAME"
+	else
+	  [[ $QUIET = "YES" ]] && echo $GREEN"Done"$NORMAL || echo ""
+	  # unpack these first as they may contain INSERT or OVERLAY archives
+	  UNPACK_NAME=$(ls "$SRC_BUILDS_DIR/$SRC_DIR_NAME")
+	  decompress_patches_tarball
+	  decompress_resources
+	  
+	  if [[ -n $OVERLAY_SOURCES ]] ; then
+		for ONE_SOURCE in $OVERLAY_SOURCES ; do
+			if [[ -f $SOURCES_DIR/$ONE_SOURCE ]] ; then
+				ONE_SOURCE=$SOURCES_DIR/$ONE_SOURCE
+			elif [[ -f $CWD/$ONE_SOURCE ]] ; then
+				ONE_SOURCE=$CWD/$ONE_SOURCE
+			fi
+			echo $BLUE"Overlaying source archive: "$NORMAL"${ONE_SOURCE##*/}"
+			( cd $SRC_DIR && tar xf $ONE_SOURCE )
+		done
+	  fi
+	  examine_source
+	  if [[ -n $INSERT_SOURCES ]] ; then
+		for ONE_SOURCE in $INSERT_SOURCES ; do
+			if [[ -f $SOURCES_DIR/$ONE_SOURCE ]] ; then
+				ONE_SOURCE=$SOURCES_DIR/$ONE_SOURCE
+			elif [[ -f $CWD/$ONE_SOURCE ]] ; then
+				ONE_SOURCE=$CWD/$ONE_SOURCE
+			fi
+			echo $BLUE"Inserting source archive: "$NORMAL"${ONE_SOURCE##*/}"
+			( cd $SRC_DIR && tar xf $ONE_SOURCE )
+		done
+	  fi
+	  decompress_package_framework
+	fi
+	if [[ $PAUSE = "AFTER" ]] || [[ $PAUSE = $FUNCNAME ]] ; then
+		echo $MAGENTA"Notice - "$BLUE"Pausing after: "$NORMAL" '$FUNCNAME'  Press ENTER to continue"
+		read
+	fi
+  fi
+fi
+
+if [[ $ALLOW_USER_EXTENSIONS = "YES" ]] ; then
+ # check if the user has any post-execution extensions to this file and run them, if so.
+ [[ -f "$HOME"/.src2pkg/extensions/04.post ]] && . "$HOME"/.src2pkg/extensions/04.post
+fi
+
+}
+# end unpack_source
+
+# local function called by unpack_source. Like the name-guessing code this is
+# clumsy-looking code using good heuristics to sort out what the content of the archive is
+# rpm archives get their internal tarred compressed archives unpacked here even with mismatched names
+examine_source() {
+cd "$SRC_BUILDS_DIR" ;
+if [[ $(ls "$SRC_DIR_NAME"/* 2> /dev/null) != "" ]] ; then
+cd "$SRC_DIR_NAME" ;
+	CONTENT=$(ls)
+	for item in $CONTENT ; do
+	 case $item in
+		usr|etc|var|lib|bin|opt|sbin|boot|dev|tmp)
+			[[ -d $item ]] && BIN_CONTENT=1 ;;
+		control) [[ -f control ]] && SRC_TYPE="DEB" ;;
+		install) [[ -d install ]] && SRC_TYPE="SLK" ; BIN_CONTENT=1 ;;
+		*.spec) SRC_TYPE="RPM" ;;
+		*.tar.bz2|*.tar.gz|*.tar.lz|*.tar.lzma|*.tar.lzma2|*.tar.xz|*.tgz|*.tbz|*.tlz|*.txz|*.tar)
+			[[ -f $item ]] && FOUND_SOURCE=1 ;;
+	 esac
+	done
+	if [[ $BIN_CONTENT -eq 1 ]] ; then
+	 CONFIG_COMMAND="skip" ; INSTALL_COMMAND="skip"
+	 MAKE_COMMAND="copyall"
+	else
+		if [[ $(ls |wc -l) -eq 1 ]] ; then
+			UNPACK_NAME=$(ls)
+			if [[ -d $UNPACK_NAME ]] ; then
+			  [[ $DEBUG ]] && echo $BLUE"Found sources: "$NORMAL"$UNPACK_NAME"$NORMAL
+			  [[ $DEBUG ]] && echo $BLUE"Moving into SRC_DIR: "$NORMAL"$SRC_DIR_NAME"
+				if [[ -e $UNPACK_NAME/$UNPACK_NAME ]] ; then
+				 mv $UNPACK_NAME/$UNPACK_NAME $UNPACK_NAME/$UNPACK_NAME.gotcha
+				fi
+			  ( cd $UNPACK_NAME && mv ./* ../ &> /dev/null && cd .. )
+			  #( cd $UNPACK_NAME && mv ./.* ../ 1> /dev/null 2> /dev/null && cd .. )
+			  #( cd $UNPACK_NAME && ls -a |tail -n +3 |xargs -r mv .. && cd .. )
+			  #( cd $UNPACK_NAME && find  -maxdepth 1 -name '.*' ! -name '.' -type d -exec mv {} \; && cd .. )
+			  ( cd $UNPACK_NAME ;
+			   for hiddenfile in $(ls -A) ; do
+				mv $hiddenfile ../
+			   done
+			  )
+			  cd "$SRC_BUILDS_DIR/$SRC_DIR_NAME" ;
+			  rm -rf $UNPACK_NAME
+				# I found this gotcha when packaging the 'rar' program which unpacks to rar/rar
+				if [[ -e $UNPACK_NAME.gotcha ]] ; then
+				 mv $UNPACK_NAME.gotcha $UNPACK_NAME
+				fi
+			  OPEN_SOURCE=1
+			fi
+		fi
+		
+		if ! [[ $OPEN_SOURCE ]] ; then
+		 for item in $(ls) ; do
+		  case $item in
+		  *.tar.bz2|*.tbz|*.tar.gz|*.tgz|*.tar.lz|*.tar.lzma|*.tar.lzma2|*.tlz|*.tar.xz|*.txz|*.tar)
+			case $item in
+				*.tar.bz2) INT_EXT='tar.bz2' ;;
+				*.tbz) INT_EXT='tbz' ;;
+				*.tar.gz) INT_EXT='tar.gz' ;;
+				*.tgz) INT_EXT='tgz' ;;
+				*.tar.lz) INT_EXT='tar.lz' ;;
+				*.tar.lzma) INT_EXT='tar.lzma' ;;
+				*.tar.lzma2) INT_EXT='tar.lzma2' ;;
+				*.tlz) INT_EXT='tlz' ;;
+				*.tar.xz) INT_EXT='tar.xz' ;;
+				*.txz) INT_EXT='txz' ;;
+				*.tar) INT_EXT='tar' ;;
+			esac
+			
+			if [[ $(echo $item |grep "patch") ]] ||  [[ $(echo $item |grep "diff") ]]; then
+			 echo -n $BLUE"Ignoring compressed patch: "$NORMAL"$item "
+			else
+			  #UNPACK_NAME=$(tar -tf $item |head --n 1 |cut -f1 -d'/')
+			  ITEM_NAME=$(basename $item .tar.bz2) ; ITEM_NAME=$(basename $item .tbz)
+			  ITEM_NAME=$(basename $item .tar.gz) ; ITEM_NAME=$(basename $item .tgz)
+			  ITEM_NAME=$(basename $item .tar.lz) ; ITEM_NAME=$(basename $item .tlz)
+			  ITEM_NAME=$(basename $item .tar.lzma) ; ITEM_NAME=$(basename $item .tar.lzma2)
+			  ITEM_NAME=$(basename $item .tar.xz) ; ITEM_NAME=$(basename $item .txz)
+			  ITEM_NAME=$(basename $item .tar) 
+			  GUESSED_NAME=$(basename $RAW_SOURCE_NAME |rev |cut -f2- -d'-' |rev)
+			  case $item in
+				$NAME-$VERSION.*|$GUESSED_NAME.*|$ORIG_NAME-$ORIG_VERSION.*|$NAME-cvs*)
+					echo -n $BLUE"Decompressing matching archive: "$NORMAL"$item "
+					case $item in
+						*.tar.gz|.tgz)
+							UNPACK_NAME=$(tar -tzf $item 2> /dev/null |head -n 1 |cut -f1 -d'/')
+							if [[ $QUIET = "YES" ]] ; then
+							 tar xzf $item &> /dev/null
+							else
+							 tar xvzf $item
+							fi
+							;;
+						*.tar.bz2|*.tbz)
+							UNPACK_NAME=$(tar -tjf $item 2> /dev/null |head -n 1 |cut -f1 -d'/')
+							if [[ $QUIET = "YES" ]] ; then
+							 tar xjf $item &> /dev/null
+							else
+							 tar xvjf $item
+							fi
+							;;
+						*.tar.lz|*.tlz|*.tar.lzma)
+							UNPACK_NAME=$(tar -t --use-compress-program lzma -f $item 2> /dev/null |head -n 1 |cut -f1 -d'/')
+							if [[ $QUIET = "YES" ]] ; then
+							 tar -x --use-compress-program lzma -f $item &> /dev/null
+							else
+							 tar -xv --use-compress-program lzma -f $item
+							fi
+							;;
+						*.tar.xz|*.txz|*.tar.lzma2)
+							UNPACK_NAME=$(tar -t --use-compress-program xz -f $item 2> /dev/null |head -n 1 |cut -f1 -d'/')
+							if [[ $QUIET = "YES" ]] ; then
+							 tar -x --use-compress-program xz -f $item &> /dev/null
+							else
+							 tar -xv --use-compress-program xz -f $item
+							fi
+							;;
+						*.tar)
+							UNPACK_NAME=$(tar -tf $item 2> /dev/null |head -n 1 |cut -f1 -d'/')
+							if [[ $QUIET = "YES" ]] ; then
+							 tar xf $item &> /dev/null
+							else
+							 tar xvf $item
+							fi
+							;;
+					esac
+					if [[ $? = 0 ]] ; then
+						echo $GREEN"Done!"$NORMAL
+						if [[ -e $UNPACK_NAME/$UNPACK_NAME ]] ; then
+						 mv $UNPACK_NAME/$UNPACK_NAME $UNPACK_NAME/$UNPACK_NAME.gotcha
+						fi
+						if [[ -d $UNPACK_NAME ]] ; then
+							( cd $UNPACK_NAME && mv ./* ../ && cd .. )
+							# cd $UNPACK_NAME && mv ./.* ../ &> /dev/null && cd .. )
+							( cd $UNPACK_NAME ;
+							   for hiddenfile in $(ls -A) ; do
+								mv $hiddenfile ../
+							   done
+							)
+							
+							
+							rm -rf $UNPACK_NAME
+						fi
+						if [[ -e $UNPACK_NAME.gotcha ]] ; then
+						 mv $UNPACK_NAME.gotcha $UNPACK_NAME
+						fi
+						rm -f $item
+						UNPACK_SUCCESS=1
+					else
+						echo $RED"FAILED!"$NORMAL
+						echo "Unable to unpack archive: $item "$RED"Exiting..."$NORMAL
+						FAILED="UNPACK_RENAME in: $FUNCNAME"
+					fi
+				;;
+				*)
+					if ! [[ $UNPACK_SUCCESS ]] ; then
+						echo -n $BLUE"Decompressing (unknown) archive: "$NORMAL"$item "
+						case $item in
+							*.tar.gz|*.tgz)
+								UNPACK_NAME=$(tar -tzf $item |head -n 1 |cut -f1 -d'/')
+								tar xzf $item &> /dev/null ;;
+							*.tar.bz2|*.tbz)
+								UNPACK_NAME=$(tar -tjf $item |head -n 1 |cut -f1 -d'/')
+								tar xjf $item &> /dev/null ;;
+							*.tar.lz|*.tlz|*.tar.lzma)
+								UNPACK_NAME=$(tar -t --use-compress-program lzma -f $item |head -n 1 |cut -f1 -d'/')
+								tar -x --use-compress-program lzma -f $item &> /dev/null ;;
+							*.tar.xz|*.txz|*.tar.lzma2)
+								UNPACK_NAME=$(tar -t --use-compress-program xz -f $item |head -n 1 |cut -f1 -d'/')
+								tar -x --use-compress-program xz -f $item &> /dev/null ;;
+							*.tar)
+								UNPACK_NAME=$(tar -tf $item |head -n 1 |cut -f1 -d'/')
+								tar xf $item &> /dev/null ;;
+						esac
+						
+						if [[ $? != 0 ]] ; then
+							echo $RED"FAILED!"$NORMAL
+							echo "Unable to unpack $item. "$RED"Exiting..."$NORMAL
+							FAILED="UNPACK_RENAME in: $FUNCNAME"
+						else
+							UNPACK_NAME=$(find * -type d |head -n1)
+							if [[ -d $UNPACK_NAME ]] ; then
+								echo $GREEN"Done!"$NORMAL
+								if [[ -e $UNPACK_NAME/$UNPACK_NAME ]] ; then
+								  mv $UNPACK_NAME/$UNPACK_NAME $UNPACK_NAME/$UNPACK_NAME.gotcha
+								fi
+								echo $CYAN"Notice - "$NORMAL"Internal archive name mismatch: $UNPACK_NAME"
+								( cd $UNPACK_NAME && mv ./* ../ && cd .. )
+								#( cd $UNPACK_NAME && mv ./.* ../ &> /dev/null && cd .. &> /dev/null )
+								( cd $UNPACK_NAME ;
+								   for hiddenfile in $(ls -A) ; do
+									mv $hiddenfile ../
+								   done
+								)
+								rm -rf $UNPACK_NAME
+								if [[ -e $UNPACK_NAME.gotcha ]] ; then
+									mv $UNPACK_NAME.gotcha $UNPACK_NAME
+								fi
+								rm -f $item
+								UNPACK_SUCCESS=1
+							else
+								rm -f $item
+								UNPACK_SUCCESS=1
+								echo $GREEN"Done!"$NORMAL
+							fi
+						fi
+					else
+					 echo $BLUE"Ignoring archive: "$NORMAL"$item"
+					fi
+				;;
+			  esac
+			fi
+		   ;;
+		  esac
+		 done
+		fi
+	fi
+else
+ echo $RED"FAILED!"$NORMAL
+ echo "Source directory is empty. "$RED"Exiting..."$NORMAL
+ FAILED="EMPTY_SOURCE in: $FUNCNAME"
+fi
+}
+
+decompress_package_framework() {
+if [[ -f "$CWD"/_$NAME.tar.gz ]] ; then
+  echo -n $BLUE"Decompressing package framework in PKG_DIR - "$NORMAL
+  ( cd "$PKG_DIR" && tar -xf "$CWD"/_$NAME.tar.gz &> /dev/null )
+  echo $GREEN"Done"$NORMAL
+fi
+}
+
+decompress_patches_tarball() {
+if [[ ! -d "$CWD"/$NAME-patches ]] ; then
+	if [[ -f "$PATCHES_DIR"/$NAME-patches.tar.bz2 ]] ; then
+		echo -n $BLUE"Decompressing $NAME-patches.tar.bz2 - "$NORMAL
+		( cd "$CWD" && tar -xf "$PATCHES_DIR"/$NAME-patches.tar.bz2  &> /dev/null )
+		echo $GREEN"Done"$NORMAL
+	elif [[ -f "$CWD"/$NAME-patches.tar.bz2 ]] ; then
+		echo -n $BLUE"Decompressing $NAME-patches.tar.bz2 - "$NORMAL
+		( cd "$CWD" && tar $NAME-patches.tar.bz2-xf  &> /dev/null )
+		echo $GREEN"Done"$NORMAL
+	fi
+fi
+
+if [[ ! -d "$CWD"/$NAME-$VERSION-patches ]] ; then
+	if [[ -f "$PATCHES_DIR"/$NAME-$VERSION-patches.tar.bz2 ]] ; then
+		echo -n $BLUE"Decompressing $NAME-$VERSION-patches.tar.bz2 - "$NORMAL
+		( cd "$CWD" && tar -xf "$PATCHES_DIR"/$NAME-$VERSION-patches.tar.bz2  &> /dev/null )
+		echo $GREEN"Done"$NORMAL
+	elif [[ -f "$CWD"/$NAME-$VERSION-patches.tar.bz2 ]] ; then
+		echo -n $BLUE"Decompressing $NAME-$VERSION-patches.tar.bz2 - "$NORMAL
+		( cd "$CWD" && tar $NAME-$VERSION-patches.tar.bz2-xf  &> /dev/null )
+		echo $GREEN"Done"$NORMAL
+	fi
+fi
+}
+
+decompress_resources() {
+if [[ ! -d "$CWD"/Resources ]] ; then
+	if [[ -f "$CWD"/Resources.tar.bz2 ]] ; then
+		echo -n $BLUE"Decompressing Resources.tar.bz2 - "$NORMAL
+		( cd "$CWD" && tar -xf Resources.tar.bz2 &> /dev/null )
+		echo $GREEN"Done"$NORMAL
+	fi
+fi
+}
+
+

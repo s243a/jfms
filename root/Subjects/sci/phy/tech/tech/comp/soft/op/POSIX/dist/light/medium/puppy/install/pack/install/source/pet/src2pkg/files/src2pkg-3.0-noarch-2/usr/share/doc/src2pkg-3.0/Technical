@@ -1,0 +1,344 @@
+
+	This file gives some technical details about src2pkg
+	which may not be found elsewhere in the doumentation.
+	
+1. Source archive formats supported by src2pkg
+2. Source configuration methods supported by src2pkg
+3. Package formats supported by src2pkg
+4. Special files created or utilized by src2pkg
+5. Execution Order of src2pkg
+6. File Layout and Coding Style
+
+1.	Source archive formats supported by src2pkg			####
+	src2pkg is able to use source archives of the most common types
+	available, provided the corresponding archive de-compression
+	tools are available on the system. Most sources are packaged
+	as 'tar' arcives which are then compressed using one of
+	several tools. These very common archive formats are supported:
+	*.tar.gz (or *.tgz) gzipped tar archives
+	*.tar.bz2 (or *.tbz/*.tbz2) tar archives compressed with bzip2
+	*.tar.lzma (or *.tlz) tar archives compressed with lzma
+	*.tar.xz (or *.txz) tar archives compressed with xz (lzma2)
+	*.rpm (or *.src.rpm) rpm-type binary or source archives
+	*.deb debian (usually binary) archives
+	*.zip archives compatible with pkzip, winzip, infozip, etc
+	*.tar uncompressed tar archives
+   
+2.	Source configuration methods supported by src2pkg		####
+	src2pkg can carry out source configuration using most commonly-
+	used methods:
+	a. autoconf  - The most commonly used configuration method. Such
+		sources usually conatain a script named 'configure' and
+		files such as Makefile.in and/or Makefile.am.
+		May require autoconf, automake, m4, perl, libtool and gettextize,
+		but these are only needed when configuration files must be
+		regenerated.
+	b. cmake - Many 'modern' sources use this alternative to autoconf.
+		Requires the 'cmake' program.
+	c. imake - Many older programs related to the X-windows system
+		use this type of configuration (with the xmkmf command)
+		Requires xmkmf or mxmkmf and possibly other programs which
+		are usually installed along with the X window system.
+	d. jam - Sources which use the 'jam' program are not too common,
+		but some important program sources do use it.
+		Requires 'jam'.
+	e. perl - Sources which add modules or other components to perl
+		usually use perl itself to generate the Makefiles. There are actually
+		at least three different sub-methods currently in use, each
+		of which must be handled a little differently. src2pkg supports
+		all three types -those using a Makefile.PL file, those that use
+		a make.pl file and those that use a Build.PL file. The last of
+		these requires that the perl 'build' modules be installed. All
+		three require perl to be installed.
+	f. python - Sources which install python modules or programs are
+		usually configured using python itself. Here again, there is
+		more than one method. Most have a python script named setup.py
+		which is run to configure the sources. But, some of them also
+		use a python module called setup-tools. python-setup-tools is
+		part of python itself staring with python-2.5, but earlier
+		versions of python can use the module, which must be built and
+		installed separately.
+		Requires python (and optionally python-setup-tools)
+	g. scons - Again, not many sources use scons, but several important
+		programs do use it.
+		Requires 'scons'.
+	h. tcl - Some programs which are meant to work with the 'tcl' or 'tk'
+		programs/libraries are built using tcl to configure the sources.
+		And nearly all tcl programs which are really just scripts, use
+		a tcl script named install.tcl to install themselves.
+		Reqiures tcl (and optionally tk or other tcl extensions).
+	i. qmake - Commonly known for its' use as the configuration method
+		for programs using the QT libraries.
+		Requires QT libs and 'qmake'. Using qmake may involve a couple
+		of extra steps to set up the proper environmental variables.
+	j. simple - Many sources come pre-configured with simple hard-coded
+		Makefiles for building the sources. src2pkg is able to easily
+		use these and even corrects hard-coded paths in the Makefiles
+		if they conflict with the default or chosen installation prefix
+		being used.
+		Requires 'make'.
+	k. waf -  waf is a build system using python and is based on ideas from
+	   scons. It is 'self-contained' in that it is simply included in the
+	   the sources it used with and need not be 'installed' to be used.
+	   waf requires python
+	l. others - Some sources use still other configuration methods -but these
+		can also be handled by src2pkg. Some sources contain a script called
+		'configure', but they are not really 'autoconf' sources as discussed
+		above. src2pkg usually has no problem with these and even 'knows'
+		that they are not autoconf sources.
+		And, even sources which use completely unique commands can still be
+		handled by src2pkg, by specifying the command to run during the
+		configuration phase of the build. This can usually be done from
+		the command-line, or even better, from within a src2pkg build script.
+		Requirements unknown, though usually only shell scripts are involved,
+		so nothing extra is needed.
+	
+3. Package formats supported by src2pkg					####
+	src2pkg can create or convert from or to the following package formats:
+	Slackware-type packages using 'tgz', 'tbz', 'tlz' or 'txz' suffixes.
+	These are all tar-archives which have no root directory (tar-bombs) which
+	are meant to be installed by de-compressing them into the toplevel '/'
+	directory of the target system. Any extra files used by the installer
+	are contained in a sub-directory named /install which is removed
+	by the package installation tools once the package is fully installed.
+	Of course, there are many derivatives of Slackware which use the same
+	package installation tools (pkgtools, installpkg, upgradepkg, removepkg)
+	as used by Slackware itself. These other Linux distributions can also
+	use packages created using this package format.
+	
+	src2pkg can create installable debian-type packages with the '.deb'
+	suffix. These packages contain a control.tar.gz archive, an archive
+	named data.tar.xx (using .gz, .bz2, .lzma or .xz suffixes according
+	to the compression tool used.
+	
+	src2pkg can also create *.pet archives for use with Puppy Linux. 'pet'
+	archives are really tar.gz archives, but with a root directory with
+	the name and version of the package and the name changed to *.pet
+	instead of *.tar.gz
+	
+	src2pkg can create *.tazpkg archives for use with the SliTaz Linux
+	distribution. slitaz is a *tiny* live CD distro which uses its' own
+	package format using cpio and gzip.
+	
+	src2pkg can create installable *.rpm archives for use on systems which
+	use the RPM package manager. Unlike the above package format, which
+	can be created with common, generic tools, to create rpm packages you
+	will need 'rpm' and 'rpmbuild' installed.
+	
+	By default, src2pkg will create Slackware-compatible *.tgz packages.
+	You can change the package type by passing a command-line argument to
+	src2pkg (-DEB, PET, -PET2, RPM, TAZ, -TGZ, -TBZ, -TLZ or -TXZ) or change
+	the default by uncommenting and editing the corresponding variable in
+	the src2pkg configuration file: /etc/src2pkg/src2pkg.conf
+	The variable to set is called PKG_FORMAT.
+
+4. Special files created or utilized by src2pkg			####
+	For most builds, src2pkg will create several (or many) temporary files
+	which it uses during packaging -list of files and things like these.
+	By default these are all created either within the un-compressed sources
+	or within the current directory -that is in the directory from which
+	src2pkg is run or a src2pkg build script is executed. For this reason,
+	it is recommended that you always create each package in a separate
+	sub-directory created just for that package. These sub-directories can
+	be located anywhere you have read and write priviledges on your system.
+	If you want to create packages from within your $HOME directory, it
+	is recommend that you create one sub-directory which will contain
+	a separate sub-directory for each package. You can also use the pre-made
+	directories installed by src2pkg under /usr/src/src2pkg, but you will
+	need to make the directories world-writable (using chmod 1777) if you
+	are building packages as any user other than 'root'.
+	
+	Every type of installable package may have certain extra files which may
+	be optionally included in the package. These files are used to provide
+	information to the package installer used for that package type, or they
+	may be post-installation scripts which are run by the package installer
+	after installing the main package files on the target system or when
+	uninstalling the package. src2pkg is able to use these files if you
+	create them or make them available at build-time. Some of these files
+	can even be generated by src2pkg for you.
+	
+	For Slackware packages, the main extra files which are part of the official
+	package format are the slack-desc and doinst.sh files. If these are to
+	be included in the package, they get placed in a subdir of the package
+	called 'install'. The slackware pkgtools (installpkg or upgradepkg) then
+	use these files during installation. The slack-desc file contains a
+	description of the package and the text there is used by pkgtools when
+	creating the database entry for the package under /var/log/packages. If
+	present, the doinst.sh file is executed by pkgtools after uncompressing
+	the package contents in the root ('/') directory of the target system.
+	When finished, pkgtools deletes the /install directory which contained
+	these files.
+	
+	debian-type packages may contain any of several extra files, including the
+	debian-binary file located in the toplevel of the package, and the files
+	control and md5sums which are located in the control.tar.gz archive.
+	At this time, other files which might be found in debian packages, such
+	as 'init' files, preinst, postinst, etc are not dealt with by src2pkg.
+	A little more work needs to be done on src2pkg to add support for automatically
+	including these files in the proper place within a package.
+	
+	Puppy Linux uses *.pet archives, which are pretty similar to Slackware
+	packages -excpet that instead of slack-desc and doinst.sh scripts, they may 
+	have a NAME.puppy.specs file and pinstall.sh script which are located
+	in the toplevel of the package. src2pkg can use these files if made
+	available during package creation, or will create them if not present
+	and needed for the package.
+	
+	For all package formats, any special or extra files used during configuration
+	and compilation or that are to be included in the package, can be placed
+	in the current directory where src2pkg is run from. If there are several files
+	needed, they can be placed inside a subdirectory named NAME-patches (where
+	NAME is the name of the software package). You can even create an archive
+	of the NAME-patches directory, if wanted, and src2pkg will unpack it when
+	it needs the files there. (The archive should be a tarred, bzipped one, with
+	the name: NAME-patches.tar.bz2)
+	
+	Read the file Special-files.txt for a more complete listing of special
+	files created or used by src2pkg
+	
+
+5. Execution Order of src2pkg		                              ####
+	The easiest way to understand how src2pkg works is to examine a generic
+	src2pkg build script. You can generate one for any source archive by
+	running the command:
+	src2pkg -N name-of-tarball
+	
+	The, open the resulting NAME.src2pkg.auto file in any text editor
+	so you can see the content. Leaving out most of the commented lines,
+	you'll something like this:
+
+#!/bin/bash
+## src2pkg script for: 	weechat
+
+SOURCE_NAME='weechat-0.3.0.tar.gz'
+NAME='weechat'   # Use ALT_NAME to override guessed value
+VERSION='0.3.0'   # Use ALT_VERSION to override guessed value
+# ARCH=''
+# BUILD='1'
+# PRE_FIX='usr'
+# Any extra options go here:
+# EXTRA_CONFIGS=""
+
+# Optional function replaces configure_source, compile_source, fake_install
+# To use, uncomment and write/paste CODE between the {} brackets.
+# build() { CODE }
+
+# Get the functions and configs
+. /usr/libexec/src2pkg/FUNCTIONS ;
+
+# Execute the named packaging steps:
+pre_process
+find_source
+make_dirs
+unpack_source
+fix_source_perms
+configure_source #
+compile_source   # If used, the 'build' function replaces these 3
+fake_install     #
+fix_pkg_perms
+strip_bins
+create_docs
+compress_man_pages
+make_description
+make_doinst
+make_package
+post_process
+# end of weechat.src2pkg.auto script
+
+	Any src2pkg script can be run as if it were a separate 'program', simply
+	by making the script executable and then running it like this:
+	./NAME.src2pkg.auto
+	
+	As you can see the first line simply tells the shell that this
+	script should interpreted using the 'bash' shell.
+	Then the next few lines contain a few variables -most of them
+	are optional. The only variable which *must* be declared is SOURCE_NAME.
+	src2pkg parses the name of the source archive to guess the NAME
+	and VERSION of the sfotware. the BUILD and PRE_FIX variables will
+	be set to sane defaults if they are not given in the script.
+	
+	So, once the SOURCE_NAME is known, the next interesting thing that happens
+	is the line: . /usr/libexec/src2pkg/FUNCTIONS
+	This line causes all the src2pkg functions to be read into the
+	src2pkg script at that point -just as if you had copied and pasted
+	the code in there. but since there are over 10,000 lines of code
+	in the src2pkg functions, it is much neater to simply read them in
+	by sourcing the FUNCTIONS file which sources other files which contain
+	more code used by src2pkg ('sourcing' simply means that the code in
+	the 'sourced' file is read into the script at that location). In the
+	case of src2pkg, all the main code is written as functions, which means
+	that the code is not executed until it is called by name.
+	The remainder of the example script is the 16 package-building
+	instructions -each of which is a shell 'function'. The code for
+	them was read in above from the FUNCTIONS file, but is not executed
+	until the name of each function is called below.
+	
+	This makes it a little easier to understand the code if you are
+	trying to read it or understand what it does. Since the code is
+	broken into many functions and each function prints some output
+	to the screen when run, it is easier to tell at what point in the
+	code something is happening. Some of the functions can even be
+	skipped in extreme cases, by simply commenting them out in the script.
+	
+	Normally, you'll use the src2pkg 'program' to run your scripts
+	by using the '-X' option. In that case, the src2pkg program simply
+	processes whatever command-line options you have given and then
+	'sources' the script being used. Or, if using no script, then
+	the command-line options themselves are translated into the same
+	variable syntax as used in the scripts.
+	
+	By using the command-line option '-V' along with any others, you
+	can see some extra output from the src2pkg code which gives more
+	detail about what it is doing. Using the '-VV' causes all the output
+	from the commands run by src2pkg to be seen in the terminal.
+	
+	The optional 'build' function provides an easy way of using custom code
+	for the three main steps of configuration, compiling and installing
+	software. If uncommented, it will be run instead of the usual steps
+	configure_source, compile_source and fake_install. There are several
+	other build systems which use a 'build' function, so this option makes
+	it easy to translate build scripts from other system into the src2pkg
+	format. It can also be used to 'cut and paste' blocks of code from
+	existing SlackBuild scripts in order to translate them into src2pkg
+	scripts.
+	
+6. File Layout and Coding Style
+	Many of the files included with src2pkg are installed into a 'private'
+	directory -that is, they are installed in an 'out-of-way' location -normally
+	under /usr/libexec/src2pkg. This is where most of the files which contain
+	the src2pkg code are placed along with the programs and library installed
+	when the src2pkg --setup' command is run. But, some of the main 'programs'
+	which come with src2pkg are installed under the normal PATH of regular
+	users. Since src2pkg can, in many cases, be used by normal users, it makes
+	sense to place the main src2pkg programs under /usr/bin.
+	Installation of src2pkg also places other files such as the man-pages and
+	documents in the 'normal' locations where you'd expect to find them on
+	your type of system.
+	
+	The Coding Style of src2pkg is 'Barbaric' -at least some might say that! :-)
+	Hopefully the code is readable enough for anyone who knows a little bit about
+	bash scripting, without being offensive to real BASH gurus.
+	src2pkg has developed over quite a long while, and some of the code has been
+	around since early versions without being changed much. So, parts of the
+	code may show a certain style of syntax which later code doesn't use.
+	Very little effort is made to optimize the code for size. Instead, it is
+	written to be easier to understand and work with. Long, descriptive variable
+	names are used with a consistent syntax which makes it easier to understand
+	what the variable is for -and easier to search for in the code base.
+	Of course, many routines must be somewhat optimized for speed. Some packages
+	install thousands of files, so even trivial processing of package content
+	would take a very long time, if no attention was paid to execution time.
+	
+	src2pkg does not use any awk, perl, python or other such scripting languages,
+	and only uses 'sed' in a very few spots. In the past, most parsing of strings
+	and variables was done with common tools like cat, cut, rev, etc. But even
+	these tools can get bogged down when running several together over many loops.
+	Where practical, some routines have been re-written to use 'pure bash' since
+	in such cases it actually runs faster than calling multiple external programs.
+	These routines may need several lines of bash code to do what can be done with
+	a single line using an external program, but this is of little consequence.
+	
+	The code in src2pkg is written to 'just work' and not do unexpected things
+	to your system. Any efforts to optimize for speed or size are secondary to
+	these two principles.
+	

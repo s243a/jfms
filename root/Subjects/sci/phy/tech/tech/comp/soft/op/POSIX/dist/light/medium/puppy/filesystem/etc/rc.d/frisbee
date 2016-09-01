@@ -1,0 +1,74 @@
+#!/bin/bash
+
+grep -q '^frisbee_mode=1' /etc/frisbee/frisbee.conf || exit
+
+#set -x
+
+. /usr/local/frisbee/func
+
+if [ -h /etc/resolv.conf ] ; then  #pppoe creates a symlink
+	rm /etc/resolv.conf
+	touch /etc/resolv.conf
+fi
+
+if [[ $1 == "start" || $1 == '' ]] ; then
+
+[ -d /tmp/.frisbee ] || mkdir /tmp/.frisbee
+if grep -q '^announce_state_changes=1' /etc/frisbee/frisbee.conf; then
+ [ ! -f /etc/dhcpcd_state_notify ] && touch /etc/dhcpcd_state_notify
+elif grep -q '^announce_state_changes=0' /etc/frisbee/frisbee.conf; then
+ [ -f /etc/dhcpcd_state_notify ] && rm -f /etc/dhcpcd_state_notify
+fi
+touch /tmp/.network_tray-use_wireless_control_menu_labels
+
+sleep 5
+
+WIFACES=$(iwconfig 2>&1 |egrep "^[a-z]"|grep -v "no wireless" |cut -f1 -d" ")
+echo "$WIFACES" > /etc/frisbee/interfaces
+
+USERIF=`cat /etc/frisbee/userif 2>/dev/null`
+
+if [ ! -z $USERIF ] && grep -q -w "$USERIF" /etc/frisbee/interfaces ; then
+	WIFI_IF=$USERIF
+else
+	WIFI_IF=`echo "$WIFACES"|head  -n1`
+fi
+
+if [[ $WIFI_IF == '' ]] ; then
+	WIFI_IF=`cat /etc/frisbee/interface 2>/dev/null`
+else
+	echo $WIFI_IF > /etc/frisbee/interface
+fi
+
+
+if [[ ! -z $WIFI_IF ]] ; then
+
+	INTMODULE=$(readlink /sys/class/net/$WIFI_IF/device/driver/module)
+	INTMODULE=${INTMODULE##*/}
+	case "$INTMODULE" in
+        	hostap*) DRIVER="hostap" ;;
+         	rt61|rt73) DRIVER="ralink" ;;
+         	*) DRIVER="wext" ;;
+	esac
+	[ -d /etc/acpi ] && echo "$INTMODULE" > /etc/acpi/wifi-driver
+
+	export INTERFACE=$WIFI_IF
+
+	grep -q '^wireless_enabled=1' /etc/frisbee/frisbee.conf \
+	 && start_wpa&
+fi
+start_dhcp&
+fi
+
+
+if [[ $1 == "stop" ]] ; then
+	wpa_cli terminate 2>/dev/null
+	dhcpcd -k
+fi
+
+if [[ $1 == "restart" ]] ; then
+	if [[ ! -z $WIFI_IF ]] ; then
+		reset_wpa
+	fi
+	reset_dhcp
+fi

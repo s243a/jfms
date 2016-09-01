@@ -1,0 +1,27 @@
+#!/bin/sh
+#
+# Start or stop cleanup for shareInternet, based upon the first argument to the script.
+#
+
+if [ -f /root/.shareInternet/share.conf ]; then
+	. /root/.shareInternet/share.conf
+fi
+
+case $1 in
+	start)
+		[ "$ROXDIR" != "" ] && [ -d "$ROXDIR" ] && cp -d -f "$ROXDIR/down.png" "$ROXDIR/.DirIcon"
+		;;
+
+	stop)
+		if [ -f /root/.shareInternet/flagFiles/sharingup.txt ]; then
+			[ -x /usr/local/shareInternet/shareInternet ] && /usr/local/shareInternet/shareInternet stop
+		fi
+		[ -d /root/.shareInternet/flagFiles ] && rm -f /root/.shareInternet/flagFiles/*
+		;;
+
+	*)
+		exit 1
+		;;
+esac
+
+exit 0

@@ -1,0 +1,25 @@
+#!/bin/bash
+
+# part of network_roxapp
+# designed to unmount samba shares created in $HOME
+
+# jamesbond
+umount_samba_shares() { 
+    # samba rox app 
+    find $HOME/network -maxdepth 2 -name mnt-point | while read p; do 
+       case $p in 
+          "") break ;; 
+          *)  if grep -q $p /proc/mounts; then 
+                fuser -mk $p 
+                ${p%/*}/AppRun unmount 
+             fi ;; 
+       esac 
+    done
+}
+
+
+case $1 in
+	start) echo "ok" ;;
+	stop) umount_samba_shares ;;
+	*)echo "usage:	$0 stop	--unmounts shares in $HOME/network" ;;
+esac

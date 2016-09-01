@@ -1,0 +1,13 @@
+#!/bin/sh
+
+case "$1" in
+  start)
+  ;;
+  stop)
+    for M in $(ls $HOME/YASSM); do
+      rox -D $HOME/YASSM/$M
+      umount-FULL $HOME/YASSM/$M
+      rmdir $HOME/YASSM/$M
+    done
+  ;;
+esac

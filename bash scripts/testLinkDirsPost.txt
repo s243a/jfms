@@ -1,0 +1,26 @@
+I wanted to write a shell function that can read from a pipe. I just got that part to work now. The next step is to use a path and take the last part of the path as the link name using sed.
+
+
+I created the file linkDIr.sh
+[code]
+#!/bin/sh
+linkDirs(){
+  $i=0;
+  echo "hi"
+  while read path; do
+    echo "$path";
+    out[$i]=$path|sed s/'(^.*)([^/]*)/$'/'<a href="'$path'">'\2'<\a>'/;
+  done
+  return 1
+}
+[/code]
+I load the function by calling
+[code]
+source linkDirs.sh
+[/code]
+
+I then call it by typing
+[code]
+echo "test"|( linkDirs )
+I get the error
+sed: -e expression #1, char 18: unknown option to `s'

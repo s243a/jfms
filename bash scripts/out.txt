@@ -1,0 +1,5 @@
+hi
+'test/bla/'
+bash: 'test/bla/': No such file or directory
+hi2
+

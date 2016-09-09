@@ -1,0 +1,7 @@
+#!/bin/sh
+trimDotSlashSlash(){
+  while read aPath; do
+    echo ""$aPath | sed -re 's/^\.\/(.*)\/$/\1/'
+  done
+  return 1
+}

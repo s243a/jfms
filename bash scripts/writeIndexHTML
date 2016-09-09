@@ -1,0 +1,13 @@
+$outfile
+$basePath
+$subfolders = ( listDirs $basePath | linkDirs )
+$files = ( listFiles | filterFiles '*.smmx' )
+
+writeHtmlHeader > $outfile
+writeHtmlHeading "Directory Content" >> $outfile 
+writeLines $files
+writeHtmlHeading "Sub Directories" >> $outfile
+#Write a hoizontal Line
+writeRaw "<hr> >> $ourfile >> $outfile
+#Write Absolute Path
+writeRaw ""$siteUSK"\"$site$path  >> $outfile

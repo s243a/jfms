@@ -1,0 +1,19 @@
+
+
+
+#tripple() {
+#  out =
+#}
+
+
+
+
+
+
+i=0
+for aDir in `find $source -type d`; do
+  shortPath = trimBase $aDir $sourceBase  #Extract the path relative to the site
+  
+  for aFile in `ls $aDir`; do
+    
+  out[$i]=(shortPath 

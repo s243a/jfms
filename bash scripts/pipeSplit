@@ -1,0 +1,12 @@
+writeOutput(){
+  #based on: http://stackoverflow.com/questions/918886/how-do-i-split-a-string-on-a-delimiter-in-bash
+ read in
+ OIFS=$IFS 
+  IFS='/'
+  arr2=${in[@]}
+  IFS=$OIFS
+  for x in $arr2; do
+   write $x 
+  done 
+}
+

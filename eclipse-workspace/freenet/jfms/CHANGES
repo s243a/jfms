@@ -1,0 +1,30 @@
+Changelog for jfms
+
+2018-01-21 - 0.0.6
+	* fix import of identities via XML
+	* unbreak sending of messages
+	* support deletion of local identities
+
+2018-01-19 - 0.0.5
+	* prevent XXE injection (critical security fix)
+	* validate/sanitize data from XML files
+	* store trust comments and attachments
+	* add option to ignore identities with NULL trust
+
+2018-01-05 - 0.0.4
+	* User Interface
+	  - add settings dialog
+	  - use breeze/oxygen icons
+	  - various other UI improvements
+	* use java.util.logging
+	* add license
+
+2017-12-02 - 0.0.3
+	* support identity and message insert
+	* add build.xml for Apache Ant
+
+2017-07-01 - 0.0.2
+	* use SQLite for storage
+
+2017-05-28 - 0.0.1
+	* initial release

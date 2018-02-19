@@ -1,0 +1,7 @@
+Put all dependencies into this directory.
+
+Build depdency:
+- junit (only for running unit tests)
+
+Run-time dependency:
+- SQLite JDBC driver
